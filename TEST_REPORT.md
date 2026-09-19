@@ -1,5 +1,11 @@
 # Relay prototype verification
 
+## 0.4.2 updater systemd interface enumeration — local verification
+
+A clean staged-tree export passed fresh dependency setup, both builds, the full Relay backend/frontend/hybrid integration suite, Python updater/deployment tests, and updater unit/browser suites. The narrow AF_NETLINK policy fix retains empty capability sets and NoNewPrivileges. The new hosted probe exercises actual interface enumeration under systemd and requires zero effective capabilities; its execution and signed dual-mode installation qualification are separate publication gates.
+
+The preceding 0.4.1 signed hosted qualification passed loopback but failed private-LAN updater startup (`uv_interface_addresses`, error 97). Version 0.4.2 corrects that service address-family restriction without weakening assigned-interface validation.
+
 ## 0.4.1 private-LAN mode and MIT license — local verification
 
 Parent-run verification passed both builds, 105 backend tests, 55 frontend tests and full hybrid integration, 48 Python updater/deployment tests, 6 updater unit tests and 35 updater browser tests. Tests used actual assigned private interfaces for HTTP/WebSocket/browser traffic and the real disposable broker handoff, install/rollback and downtime-monitoring paths in both modes. A regression reproduced the independent updater accepting an unassigned bind up to `listen`; the fix rejects it before creating the listener. Scoped independent re-review found no remaining blocker.

@@ -7,6 +7,12 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 No changes recorded yet.
 
+## [0.4.2] — 2026-09-19
+
+### Fixed
+- Permit AF_NETLINK in the independent updater web service so libuv can validate the assigned private-LAN interface under systemd. Empty capability sets and NoNewPrivileges remain enforced; no network administration privileges are granted.
+- Add a service-policy regression and a real hosted systemd interface-enumeration probe that asserts zero effective capabilities. Signed loopback/private-LAN qualification remains a separate release gate.
+
 ## [0.4.1] — 2026-09-19
 
 Release preparation; deployment and private-LAN qualification are separate gates.

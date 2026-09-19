@@ -9,6 +9,13 @@ from updater.broker.driver import network_host, network_origin
 from updater.broker.auth import Denied
 
 class PrivateLANTests(unittest.TestCase):
+    def test_web_sandbox_allows_interface_enumeration_without_capabilities(self):
+        unit = (Path(__file__).resolve().parents[2] / 'updater/web/relay-updater-web.service').read_text()
+        self.assertIn('RestrictAddressFamilies=AF_UNIX AF_INET AF_NETLINK\n', unit)
+        self.assertIn('CapabilityBoundingSet=\n', unit)
+        self.assertIn('AmbientCapabilities=\n', unit)
+        self.assertIn('NoNewPrivileges=true\n', unit)
+
     def test_qualifier_threads_network_and_hardened_restore(self):
         path = Path(__file__).resolve().parents[2] / 'deploy/qualify-systemd.py'
         spec = importlib.util.spec_from_file_location('relay_lan_qualify', path)

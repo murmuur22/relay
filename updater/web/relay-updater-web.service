@@ -25,7 +25,9 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-RestrictAddressFamilies=AF_UNIX AF_INET
+# Required by getifaddrs/libuv to validate the assigned private interface.
+# Empty capabilities below still deny network administration.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_NETLINK
 CapabilityBoundingSet=
 AmbientCapabilities=
 InaccessiblePaths=-/var/lib/relay -/var/lib/relay-updater -/etc/relay-updater/bridge.key

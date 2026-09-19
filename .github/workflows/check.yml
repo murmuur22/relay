@@ -52,6 +52,8 @@ jobs:
           sudo install -m 0755 "$(command -v node)" /usr/bin/node
           sudo useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin relay
           sudo env -i PATH=/usr/bin:/bin CI=true GITHUB_ACTIONS=true PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m updater.tests.test_mount_sandbox --disposable-github-systemd
+          FAMILIES="$(python3 -c 'from pathlib import Path; print(next(x.split("=",1)[1] for x in Path("updater/web/relay-updater-web.service").read_text().splitlines() if x.startswith("RestrictAddressFamilies=")))')"
+          sudo systemd-run --quiet --wait --pipe --collect --property=User=relay --property=NoNewPrivileges=true --property=CapabilityBoundingSet= --property="RestrictAddressFamilies=$FAMILIES" /usr/bin/node -e 'const os=require("os"),fs=require("fs"),assert=require("assert");assert(Object.values(os.networkInterfaces()).flat().some(n=>n.family==="IPv4"&&!n.internal));assert.match(fs.readFileSync("/proc/self/status","utf8"),/^CapEff:\s+0+$/m);console.log("PASS interface enumeration with empty capabilities")'
       - name: Build both allowlisted Linux payloads without publishing
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-browsers
