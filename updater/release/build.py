@@ -38,7 +38,7 @@ def control_bundle(source, output, package):
                 raise Denied('Control bundle contains link')
         for name in sorted(files):
             path = Path(directory) / name
-            if path.suffix not in ('.html', '.js', '.css'):
+            if path.suffix not in ('.html', '.js', '.css') and path.relative_to(dist).as_posix() != 'licenses/three.txt':
                 raise Denied('Unexpected updater UI asset')
             selected.append((path.relative_to(source).as_posix(), path))
     size = 0

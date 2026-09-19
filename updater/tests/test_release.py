@@ -110,7 +110,7 @@ class ReleaseTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('synthetic')
             from updater.release.build import CONTROL_FILES
-            for name in (*CONTROL_FILES, 'updater/ui/dist/index.html', 'updater/ui/dist/assets/app.js', 'updater/broker/secret.json', 'updater/broker/tests/private.py', 'deploy/private.env'):
+            for name in (*CONTROL_FILES, 'updater/ui/dist/index.html', 'updater/ui/dist/assets/app.js', 'updater/ui/dist/licenses/three.txt', 'updater/broker/secret.json', 'updater/broker/tests/private.py', 'deploy/private.env'):
                 path = source / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('synthetic')
@@ -131,6 +131,7 @@ class ReleaseTests(unittest.TestCase):
                 self.assertIn('updater/broker/server.py', names)
                 self.assertIn('updater/web/index.mjs', names)
                 self.assertIn('updater/ui/dist/index.html', names)
+                self.assertIn('updater/ui/dist/licenses/three.txt', names)
                 self.assertIn('deploy/install-release.py', names)
                 self.assertIn('updater/web/relay-updater-web.service', names)
                 self.assertIn('updater/deploy/relay-updater-broker.service', names)
@@ -139,6 +140,11 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(json.load(archive.extractfile('package.json'))['type'], 'module')
             self.assertGreater(result['artifact']['size'], 0)
             self.assertFalse((output / 'relay-release.attestation.json').exists())
+            from updater.release.build import control_bundle
+            from updater.broker.auth import Denied
+            (source / 'updater/ui/dist/secret.txt').write_text('must not be packaged')
+            with self.assertRaisesRegex(Denied, 'Unexpected updater UI asset'):
+                control_bundle(source, output, {'version': '1.2.3'})
 
 
 if __name__ == '__main__':
