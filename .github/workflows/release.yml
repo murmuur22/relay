@@ -120,6 +120,8 @@ jobs:
           sudo install -m 0755 "$(command -v node)" /usr/bin/node
           /usr/bin/node --version
           /usr/bin/gh --version
+          sudo namei -l /opt /var/lib /run /etc/systemd/system /usr/bin/node /usr/bin/python3 /usr/bin/gh /usr/sbin/useradd /usr/sbin/groupadd /usr/sbin/nologin
+          /usr/bin/python3 -I -c 'import PIL; print(PIL.__file__)' | xargs sudo namei -l
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Download the four PUBLIC assets with no GitHub login
         run: |
