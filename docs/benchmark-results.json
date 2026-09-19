@@ -1,0 +1,81 @@
+{
+  "host": {
+    "platform": "darwin",
+    "release": "24.6.0",
+    "arch": "arm64",
+    "cpu": "Apple M1 Pro",
+    "logicalCpus": 8,
+    "totalMemory": 17179869184,
+    "node": "v26.8.1",
+    "playwright": "1.63.0",
+    "browser": "153.0.8010.12"
+  },
+  "durationSeconds": 60.003,
+  "viewport": "1280x720 each",
+  "transport": "CDP JPEG quality65; WebSocket JSON/base64; one shared sandbox-enabled Chromium; separate contexts",
+  "streams": {
+    "notes-lab": {
+      "frames": 599,
+      "fps": 9.982834191623752,
+      "jpegBytes": 12085721,
+      "jsonBytes": 16191678,
+      "jsonMbps": 2.158782460876956,
+      "sendToDecodePaintAgeMs": {
+        "p50": 4,
+        "p95": 6,
+        "max": 10
+      }
+    },
+    "signal-lab": {
+      "frames": 598,
+      "fps": 9.966168358248755,
+      "jpegBytes": 11920338,
+      "jsonBytes": 15971636,
+      "jsonMbps": 2.1294449944169456,
+      "sendToDecodePaintAgeMs": {
+        "p50": 3,
+        "p95": 6,
+        "max": 11
+      }
+    }
+  },
+  "browserProcesses": [
+    {
+      "pid": 89899,
+      "rssKiB": 76432,
+      "pcpu": 16.2
+    },
+    {
+      "pid": 89900,
+      "rssKiB": 90912,
+      "pcpu": 11.3
+    },
+    {
+      "pid": 89901,
+      "rssKiB": 29872,
+      "pcpu": 0
+    },
+    {
+      "pid": 89902,
+      "rssKiB": 83456,
+      "pcpu": 1.1
+    },
+    {
+      "pid": 89903,
+      "rssKiB": 83120,
+      "pcpu": 1.4
+    }
+  ],
+  "browserRSSMiB": 355.265625,
+  "browserAverageCores": 0.22402124893755307,
+  "gatewayRSSMiB": 206.46875,
+  "gatewayAverageCores": 0.04745176074529607,
+  "minimizedThreeSecondsFrames": {
+    "notes": 28,
+    "signal": 0
+  },
+  "repeatedOpenCloseCycles": 20,
+  "contextsAfterCycles": 1,
+  "inputToVisibleLatency": "UNMEASURED: reported frame age begins at gateway send, not input/capture",
+  "limits": "60 second local synthetic counter workload, not hour stability, WAN, scrolling budget, Safari or production service test"
+}

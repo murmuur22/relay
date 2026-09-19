@@ -1,0 +1,7 @@
+<!doctype html><html><body><div id="surface"></div><script type="module">
+import { mount, unmount } from 'svelte';
+import StreamSurface from '../../src/StreamSurface.svelte';
+const win={id:'a',title:'Synthetic',visible:true,focused:true};
+const surface=mount(StreamSurface,{target:document.getElementById('surface'),props:{win,onactivate:async()=>{if(window.activation)await window.activation;}}});
+window.destroySurface=()=>unmount(surface);
+</script></body></html>

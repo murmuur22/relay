@@ -1,0 +1,34 @@
+node_modules/
+dist/
+.runtime/
+.data/
+.test-*/
+test-results/
+playwright-report/
+.env
+.env.*
+__pycache__/
+.venv/
+.cache/
+*.pyc
+.DS_Store
+integrations/**/.venv/
+integrations/**/data/
+integrations/**/.cache/
+
+# Local planning, source briefs, and review working notes
+*.pdf
+/Relay - Combined Plan.md
+/IMPLEMENTATION_CONTRACT.md
+/PARENT_CAPTURE_FINDING.md
+/REVIEW_FIX_BRIEF.md
+/sources.json
+
+# Reference fonts are not cleared for redistribution
+/public/fonts/
+
+# Generated screenshots and duplicate local test copy
+/screenshots/
+/tests/frontend/artifacts/
+/tests/frontend/mock-browser 2.mjs
+*.log

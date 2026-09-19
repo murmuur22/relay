@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Parcels</title><link rel="icon" href="data:,"></head>
+<body>
+<header><a class="wordmark" href="./" aria-label="Parcels home">✳</a><div class="edition">PERSONAL TRANSFER UTILITY<br>EXPERIMENTAL / 0.2</div><div class="header-tools"><span class="local"><i></i> BROWSER ONLY</span><button id="settings" class="settings-trigger" aria-haspopup="dialog">Settings</button></div></header>
+<main>
+<section class="intro"><div><p class="eyebrow">SMALL FILES. STRANGE JOURNEYS.</p><h1>Parcels<span aria-hidden="true">✳</span></h1></div><p class="pitch">A little something.<br>All wrapped up.<br><span>No account. No upload. Yours to give.</span></p></section>
+<div class="workbench">
+<section class="cargo" aria-labelledby="cargo-title"><div class="section-head"><h2 id="cargo-title">01 / THE CONTENTS</h2><span id="count">00 FILES</span></div>
+<button id="pick" class="drop"><span class="plus" aria-hidden="true">+</span><strong>Bring something with you.</strong><span>Drop files here, or choose files</span><small>Up to 100 files · 100 MB total · files, not folders</small></button><input id="files" type="file" multiple hidden>
+<ul id="file-list" aria-label="Selected files"></ul>
+<div class="note-wrap"><label for="note">A note for the recipient <span>OPTIONAL</span></label><textarea id="note" maxlength="4000" placeholder="Thought you might like these."></textarea><p>Included as a plain Markdown file. Nothing locked away.</p></div>
+</section>
+<section class="chamber" aria-labelledby="chamber-title"><div class="section-head"><h2 id="chamber-title">02 / THE WRAPPING ROOM</h2><button id="motion" class="text-button" aria-pressed="false">Motion on</button></div>
+<div id="stage"><div id="orbit" aria-hidden="true"></div><div class="coordinates" aria-hidden="true">PCL / LOCAL SPACE</div><div class="bottom-coordinates" aria-hidden="true">HANDLE WITH CURIOSITY.</div><div id="package" aria-hidden="true"><span>✳</span><b>PARCEL</b><small>READY TO LEAVE</small></div><div id="fallback" hidden>✳</div></div>
+<div class="controls"><p id="status" role="status" aria-live="polite">The universe has room for your files.</p><button id="seal" disabled>Seal parcel <span aria-hidden="true">↗</span></button><a id="download" hidden download="parcel.zip">Download parcel.zip <span aria-hidden="true">↓</span></a><button id="reset" class="text-button" hidden>Make another parcel</button><p id="error" role="alert"></p></div>
+</section>
+</div>
+<footer><span>ORDINARY FILES. A LITTLE DARK MAGIC.</span><p>ZIPs are made on your device, not encrypted.<br>Share the download yourself. No hosted links in this prototype.</p><span class="maker-credit">Made by Wicked Evil Incorporated</span></footer>
+</main>
+<dialog id="settings-panel" aria-labelledby="appearance-title">
+  <div class="settings-head"><p class="eyebrow">MAKE YOURSELF AT HOME.</p><button id="close-settings" aria-label="Close settings">×</button></div>
+  <h2 id="appearance-title">Appearance</h2>
+  <p class="settings-intro">A little more you. Saved in this browser.</p>
+  <fieldset class="theme-options"><legend>Mode</legend><label><input type="radio" name="theme" value="dark"> Dark</label><label><input type="radio" name="theme" value="light"> Light</label></fieldset>
+  <fieldset class="presets"><legend>Accent presets</legend><div class="swatches">
+    <button type="button" data-preset="#c8e6a0" aria-label="Moss accent"><i class="moss"></i>Moss</button>
+    <button type="button" data-preset="#b9a0ef" aria-label="Lilac accent"><i class="lilac"></i>Lilac</button>
+    <button type="button" data-preset="#ff976b" aria-label="Apricot accent"><i class="apricot"></i>Apricot</button>
+    <button type="button" data-preset="#f29abb" aria-label="Rose accent"><i class="rose"></i>Rose</button>
+    <button type="button" data-preset="#91cce8" aria-label="Ice accent"><i class="ice"></i>Ice</button>
+  </div></fieldset>
+  <form id="appearance-form"><label for="hex">Custom hex color</label><div class="custom-color"><input id="color-picker" type="color" aria-label="Choose accent color"><input id="hex" type="text" maxlength="7" spellcheck="false" autocomplete="off" aria-describedby="color-help color-error"><button type="submit">Apply color</button></div><p id="color-help">Any 3- or 6-digit hex. Text and the vortex adapt for readability; solid accents keep your exact color.</p><p id="color-error" role="alert"></p></form>
+  <button id="reset-appearance" class="text-button">Reset appearance</button>
+</dialog>
+<script type="module" src="/src/main.js"></script>
+</body></html>

@@ -1,0 +1,14 @@
+{
+  "keepsakes": {
+    "commit": "a496aa84252bf61082b5e001a1f88be965200edc",
+    "origin": "../keepsakes",
+    "source": "pinned tracked files",
+    "dist": null
+  },
+  "parcels": {
+    "commit": "0d1f87a63bd9bd63b7b15fd3c94b8c80b76060c3",
+    "origin": "../parcels",
+    "source": "pinned tracked files",
+    "dist": "rebuilt from the copied pinned source"
+  }
+}
