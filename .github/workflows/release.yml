@@ -147,4 +147,8 @@ jobs:
             network_args=(--private-lan "$PRIVATE_IP")
           fi
           sudo env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME=/nonexistent GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted RELAY_DISPOSABLE_SYSTEMD=I_ACCEPT_DISPOSABLE_HOST_MUTATION /usr/bin/python3 deploy/qualify-systemd.py --release-dir "$RUNNER_TEMP/public-release" --version "$RELEASE_TAG" --apply "${network_args[@]}"
+      - name: Service startup diagnostics on qualification failure
+        if: failure()
+        run: |
+          sudo journalctl -u relay.service -u relay-updater-web.service -u relay-updater-broker.service --no-pager -n 100
       # This job deliberately has no release-write permission or promotion step.
