@@ -1,6 +1,14 @@
 # Relay prototype verification
 
-## Accounts / Navigation update — current working tree
+## Settings refinement — current verification
+
+Profile and Control Panel use neutral black/stone/off-white surfaces, fields, focus rings and feedback; semantic colors remain on status dots. Control Panel has Users, Services and System tabs, searchable semantic tables, focused create/edit forms, removal confirmation, diagnostic grids and a resource-limits table. Drafts survive tab switches in memory; cancel/close discards them. Profile uses a compact account/security grid.
+
+Parent independently ran `npm run build && npm test`: **31 backend tests, 20 frontend tests and full hybrid integration passed**. Real browser tests cover create/edit/grants/role/disable/password reset, service lifecycle, search, cancel/confirmation, modal keyboard focus, draft retention, status-search consistency and session expiry during settings loading. Neutral computed-color checks passed; layouts were exercised at 390px and 320px with local table scrolling rather than viewport overflow. Desktop and narrow screenshots were inspected. Backend and authorization code are unchanged. No preview restart, VM deployment or GitHub push was required. Safari/physical-device checks remain unverified.
+
+Screenshots: `control-panel-users.png`, `control-panel-services.png`, `control-panel-system.png`, `profile-settings.png`, plus narrow variants (ignored local test artifacts).
+
+## Accounts / Navigation update — previous verification
 
 Executed on the local macOS development checkout, branch `feat/accounts-navigation`:
 
