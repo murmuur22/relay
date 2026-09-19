@@ -1,6 +1,12 @@
 # Relay prototype verification
 
-## Personal desktop folders, appearance and private routing — Unreleased
+## Version 0.3.0 standalone preparation — current verification
+
+Added a Relay-only profile with no builtin catalog/native process/routes, strict localhost-origin configuration, independent state/Python paths, Chromium-only setup, a nonroot bounded systemd template and a runtime-only qualification smoke. Development mode remains compatible with the existing native test integrations; standalone refuses incompatible development registry state instead of deleting it.
+
+Parent executed build and full tests on macOS: **89 backend tests, 47 frontend tests and the real hybrid integration passed**. The standalone smoke also passed real empty-catalog enrollment, sandbox-enabled client/server Chromium frames and typed input, configured Pillow private PNG upload/read, and restart persistence with old-session rejection. No real production state is used by the smoke. Actual Debian/systemd qualification and coexistence checks are deployment steps, not inferred from these local results; see deploy/README.md and the operator's installation record.
+
+## Personal desktop folders, appearance and private routing — previous verification
 
 Branch: `feat/desktop-folders-routing`. Implemented per-user nested folders, grid-snapped shortcut moves, right-click/keyboard/touch actions, personal names/icons, normalized private raster uploads, clickable breadcrumbs and readable stable-key URLs. The existing maximize control persists restore geometry and is reflected in private app URLs. Global app definitions/grants are unchanged by personal customization. Public sharing remains a separate proposal in `docs/public-sharing-plan.md`.
 

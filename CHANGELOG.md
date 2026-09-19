@@ -5,7 +5,13 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
+No changes recorded yet.
+
+## [0.3.0] — 2026-09-19
+
 ### Added
+- Relay-only standalone profile with an empty builtin catalog, no bundled app processes/routes, explicit private state/Python configuration and strict localhost-origin support for SSH forwarding.
+- Chromium-only standalone setup, a nonroot bounded systemd service template and an executable standalone qualification smoke for real streaming, icon decoding and restart persistence.
 - Per-user folders, nested organization, top-left/downward grid-snapped drag/drop, context menus and keyboard/touch alternatives.
 - Personal app names/icons without changing registry definitions or grants; premade icon gallery plus private normalized PNG/JPEG/WebP uploads.
 - Clickable breadcrumb navigation and readable private desktop/app URLs with stable short keys, login/reload/Back/Forward handling and URL-backed maximize/restore.
@@ -24,7 +30,7 @@ Versions describe the source/application, not a production deployment or a GitHu
 - Owner setup fragments are captured and cleared before waiting for session discovery.
 - Existing accounts do not replay first-run setup. Existing preference values are preserved while new motion defaults are added; malformed persisted flags still fail closed.
 
-These changes are local development work, not a published version or deployment.
+This source version supports a private standalone installation. A source push alone does not deploy it or make apps public; deployment qualification and operator access remain separate steps.
 
 ## [0.2.0] — 2026-09-18
 

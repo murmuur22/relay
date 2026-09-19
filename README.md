@@ -31,7 +31,13 @@ This is a development prototype, not a production deployment or installable rele
 
 No project-wide open-source license has been selected yet. Public visibility does not itself grant an open-source license; third-party dependencies retain their own terms. See `THIRD_PARTY_NOTICES.md`.
 
-## Run locally
+## Relay-only installation
+
+For a private server installation without Parcels, Keepsakes or synthetic apps, use `RELAY_PROFILE=standalone`, a fresh absolute `RELAY_STATE_DIR`, and an operator-supplied Python/Pillow interpreter through `RELAY_ICON_PYTHON`. `npm run setup:standalone` installs only Chromium and verifies Pillow. It does not install/start the bundled integrations. See [standalone deployment](deploy/README.md) for the systemd template, private forwarding, qualification and rollback boundaries.
+
+Development mode remains the default for the commands below and retains the bundled test integrations. Do not copy development account/registry state into standalone mode; incompatible builtin entries are refused, not silently removed.
+
+## Run locally (development profile)
 
 Prerequisites: Node.js (tested with v26.8.1), Python 3.11 and uv. The application files and isolated integrations are already prepared here.
 
@@ -58,13 +64,13 @@ Gateway binds **127.0.0.1:4180**. The isolated Keepsakes service binds **127.0.0
 
 Use the compiled gateway for the real app. Vite on4182 is frontend development/mock-fixture tooling, not a production or authenticated deployment path; proxy Origin handling is intentionally not relaxed for it.
 
-## Motion and first-run setup (Unreleased)
+## Motion and first-run setup
 
-The development branch adds a short monochrome arrival sequence with **[ESC] BYPASS INITIALIZATION**. Escape, click or tap bypasses only decoration; covered controls are inert while real authentication discovery continues. Login, desktop, windows and Navigation have restrained motion. Profile provides independent Intro animation and Interface animations controls, and device reduced-motion settings take priority.
+Relay includes a short monochrome arrival sequence with **[ESC] BYPASS INITIALIZATION**. Escape, click or tap bypasses only decoration; covered controls are inert while real authentication discovery continues. Login, desktop, windows and Navigation have restrained motion. Profile provides independent Intro animation and Interface animations controls, and device reduced-motion settings take priority.
 
-New installations guide the initial administrator from password creation into adding the first app or choosing Set up later. Existing accounts are not forced through setup. First-app progress is server-backed so interrupted responses, retries and reloads do not duplicate registration. See [motion and onboarding](docs/motion-onboarding.md) for preferences, migration and rollback boundaries. These changes remain under Unreleased; the last published source version is 0.2.0.
+New installations guide the initial administrator from password creation into adding the first app or choosing Set up later. Existing accounts are not forced through setup. First-app progress is server-backed so interrupted responses, retries and reloads do not duplicate registration. See [motion and onboarding](docs/motion-onboarding.md) for preferences, migration and rollback boundaries. These features are included in source version 0.3.0; publication and deployment are separate actions.
 
-## Personal desktop and private links (Unreleased)
+## Personal desktop and private links
 
 Each account can create/nest folders, drag shortcuts into folders or snapped grid positions, and change its own shortcut names/icons. Right-click menus have keyboard and touch alternatives; custom PNG/JPEG/WebP icons are normalized and served privately. These are personal presentation overrides, not global app or permission changes.
 

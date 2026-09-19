@@ -1,11 +1,12 @@
 {
   "name": "we-relay",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4182",
     "setup": "node tools/setup.mjs",
+    "setup:standalone": "node tools/setup-standalone.mjs",
     "build": "vite build",
     "start": "node server/index.mjs",
     "open": "node tools/open-local.mjs",

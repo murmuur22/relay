@@ -1,6 +1,6 @@
 import {VERSION} from '../version.js';
 import {Desktop} from './desktop.mjs';
-import {normalizeIcon} from './icons.mjs';
+import {normalizeIcon,iconPython} from './icons.mjs';
 import express from 'express';
 import {publicApp,webConfig} from './webapps.mjs';
 import {Transport} from './transport.mjs';
@@ -20,14 +20,18 @@ export const APPS=[
  {id:'notes-lab',label:'Notes Lab',mode:'stream',description:'Synthetic editable notes'},
  {id:'signal-lab',label:'Signal Lab',mode:'stream',description:'Synthetic live signals'},
 ];
-export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=false,keepsakesPort=4181,data=ROOT+'.data/keepsakes',sessionMs=8*60*60*1000}={}){
+export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=false,keepsakesPort=4181,data=ROOT+'.data/keepsakes',sessionMs=8*60*60*1000,profile='development',hostname='127.0.0.1'}={}){
+ iconPython(); // Validate trusted operator configuration before state or listener creation.
+ if(!['127.0.0.1','localhost'].includes(hostname))throw Error('Invalid Relay hostname');
+ if(!['development','standalone'].includes(profile))throw Error('Invalid Relay profile');
+ if(profile==='standalone'&&native)throw Error('Standalone profile cannot start native integrations');
  await mkdir(runtime,{recursive:true,mode:0o700});await chmod(runtime,0o700);
- const accounts=new Accounts(runtime,APPS);await accounts.init();
+ const accounts=new Accounts(runtime,profile==='standalone'?[]:APPS);await accounts.init();
  const app=express(),server=http.createServer(app),sessions=new Map();
  let setup=accounts.state.users.length?null:token();const authCsrf=token();
  const wss=new WebSocketServer({noServer:true,maxPayload:8192,perMessageDeflate:false});
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
- const origin=`http://127.0.0.1:${server.address().port}`;
+ const origin=`http://${hostname}:${server.address().port}`;
  const transport=new Transport({gatewayOrigin:origin});
  // Registration is not a reachability test: client-only DNS and offline apps are valid.
  // Every actual Relay connection still resolves, vets and pins its destination.
@@ -168,7 +172,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   if(req.headers.host!==new URL(origin).host||req.headers.origin!==origin||!s||!match||!accounts.allowed(s.user,accounts.state.services.find(a=>a.id===match[1]))||s.manager.windows.get(match[1])?.mode!=='stream'){socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return;}
   wss.handleUpgrade(req,socket,head,ws=>{ws.on('error',()=>{});s.sockets.add(ws);ws.once('close',()=>s.sockets.delete(ws));s.manager.attach(match[1],ws);});
  });
- app.use('/native/:service',(req,res,next)=>{const s=req.session;const service=accounts.state.services.find(a=>a.template===req.params.service&&a.mode==='native'&&accounts.allowed(s.user,a));if(!service)return res.status(403).json({error:'Service access denied'});res.serviceId=service.id;s.responses.add(res);res.once('close',()=>s.responses.delete(res));next();});
+ if(profile==='development')app.use('/native/:service',(req,res,next)=>{const s=req.session;const service=accounts.state.services.find(a=>a.template===req.params.service&&a.mode==='native'&&accounts.allowed(s.user,a));if(!service)return res.status(403).json({error:'Service access denied'});res.serviceId=service.id;s.responses.add(res);res.once('close',()=>s.responses.delete(res));next();});
  let nativeService;
  try{if(native)nativeService=await installNative(app,{root:ROOT,origin,port:keepsakesPort,data});}catch(e){await new Promise(r=>server.close(r));throw e;}
  app.use(express.static(ROOT+'dist',{index:'index.html'}));app.use((req,res)=>res.status(404).json({error:'Not found'}));

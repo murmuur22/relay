@@ -1,3 +1,4 @@
+import {isAbsolute} from 'node:path';
 import { createGateway } from "./gateway.mjs";
 const port = Number(process.env.PORT || 4180),
   keepsakesPort = Number(process.env.KEEPSAKES_PORT || 4181);
@@ -10,9 +11,13 @@ if (
   keepsakesPort > 65535
 )
   throw Error("Invalid configured port");
-const gateway = await createGateway({ port, keepsakesPort, native: true });
+const profile = process.env.RELAY_PROFILE ?? 'development';
+const hostname = process.env.RELAY_HOSTNAME ?? '127.0.0.1';
+const runtime = process.env.RELAY_STATE_DIR;
+if(runtime !== undefined && !isAbsolute(runtime)) throw Error('RELAY_STATE_DIR must be an absolute path');
+const gateway = await createGateway({ port, keepsakesPort, profile, hostname, runtime, native: profile === 'development' });
 console.log(
-  `Relay listening on ${gateway.origin}; use npm run open for first-run enrollment or login. Native Keepsakes PID ${gateway.nativeService.pid}.`,
+  `Relay listening on ${gateway.origin}; enrollment/login location saved in the configured state directory.${gateway.nativeService ? ` Native Keepsakes PID ${gateway.nativeService.pid}.` : ''}`,
 );
 let closing = false;
 for (const signal of ["SIGINT", "SIGTERM"])
