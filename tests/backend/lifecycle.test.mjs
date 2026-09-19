@@ -1,3 +1,4 @@
+import {authenticate} from '../auth-helper.mjs';
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -11,14 +12,11 @@ test(
   async () => {
     const runtime = await mkdtemp(tmpdir() + "/relay-life-");
     const g = await createGateway({ port: 0, runtime });
-    g.manager.graceMs = 150;
+
     let ws;
     try {
-      const r = await fetch(
-        await readFile(runtime + "/bootstrap-url.txt", "utf8"),
-        { redirect: "manual" },
-      );
-      const cookie = r.headers.get("set-cookie").split(";")[0];
+      const {cookie}=await authenticate(g.origin,runtime);
+      g.manager.graceMs = 150;
       const w = await g.manager.open("notes-lab");
       await g.manager.patch(w.id, { visible: false });
       ws = new WebSocket(

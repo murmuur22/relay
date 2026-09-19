@@ -1,3 +1,4 @@
+import {browserLogin} from '../auth-helper.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
@@ -11,7 +12,7 @@ test('breadcrumb icon and text share a vertical center at desktop and mobile siz
  const browser=await chromium.launch({headless:true,chromiumSandbox:true});
  try{
   const page=await browser.newPage();
-  await page.goto((await readFile(path.join(runtime,'bootstrap-url.txt'),'utf8')).trim());
+  await browserLogin(page,g.origin,runtime);
   await page.getByRole('button',{name:'Open Parcels',exact:true}).waitFor();
   await page.evaluate(()=>document.fonts.ready);
   for(const width of [1440,390]){

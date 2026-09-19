@@ -1,3 +1,4 @@
+import {authenticate} from '../auth-helper.mjs';
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -13,9 +14,7 @@ test(
     let g = await createGateway({ port: 0, runtime });
     let sockets = [];
     try {
-      const boot = await readFile(runtime + "/bootstrap-url.txt", "utf8");
-      const r = await fetch(boot, { redirect: "manual" });
-      const cookie = r.headers.get("set-cookie").split(";")[0];
+      const {cookie}=await authenticate(g.origin,runtime);
       const session = await (
         await fetch(g.origin + "/api/session", { headers: { cookie } })
       ).json();
@@ -216,6 +215,7 @@ test(
       assert.equal(g.manager.resources.has(b.id), false);
       await g.close();
       g = await createGateway({ port: 0, runtime });
+      await authenticate(g.origin,runtime);
       assert.equal(g.manager.windows.get(a.id).x, 123);
       assert.equal(g.manager.windows.size, 1);
     } finally {

@@ -1,3 +1,4 @@
+import {browserLogin} from '../tests/auth-helper.mjs';
 import { createGateway, ROOT } from "../server/gateway.mjs";
 import { chromium } from "playwright";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
@@ -10,7 +11,7 @@ const runtime = await mkdtemp(os.tmpdir() + "/relay-benchmark-"),
 try {
   const context = await browser.newContext();
   const page = await context.newPage();
-  await page.goto(await readFile(runtime + "/bootstrap-url.txt", "utf8"));
+  await browserLogin(page,g.origin,runtime);
   await page.setContent(
     '<canvas id="notes-lab" width="1280" height="720"></canvas><canvas id="signal-lab" width="1280" height="720"></canvas>',
   );

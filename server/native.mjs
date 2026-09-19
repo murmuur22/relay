@@ -82,6 +82,8 @@ export async function installNative(
     } catch {
       return;
     }
+    // Revocation can occur while the bounded upload body is being received.
+    if(res.destroyed||req.session?.revoked)return;
     const headers = { Host: `127.0.0.1:${port}` };
     if (req.headers.origin) headers.Origin = upstream;
     if (req.headers["x-csrf-token"])
@@ -112,6 +114,8 @@ export async function installNative(
   });
   return {
     pid: child.pid,
+    get ready(){return !exited;},
+    probe: async()=>{if(exited)return false;try{const r=await fetch(upstream+'/api/session',{signal:AbortSignal.timeout(1000),redirect:'error'});await r.body?.cancel();return r.ok;}catch{return false;}},
     close: async () => {
       if (exited) return;
       const done = new Promise((r) => child.once("exit", r));

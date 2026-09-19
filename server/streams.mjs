@@ -42,17 +42,21 @@ export class Manager {
   }
   persist() {
     const data = JSON.stringify([...this.windows.values()]);
-    this.persistQueue = this.persistQueue.then(async () => {
+    this.persistence ??= {queue:Promise.resolve()};
+    this.persistQueue = this.persistence.queue.catch(()=>{}).then(async () => {
       await writeFile(this.runtime + "/layout.tmp", data, { mode: 0o600 });
       await rename(this.runtime + "/layout.tmp", this.runtime + "/layout.json");
     });
+    this.persistence.queue=this.persistQueue;
     return this.persistQueue;
   }
   async open(appId) {
     const app = this.apps.find((a) => a.id === appId);
     if (!app) throw Error("Unknown registered app");
     let w = this.windows.get(appId);
+    if (this.closed) throw Error('Session closed');
     if (!w) {
+      if(app.mode==='stream')this.checkQuota?.();
       w = {
         id: app.id,
         appId,
@@ -194,7 +198,7 @@ export class Manager {
           } else this.sendFrame(c, m);
         }
       });
-      page.on("crash", () => this.state(r, "failed", "Browser page failed"));
+      page.on("crash", () => {r.failed=true;this.state(r, "failed", "Browser page failed");});
       return r;
     } catch (error) {
       await context.close().catch(() => {});
@@ -202,7 +206,7 @@ export class Manager {
     }
   }
   synthetic(w) {
-    return `<!doctype html><html><head><meta charset="utf-8"><style>body{background:${w.appId === "notes-lab" ? "#f5eedc" : "#dae9ec"};color:#202423;font:20px monospace;margin:24px}h1{font-size:26px}textarea{display:block;box-sizing:border-box;width:90%;height:180px;font:22px monospace;padding:12px}#tick{font-size:24px}article{height:1200px}</style></head><body><h1>${w.title} / synthetic</h1><p id="tick">0</p><textarea aria-label="Synthetic editor" spellcheck="false"></textarea><p>Editable server-side browser. Scroll this page.</p><article>Independent context · no external requests</article><script>let n=0;setInterval(()=>document.querySelector('#tick').textContent='Signal '+(++n),100);</script></body></html>`;
+    return `<!doctype html><html><head><meta charset="utf-8"><style>body{background:${w.appId === "notes-lab" ? "#f5eedc" : "#dae9ec"};color:#202423;font:20px monospace;margin:24px}h1{font-size:26px}textarea{display:block;box-sizing:border-box;width:90%;height:180px;font:22px monospace;padding:12px}#tick{font-size:24px}article{height:1200px}</style></head><body><h1>${w.title.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))} / synthetic</h1><p id="tick">0</p><textarea aria-label="Synthetic editor" spellcheck="false"></textarea><p>Editable server-side browser. Scroll this page.</p><article>Independent context · no external requests</article><script>let n=0;setInterval(()=>document.querySelector('#tick').textContent='Signal '+(++n),100);</script></body></html>`;
   }
   sendFrame(c, m) {
     if (c.ws.readyState !== 1 || c.ws.bufferedAmount > 2 * 1024 * 1024) return;
@@ -505,6 +509,10 @@ export class Manager {
     };
   }
   async close() {
+    this.closed=true;
+    // Invalidate window identity before waiting for in-flight Chromium creation.
+    this.windows.clear();
+    await Promise.allSettled([...(this.opening?.values()||[])]);
     for (const id of [...this.resources.keys()]) await this.dispose(id);
     if (this.browserPromise) await (await this.browserPromise).close();
     await this.persistQueue;

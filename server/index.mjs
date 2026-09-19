@@ -12,7 +12,7 @@ if (
   throw Error("Invalid configured port");
 const gateway = await createGateway({ port, keepsakesPort, native: true });
 console.log(
-  `Relay listening on ${gateway.origin}; unlock using the protected local bootstrap file. Native Keepsakes PID ${gateway.nativeService.pid}.`,
+  `Relay listening on ${gateway.origin}; use npm run open for first-run enrollment or login. Native Keepsakes PID ${gateway.nativeService.pid}.`,
 );
 let closing = false;
 for (const signal of ["SIGINT", "SIGTERM"])

@@ -1,6 +1,53 @@
 # Relay prototype verification
 
+## Accounts / Navigation update — current working tree
+
+Executed on the local macOS development checkout, branch `feat/accounts-navigation`:
+
+```sh
+npm run build && npm test
+```
+
+Result: **build passed; 31 backend tests passed; 18 frontend tests passed; real hybrid integration passed.** No failed, skipped or cancelled tests in the final run. Vite reported its existing default-Svelte-configuration notice; the build emitted no Svelte compiler warnings. Tests were exercised against temporary synthetic accounts, layouts and Keepsakes libraries, never the real `.runtime` or `.data` libraries. The supervising agent reran the full suite, then repeated fresh dependency setup/build/tests against a clean Git-index export without private fonts or runtime state; all passed. An independent read-only security/logic review found no blocking issues within the loopback/template scope. Additional concurrent-limit and real slow-transfer revocation tests remain useful follow-ups; this is not a production security audit. No VM deployment or GitHub push was performed.
+
+### New coverage
+
+- Protected first-run enrollment creates `admin` once, requires the local setup credential, stores no plaintext password, and cannot be reused after initialization or restart. Account files are checked as mode 0600.
+- Generic failed login, login CSRF, bounded login throttling, logout CSRF, logout/restart/finite-expiry revocation, and live socket/context cleanup on logout and expiry.
+- Server-side role/grant enforcement for session app lists, window opening/editing/reload, native Keepsakes and WebSocket upgrades. Ordinary users cannot obtain the shared admin library.
+- Separate login sessions have independent managers and real Chromium contexts; text entered into one does not appear in another. Per-user saved layout restoration and restart persistence remain exercised.
+- User creation, disable, role/grant changes, last-admin protection, current-password verification, profile edits, password-change revocation and forced password change following admin reset.
+- Real service creation, label/enabled edits, removal and grants. Duplicate synthetic templates use separate real contexts; HTML-like labels render as text. Arbitrary URL fields and malformed persisted registries are rejected.
+- Per-user/global stream reservations, restored-layout admission limits and per-user login-session limits. Already queued mutations are reauthorized after a caller is disabled.
+- Native service-disable cleanup is covered at the gateway response-tracking seam with a controlled in-flight response; ordinary native upload/download regressions use actual HTTP/browser traffic.
+- Bounded truthful status: absent synthetic pages are Unknown, unavailable native runtime is Offline, observations are timestamped. Diagnostics expose process/session/resource summaries, not credentials.
+- Real compiled browser flow: enrollment → logout → login → Navigation → Control Panel → create user/grant → add/rename/disable/remove a service → user login/authorized desktop → Profile display-name update → logout. No browser page exceptions in this flow.
+
+New auth/security tests were run red before implementation. Additional red/green regressions caught and fixed restored quota overflow, HTML interpolation of service labels, stale queued administrator authority, malformed persisted URL state, non-string usernames, and in-flight native response cleanup. Existing lifecycle/input/focus tests remain in the final suite.
+
+### Real artifacts
+
+Generated and visually inspected login/navigation/control-panel screenshots are ignored local artifacts:
+
+- `screenshots/login.png`
+- `screenshots/navigation.png`
+- `screenshots/control-panel.png`
+
+The account-UI fixture intentionally starts without native services, so its native status dots truthfully read Offline. The separate full hybrid fixture starts isolated native services and retains `desktop.png`, `native-parcels.png`, `native-keepsakes.png`, `two-streams.png`, and `hybrid-desktop.png`.
+
+The final hybrid integration again downloaded a real **512KiB random-file ZIP** from embedded Parcels and compared extracted bytes, uploaded synthetic artwork and edited notes in isolated Keepsakes, exercised two independent real CDP pages, typing isolation, drag/resize, pause/resume, reconnect retention and gateway-only client HTTP requests. It reported no page exceptions.
+
+### Explicit limits / not newly verified
+
+This is loopback-only development, not production qualification or an independent security audit. General LAN/external service registration is not implemented: only managed native/synthetic templates are supported. Streaming provides upstream session capabilities, not a complete security boundary. Chromium sandbox remains enabled; CDP is private; no host shell, Docker/socket access, process restart/update controls or Clippings integration was added.
+
+Keepsakes remains a single shared admin-only library; trusted native apps share the gateway origin. Sessions expire after eight hours, with four per user / sixteen globally; stream reservations are two per user / eight globally. Same-user sessions have independent live contexts and last-save-wins shared layout persistence. Revocation cannot erase already downloaded client data. Login throttling is gateway-wide and may temporarily throttle other local users after failed attempts.
+
+The local preview was restarted and `npm run open` opened protected first-run enrollment on the laptop; `/api/auth` confirmed setup is required and unauthenticated `/api/session` returned 401. No admin password was chosen automatically. Existing library data and legacy layout remain untouched. Fresh clean-export installation and full tests passed as described above. Linux, Safari, WAN, long-duration soak and a new performance benchmark were not run. README documents optional operator-controlled legacy layout migration.
+
 ## Public-source verification
+
+Historical baseline, before the accounts update:
 
 A clean export of the Git index, without local fonts, runtime state, libraries or installed dependencies, passed these commands on macOS:
 
@@ -34,10 +81,10 @@ Tests use temporary synthetic libraries, not personal media or journal content. 
 
 Native integrations are trusted first-party same-origin copies, not a hostile-plugin sandbox. Direct loopback access to the native subprocess is inside the trusted-machine boundary. Chromium's sandbox remains enabled; browser debugging and Docker control are not exposed to clients.
 
-Debian/GPU qualification, real home-service login, production identity, Safari and deployment hardening remain unfinished. Optional reference fonts are not distributed, and a project-wide license remains undecided.
+Debian/GPU qualification, real home-service login, production identity hardening, Safari and deployment remain unfinished. Optional reference fonts are not distributed, and a project-wide license remains undecided.
 
 ## Known follow-up from review
 
-A failed layout persistence write can leave the stream manager's persistence queue rejected, preventing later layout saves until restart. Add explicit recovery and a regression test before treating persistence as production-ready. This was not changed as part of source publication.
+The earlier source-publication review noted that a failed layout persistence write poisoned subsequent saves. The accounts update now chains new writes after recovery from rejection and serializes layouts shared by same-user sessions. This is not a claim of crash-proof/fsync durability or disk-failure qualification.
 
-See README.md for startup, storage and limitations. Runtime bootstrap files and libraries must remain private.
+See README.md for startup, storage and limitations. Runtime setup credentials, account state and libraries must remain private.

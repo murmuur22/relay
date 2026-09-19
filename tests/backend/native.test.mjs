@@ -1,3 +1,4 @@
+import {browserLogin} from '../auth-helper.mjs';
 import { inflateRawSync } from "node:zlib";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -27,7 +28,7 @@ test(
         reducedMotion: "reduce",
       });
       const page = await context.newPage();
-      await page.goto(await readFile(runtime + "/bootstrap-url.txt", "utf8"));
+      await browserLogin(page,g.origin,runtime);
       const result = await page.evaluate(async () => {
         const prefix = "/native/keepsakes";
         const session = await (await fetch(prefix + "/api/session")).json();

@@ -1,9 +1,10 @@
+import {authenticate} from '../auth-helper.mjs';
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createGateway } from "../../server/gateway.mjs";
-test("loopback gateway locks content and consumes bootstrap, enforcing Host Origin CSRF", async () => {
+test("loopback gateway locks content and enforces Host Origin CSRF after enrollment", async () => {
   const dir = await mkdtemp(tmpdir() + "/relay-test-");
   const g = await createGateway({ port: 0, runtime: dir });
   try {
@@ -15,11 +16,7 @@ test("loopback gateway locks content and consumes bootstrap, enforcing Host Orig
         .status,
       403,
     );
-    const boot = await readFile(dir + "/bootstrap-url.txt", "utf8");
-    const r = await fetch(boot, { redirect: "manual" });
-    assert.equal(r.status, 303);
-    const cookie = r.headers.get("set-cookie").split(";")[0];
-    assert.equal((await fetch(boot, { redirect: "manual" })).status, 403);
+    const {cookie}=await authenticate(base,dir);
     const s = await (
       await fetch(base + "/api/session", { headers: { cookie } })
     ).json();

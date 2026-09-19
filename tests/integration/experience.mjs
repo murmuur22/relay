@@ -1,3 +1,4 @@
+import {browserLogin} from '../auth-helper.mjs';
 import {createGateway, ROOT} from '../../server/gateway.mjs';
 import {chromium, expect} from '@playwright/test';
 import {mkdtemp, readFile, mkdir, rm} from 'node:fs/promises';
@@ -15,13 +16,13 @@ const errors=[];page.on('pageerror',e=>errors.push(e.message));
 const requests=[];page.on('request',r=>{if(/^https?:/.test(r.url()))requests.push(r.url());});
 await mkdir(path.join(ROOT,'screenshots'),{recursive:true});
 try{
- await page.goto((await readFile(path.join(runtime,'bootstrap-url.txt'),'utf8')).trim());
+ await browserLogin(page,g.origin,runtime);
  await expect(page).toHaveTitle('Private desktop');
  await expect(page.locator('body')).not.toContainText(/relay|after wicked/i);
  await expect(page.locator('footer .maker')).toHaveText('Made by Wicked Evil Incorporated');
  await expect(page.locator('.desktop-signature')).toHaveCount(0);
  const locked=await fetch(g.origin);
- assert.equal(locked.status,401);assert.match(await locked.text(),/^Desktop locked\./);
+ assert.equal(locked.status,200);assert.equal((await fetch(g.origin+'/api/session')).status,401);
  await expect(page.getByRole('button',{name:'Open Parcels',exact:true})).toBeVisible();
  await page.screenshot({path:path.join(ROOT,'screenshots/desktop.png')});
  await page.getByRole('button',{name:'Open Parcels',exact:true}).click();
@@ -57,7 +58,7 @@ try{
  await keeps.getByRole('button',{name:'Close clipping'}).click();
  await page.getByRole('button',{name:'Minimize Keepsakes',exact:true}).click();
  await page.getByRole('button',{name:'Open Notes Lab',exact:true}).click();
- await page.getByRole('button',{name:'Quick navigation',exact:true}).click();
+ await page.getByRole('button',{name:'Navigation',exact:true}).click();
  await page.locator('.quick-nav').getByRole('button',{name:/Signal Lab/}).click();
  const session=await page.evaluate(async()=>await(await fetch('/api/session')).json());
  async function patch(id,data){await page.evaluate(async({id,data,csrf})=>{const r=await fetch('/api/windows/'+id,{method:'PATCH',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(data)});if(!r.ok)throw Error('layout patch failed');},{id,data,csrf:session.csrf});}

@@ -1,3 +1,4 @@
+import {authenticate} from '../auth-helper.mjs';
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
@@ -16,7 +17,7 @@ test(
     try {
       assert.equal((await stat(runtime)).mode & 0o777, 0o700);
       assert.equal(
-        (await stat(runtime + "/bootstrap-url.txt")).mode & 0o777,
+        (await stat(runtime + "/setup-url.txt")).mode & 0o777,
         0o600,
       );
       const hostile = await new Promise((resolve) => {
@@ -26,9 +27,7 @@ test(
         });
       });
       assert.equal(hostile, 403);
-      const boot = await readFile(runtime + "/bootstrap-url.txt", "utf8");
-      const r = await fetch(boot, { redirect: "manual" });
-      const cookie = r.headers.get("set-cookie").split(";")[0];
+      const {cookie}=await authenticate(g.origin,runtime);
       const session = await (
         await fetch(g.origin + "/api/session", { headers: { cookie } })
       ).json();
@@ -47,7 +46,7 @@ test(
               body: JSON.stringify({ appId }),
             })
           ).status,
-          400,
+          403,
         );
       await fetch(g.origin + "/api/windows", {
         method: "POST",
