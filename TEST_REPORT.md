@@ -1,5 +1,18 @@
 # Relay prototype verification
 
+## 0.4.0 published Linux release — hosted qualification
+
+Public release: https://github.com/murmuur22/relay/releases/tag/v0.4.0 . Tag source commit: `f793f8060a0a056afd5be3db95a6141e40d98708`. Published as a prerelease, verified, then explicitly promoted to the latest non-prerelease. The two archives and their attested manifest were downloaded without credentials; local verification also pinned the exact source commit. The production release-discovery code subsequently returned `v0.4.0` with `verified: true` using its credential-free verifier.
+
+Executed hosted evidence:
+- Linux preflight and real distinct-mount systemd fixture: https://github.com/murmuur22/relay/actions/runs/35464188415 — passed. Actual mount IDs differed for install/state/control, successful install and explicit/failed-readiness rollback completed, and the state root inode stayed stable.
+- Both Linux archives, real GitHub provenance and anonymous bundle verification: https://github.com/murmuur22/relay/actions/runs/35464349921 — passed.
+- Anonymous download and installation of the actual published signed artifacts under systemd: https://github.com/murmuur22/relay/actions/runs/35464757485 — passed. Verified distinct UIDs/no-new-privileges, key/state access denial, ordinary admin authentication/ticket handoff, monitoring during stop, persistent maintenance across restarts, unexpected-version readiness rejection, and signed-baseline code/state restoration.
+
+The first packaging run rejected the required Three.js license notice; the allowlist now admits that exact path while still rejecting unrelated text files. The first signed-install qualification correctly rejected the hosted runner's world-writable `/opt`; the disposable workflow now sets the required root-only parent mode rather than weakening installer checks. No tag or release artifact was rewritten for the runner setup adjustment.
+
+Scope: Ubuntu 24.04 x64 hosted execution, plus the clean macOS checkout evidence below. Signed-baseline restoration and multi-version HMAC fixture recovery are distinct; no second-signed-release upgrade, host reboot/power-loss test, Debian-specific installed-browser proof or production VM deployment is claimed. The production VM and neighboring services were not changed.
+
 ## 0.4.0 public Linux release preparation — local evidence
 
 A clean Git-index export with fresh dependency setup passed both builds, **99 backend tests, 53 frontend tests, full hybrid integration, 43 updater Python tests, 6 updater unit tests, 35 updater browser tests, and both compiled HTTP/disposable install/rollback smokes**. Private state, planning material, host references, credentials and unverified fonts were excluded by the staged-tree audit. Missing local font warnings use the documented public fallback; the Three.js chunk remains lazy-loaded.

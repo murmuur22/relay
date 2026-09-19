@@ -9,7 +9,7 @@ No changes recorded yet.
 
 ## [0.4.0] — 2026-09-19
 
-Release preparation: publication and Linux qualification are separate gates; version metadata alone does not establish deployment readiness.
+Published Linux x64 release: [v0.4.0](https://github.com/murmuur22/relay/releases/tag/v0.4.0). Hosted Linux preflight, real systemd mount-boundary recovery, anonymous public attestation verification and signed initial-install qualification passed; see `TEST_REPORT.md`. Publication is not a production VM deployment.
 
 ### Added
 - Administrator Updater now opens a draggable/resizable/minimizable desktop browser for release notes, selection, real status and the shared Three.js chamber. Start update hands the selected release to a separate maintenance tab; only explicit confirmation and a fresh Relay administrator password there can begin installation.
@@ -28,7 +28,7 @@ Release preparation: publication and Linux qualification are separate gates; ver
 - Decorative trail endpoints stay on one traversal across the loop boundary, preventing long flashing spokes as particles reset.
 
 ### Verification boundary
-- Local macOS/Chromium development only. Scripted visual previews, real HTTP with protocol doubles, and actual disposable broker/service tests are labelled separately. Production installation, existing-state migration and updater self-updates are not provided by these results.
+- Verified on macOS and disposable hosted Ubuntu 24.04 x64. Scripted UI previews, HMAC-signed multi-version fixtures and the genuinely GitHub-attested baseline installation are separate evidence. Existing-state migration, control-plane self-updates, host power-loss testing, a second signed-version upgrade and production VM deployment are not established by these results.
 
 ## [0.3.0] — 2026-09-19
 
