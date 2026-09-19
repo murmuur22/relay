@@ -11,7 +11,16 @@ export function brokerRequest(socketPath,request,{timeout=15000}={}) {
   socket.on('data',chunk=>{bytes+=chunk.length;if(bytes>1048576)return finish(new BrokerError('Updater broker response too large'));chunks.push(chunk);if(!chunk.includes(10))return;try{const data=Buffer.concat(chunks);const end=data.indexOf(10);if(data.subarray(end+1).length)throw Error();const reply=JSON.parse(data.subarray(0,end).toString('utf8'));if(reply.ok!==true)return finish(new BrokerError('Updater request rejected',403));if(!reply.result||typeof reply.result!=='object')throw Error();finish(null,reply.result);}catch{finish(new BrokerError('Invalid updater broker response'));}});
  });
 }
-export function loopbackOrigin(value){let url;try{url=new URL(value);}catch{throw Error('Invalid updater origin');}if(url.origin!==value||url.protocol!=='http:'||!['127.0.0.1','localhost'].includes(url.hostname)||url.username||url.password)throw Error('Invalid updater origin');return url;}
+export function privateIPv4(value){
+ if(typeof value!=='string'||! /^(?:0|[1-9]\d{0,2})(?:\.(?:0|[1-9]\d{0,2})){3}$/.test(value))return false;
+ const n=value.split('.').map(Number);return n.every(v=>v<=255)&&(n[0]===10||(n[0]===172&&n[1]>=16&&n[1]<=31)||(n[0]===192&&n[1]===168));
+}
+export function networkHost(hostname,networkMode='loopback'){
+ if(networkMode==='private-lan'&&privateIPv4(hostname))return hostname;
+ if(networkMode==='loopback'&&['127.0.0.1','localhost'].includes(hostname))return '127.0.0.1';
+ throw Error('Invalid Relay hostname or network mode');
+}
+export function loopbackOrigin(value,networkMode='loopback'){let url;try{url=new URL(value);}catch{throw Error('Invalid updater origin');}if(url.origin!==value||url.protocol!=='http:'||url.username||url.password)throw Error('Invalid updater origin');networkHost(url.hostname,networkMode);return url;}
 export const capability=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{32,256}$/.test(value);
 export function actionFields(body,action=body?.action){
  if(!body||typeof body!=='object'||Array.isArray(body)||!['install','cancel','rollback'].includes(action)||body.confirmed!==true||typeof body.password!=='string'||body.password.length>128||Object.keys(body).some(k=>!['action','version','jobId','password','confirmed'].includes(k)))throw Object.assign(Error('Invalid update confirmation'),{status:400});

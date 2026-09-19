@@ -1,5 +1,6 @@
 """Only two service drivers: fixed Linux relay.service, owned disposable Node fixture."""
 import json
+import ipaddress
 import os
 from pathlib import Path
 import shutil
@@ -23,14 +24,37 @@ def private_path(path, owner=None, directory=False):
     return path
 
 
+def network_host(host, network_mode='loopback'):
+    if network_mode == 'loopback' and host in ('localhost', '127.0.0.1'):
+        return '127.0.0.1'
+    if network_mode == 'private-lan' and isinstance(host, str):
+        try:
+            address = ipaddress.IPv4Address(host)
+            if str(address) == host and any(address in ipaddress.IPv4Network(block) for block in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')):
+                return host
+        except ValueError:
+            pass
+    raise Denied('Invalid network mode or canonical private IPv4 host')
+
+
+def network_origin(value, network_mode='loopback'):
+    try:
+        origin = urlsplit(value)
+        network_host(origin.hostname, network_mode)
+        if origin.scheme == 'http' and origin.port and value == f'http://{origin.hostname}:{origin.port}':
+            return origin
+    except (ValueError, TypeError):
+        pass
+    raise Denied('Explicit canonical trusted HTTP origin required')
+
+
 def validate_config(config):
     config = dict(config)
     mode = config.get('mode')
     if mode not in ('fixture', 'observe', 'production'):
         raise Denied('Explicit mode required')
-    origin = urlsplit(config.get('uiOrigin', ''))
-    if origin.scheme != 'http' or origin.hostname not in ('localhost', '127.0.0.1') or origin.username or origin.password or origin.path or origin.query or origin.fragment or not origin.port:
-        raise Denied('Explicit loopback UI origin required')
+    network_mode = config.get('networkMode', 'loopback')
+    origin = network_origin(config.get('uiOrigin', ''), network_mode)
     if mode == 'production':
         if sys.platform != 'linux' or os.geteuid() != 0:
             raise Denied('Production requires Linux privileged service')
@@ -58,8 +82,8 @@ def validate_config(config):
             raise Denied('Explicit Relay UID/socket GID required')
         config.setdefault('readinessUrl', 'http://localhost:4190/health/ready')
         ready = urlsplit(config['readinessUrl'])
-        if ready.scheme != 'http' or ready.hostname != origin.hostname or ready.username or ready.password or ready.path != '/health/ready' or ready.query or ready.fragment or not ready.port or ready.port == origin.port:
-            raise Denied('Readiness must use the fixed Relay loopback host and a distinct port')
+        if ready.scheme != 'http' or ready.hostname != origin.hostname or not ready.port or ready.port == origin.port or config['readinessUrl'] != f'http://{origin.hostname}:{ready.port}/health/ready':
+            raise Denied('Readiness must use the fixed trusted host and a distinct port')
     else:
         if os.geteuid() == 0:
             raise Denied('Nonproduction modes refuse root')

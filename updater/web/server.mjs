@@ -1,9 +1,10 @@
 import http from 'node:http';
+import {networkInterfaces} from 'node:os';
 import {randomBytes,createHash} from 'node:crypto';
 import {readFile,realpath,stat} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {isAbsolute,resolve,extname,sep} from 'node:path';
-import {brokerRequest,loopbackOrigin,capability,actionFields} from './broker-client.mjs';
+import {brokerRequest,loopbackOrigin,networkHost,capability,actionFields} from './broker-client.mjs';
 const fail=(status,message)=>Object.assign(new Error(message),{status});
 const random=()=>randomBytes(32).toString('hex');
 const digest=value=>createHash('sha256').update(value).digest('hex');
@@ -13,18 +14,19 @@ async function body(req){
  if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||''))throw fail(415,'JSON required');
  const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>16384)throw fail(413,'Request too large');chunks.push(chunk);}let value;try{value=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw fail(400,'Invalid JSON');}if(!value||typeof value!=='object'||Array.isArray(value))throw fail(400,'JSON object required');return value;
 }
-// Fixed loopback target; no redirects, external DNS, caller URL or cookie forwarding.
+// Fixed validated operator target; no redirects, external DNS or caller URL.
 function relayRequest(origin,path,cookieValue,method='GET',data,csrf){
  const url=new URL(origin+path),text=data?JSON.stringify(data):null;
  return new Promise((resolve,reject)=>{
-  const req=http.request({hostname:'127.0.0.1',port:url.port||80,path:url.pathname,method,headers:{Host:url.host,Origin:origin,Cookie:'relay_session='+cookieValue,...(csrf?{'X-CSRF-Token':csrf}:{}),...(text?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(text)}:{})}},res=>{let size=0,chunks=[];res.on('data',c=>{size+=c.length;if(size>1048576){res.destroy();return;}chunks.push(c);});res.on('error',()=>finish(fail(503,'Relay unavailable. Sign in to Relay again before changing updates.')));res.on('end',()=>{if(res.statusCode!==200)return finish(fail([400,401,403,429,503].includes(res.statusCode)?res.statusCode:503,res.statusCode===403?'Reauthentication rejected. Check your password and administrator access.':'Relay unavailable or session expired. Sign in to Relay again.'));try{finish(null,JSON.parse(Buffer.concat(chunks)));}catch{finish(fail(503,'Invalid Relay response'));}});});
+  const req=http.request({hostname:url.hostname==='localhost'?'127.0.0.1':url.hostname,port:url.port||80,path:url.pathname,method,headers:{Host:url.host,Origin:origin,Cookie:'relay_session='+cookieValue,...(csrf?{'X-CSRF-Token':csrf}:{}),...(text?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(text)}:{})}},res=>{let size=0,chunks=[];res.on('data',c=>{size+=c.length;if(size>1048576){res.destroy();return;}chunks.push(c);});res.on('error',()=>finish(fail(503,'Relay unavailable. Sign in to Relay again before changing updates.')));res.on('end',()=>{if(res.statusCode!==200)return finish(fail([400,401,403,429,503].includes(res.statusCode)?res.statusCode:503,res.statusCode===403?'Reauthentication rejected. Check your password and administrator access.':'Relay unavailable or session expired. Sign in to Relay again.'));try{finish(null,JSON.parse(Buffer.concat(chunks)));}catch{finish(fail(503,'Invalid Relay response'));}});});
   let done=false;const timer=setTimeout(()=>{req.destroy();finish(fail(503,'Relay unavailable. Sign in to Relay again.'));},10000);function finish(error,result){if(done)return;done=true;clearTimeout(timer);error?reject(error):resolve(result);}
   req.on('error',()=>finish(fail(503,'Relay unavailable. Sign in to Relay again.')));req.end(text);
  });
 }
-export async function createUpdaterWeb({uiOrigin,relayOrigin,socketPath,bind='127.0.0.1',staticDir=fileURLToPath(new URL('../ui/dist/',import.meta.url))}={}){
- const ui=loopbackOrigin(uiOrigin),relay=loopbackOrigin(relayOrigin);
- if(bind!=='127.0.0.1'||ui.hostname!==relay.hostname||ui.origin===relay.origin||typeof socketPath!=='string'||!isAbsolute(socketPath)||!isAbsolute(staticDir))throw Error('Invalid updater web configuration');
+export async function createUpdaterWeb({uiOrigin,relayOrigin,socketPath,networkMode='loopback',bind='127.0.0.1',staticDir=fileURLToPath(new URL('../ui/dist/',import.meta.url))}={}){
+ const ui=loopbackOrigin(uiOrigin,networkMode),relay=loopbackOrigin(relayOrigin,networkMode);
+ if(bind!==networkHost(ui.hostname,networkMode)||ui.hostname!==relay.hostname||ui.origin===relay.origin||typeof socketPath!=='string'||!isAbsolute(socketPath)||!isAbsolute(staticDir))throw Error('Invalid updater web configuration');
+ if(networkMode==='private-lan'&&!Object.values(networkInterfaces()).flat().some(n=>n.family==='IPv4'&&!n.internal&&n.address===bind))throw Error('Private LAN IPv4 must be assigned to this host');
  const sessions=new Map(),rates=new Map();let active=0;
  const prune=()=>{for(const [id,s] of sessions)if(s.expires<=Date.now())sessions.delete(id);};
  const rate=key=>{let r=rates.get(key);if(!r||r.until<Date.now()){r={count:0,until:Date.now()+60000};rates.set(key,r);}if(++r.count>(key==='read'?1800:key==='exchange'?20:60))throw fail(429,'Updater request rate limited');};

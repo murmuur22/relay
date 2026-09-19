@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import net from 'node:net';
+import {networkInterfaces} from 'node:os';
+import http from 'node:http';
 import {readFile,writeFile,rm} from 'node:fs/promises';
 import {createHmac,randomBytes} from 'node:crypto';
 import {createGateway,ROOT} from '../../server/gateway.mjs';
@@ -11,17 +13,24 @@ import {brokerRequest} from '../../updater/web/broker-client.mjs';
 import {authenticate,client,password} from '../auth-helper.mjs';
 async function freePort(){const s=net.createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const p=s.address().port;await new Promise(r=>s.close(r));return p;}
 async function waitFor(fn,ms=30000){const end=Date.now()+ms;while(Date.now()<end){const v=await fn();if(v)return v;await new Promise(r=>setTimeout(r,40));}throw Error('Bounded fixture deadline exceeded');}
-test('real broker + Relay HMAC + web auth: single use, target binding, actual install/rollback and downtime monitoring',{timeout:90000},async t=>{
- const uiOrigin=`http://127.0.0.1:${await freePort()}`;
+for(const networkMode of ['loopback','private-lan'])test(`${networkMode}: real broker + Relay HMAC + web auth: single use, target binding, actual install/rollback and downtime monitoring`,{timeout:90000},async t=>{
+ const hostname=networkMode==='loopback'?'127.0.0.1':Object.values(networkInterfaces()).flat().find(n=>n.family==='IPv4'&&!n.internal&&/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(n.address))?.address;
+ assert.ok(hostname,'No assigned private IPv4 interface');
+ const uiOrigin=`http://${hostname}:${await freePort()}`;
  const script="from updater.fixtures.harness import Sandbox\nfrom updater.broker.auth import atomic_json\nimport sys,json\nbox=Sandbox()\ntry:\n box.config['uiOrigin']=sys.argv[1]\n atomic_json(box.config_path,box.config)\n box.start()\n print(json.dumps({'root':str(box.root),'config':box.config}),flush=True)\n sys.stdin.readline()\nfinally:\n box.close()";
- const process=spawn('python3',['-u','-c',script,uiOrigin],{cwd:ROOT,stdio:['pipe','pipe','pipe']});let stdout='',stderr='';process.stdout.on('data',b=>stdout+=b);process.stderr.on('data',b=>stderr+=b);let g,web;
+ const process=spawn('python3',['-u','-c',script.replace("box.config['uiOrigin']=sys.argv[1]","box.config['uiOrigin']=sys.argv[1]; box.config['networkMode']=sys.argv[2]"),uiOrigin,networkMode],{cwd:ROOT,stdio:['pipe','pipe','pipe']});let stdout='',stderr='';process.stdout.on('data',b=>stdout+=b);process.stderr.on('data',b=>stderr+=b);let g,web;
  t.after(async()=>{await web?.close();await g?.close();process.stdin.end('\n');if(process.exitCode===null){const timer=setTimeout(()=>process.kill('SIGKILL'),22000);await once(process,'exit');clearTimeout(timer);}});
  const line=await waitFor(()=>{if(process.exitCode!==null)throw Error('Fixture startup failed: '+stderr);return stdout.includes('\n')&&stdout.split('\n')[0];},15000),{root,config}=JSON.parse(line);
- const options={port:0,runtime:root+'/relay-integration',profile:'standalone',updater:{socketPath:config.socketPath,keyFile:config.bridgeKeyFile,uiOrigin},maintenanceFile:config.maintenance};
- g=await createGateway(options);web=await createUpdaterWeb({uiOrigin,relayOrigin:g.origin,socketPath:config.socketPath});let auth=await authenticate(g.origin,options.runtime),api=client(g.origin,auth);
+ const options={port:0,runtime:root+'/relay-integration',profile:'standalone',hostname,networkMode,updater:{socketPath:config.socketPath,keyFile:config.bridgeKeyFile,uiOrigin},maintenanceFile:config.maintenance};
+ g=await createGateway(options);web=await createUpdaterWeb({uiOrigin,relayOrigin:g.origin,socketPath:config.socketPath,networkMode,bind:hostname});let auth=await authenticate(g.origin,options.runtime),api=client(g.origin,auth);
  const launch=await (await api('/updater/launch','POST',{})).json(),ticket=new URL(launch.url).hash.slice(1);
  const req=(path,method='GET',body,headers={})=>fetch(uiOrigin+'/updater/api'+path,{method,headers:{Origin:uiOrigin,'Content-Type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})});
  let r=await req('/exchange','POST',{ticket});assert.equal(r.status,200);const cookie=r.headers.get('set-cookie').split(';')[0],{csrf}=await r.json(),headers={cookie:cookie+'; '+auth.cookie,'X-CSRF-Token':csrf};
+ assert.equal(web.server.address().address,hostname);
+ assert.equal(await new Promise((resolve,reject)=>{http.get(uiOrigin+'/updater/api/auth',{headers:{Host:'evil.test'}},res=>{res.resume();resolve(res.statusCode);}).on('error',reject);}),403);
+ assert.equal((await req('/state','GET',null,{...headers,Origin:g.origin})).status,403);
+ assert.equal((await req('/check','POST',{}, {cookie:headers.cookie})).status,403);
+ assert.equal((await req('/check','POST',{}, {...headers,Origin:'http://evil.test'})).status,403);
  assert.equal((await req('/exchange','POST',{ticket})).status,403);
  const rpc=(action,params)=>brokerRequest(config.socketPath,{action,params});await assert.rejects(rpc('redeem-ui',{ticket,origin:uiOrigin}));await assert.rejects(rpc('state',{token:ticket}));
  const key=await readFile(config.bridgeKeyFile);const sign=(action,params,timestamp=Math.floor(Date.now()/1000))=>{const nonce=randomBytes(16).toString('hex'),payload=Buffer.from(JSON.stringify(params)).toString('base64');return {action,timestamp,nonce,payload,mac:createHmac('sha256',key).update(`${timestamp}\n${nonce}\n${action}\n${payload}`).digest('hex')};};

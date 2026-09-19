@@ -23,6 +23,7 @@ install = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(install)
 run = install.run
 GATE = Path('/var/lib/relay-updater-control/maintenance')
+NETWORK = install.deployment_network()
 
 
 MARKER = Path('/var/lib/relay-updater/.disposable-qualification')
@@ -37,9 +38,9 @@ def guard_environment(apply):
         raise install.InstallError('Disposable Linux root execution required')
 
 
-def guard(apply):
+def guard(apply, private_lan=None):
     guard_environment(apply)
-    install.preflight_host()
+    install.preflight_host(private_lan)
     for tool in ('/usr/bin/systemd-run', '/usr/sbin/runuser', '/usr/bin/test'):
         install.trusted_path(tool)
     require(run(['/usr/bin/systemctl', 'show', 'relay-qualification-restore.service', '--property=LoadState', '--value']) == 'not-found',
@@ -52,8 +53,8 @@ def require(value, message):
 
 
 def http(port, path, method='GET', data=None, cookie='', csrf=''):
-    conn = HTTPConnection('127.0.0.1', port, timeout=10)
-    headers = {'Host': f'localhost:{port}', 'Origin': f'http://localhost:{port}',
+    conn = HTTPConnection(NETWORK['bind'], port, timeout=10)
+    headers = {'Host': f"{NETWORK['hostname']}:{port}", 'Origin': f"http://{NETWORK['hostname']}:{port}",
                'Content-Type': 'application/json', 'Cookie': cookie, 'X-CSRF-Token': csrf}
     try:
         conn.request(method, path, body=json.dumps(data) if data is not None else None, headers=headers)
@@ -141,7 +142,7 @@ def launch_monitor(cookie, csrf):
     status, value, _ = http(4190, '/api/updater/launch', 'POST', {}, cookie, csrf)
     require(status == 200, 'Normal desktop launch failed')
     url = urlsplit(value['url'])
-    require(url.scheme == 'http' and url.netloc == 'localhost:4191' and url.path == '/updater/', 'Unsafe launch target')
+    require(url.scheme == 'http' and url.netloc == f"{NETWORK['hostname']}:4191" and url.path == '/updater/' and not url.query, 'Unsafe launch target')
     status, _, monitor = http(4191, '/updater/api/exchange', 'POST', {'ticket': url.fragment})
     require(status == 200 and bool(monitor), 'Independent ticket exchange failed')
     status, _, _ = http(4191, '/updater/api/exchange', 'POST', {'ticket': url.fragment})
@@ -186,7 +187,8 @@ def restore_command(version):
             *('--property=' + value for value in properties),
             *('--setenv=' + key + '=' + value for key, value in {**DISPOSABLE_ENV, **install.SAFE_ENV}.items()),
             '/usr/bin/python3', '/opt/relay-updater/deploy/qualify-systemd.py',
-            '--restore-baseline', '--version', version, '--apply']
+            '--restore-baseline', '--version', version, '--apply',
+            *(['--private-lan', NETWORK['hostname']] if NETWORK['networkMode'] == 'private-lan' else [])]
 
 
 def signed_baseline_restore(version):
@@ -244,12 +246,14 @@ def restore_probe(version, apply):
 
 
 def qualify(args):
-    guard(args.apply)
+    global NETWORK
+    NETWORK = install.deployment_network(args.private_lan)
+    guard(args.apply, args.private_lan)
     installed = False
     try:
         with install.prepare(args) as (work, manifest):
             installed = True  # own any partial installer mutations after preflight
-            install.apply_install(work, manifest, args.version)
+            install.apply_install(work, manifest, args.version, args.private_lan)
         install.write_new(MARKER, args.version + '\n')
         # Start runtime under the persistent gate; never enable on boot in qualification.
         run(['/usr/bin/systemctl', 'start', *install.UNITS])
@@ -280,7 +284,7 @@ def qualify(args):
         ready(args.version, False)
         cookie, csrf = authenticate(password)
         require(http(4190, '/api/updater/state', cookie=cookie)[0] == 200, 'Read bridge failed after recovery')
-        result = dict(passed=True, version=args.version,
+        result = dict(passed=True, version=args.version, networkMode=NETWORK['networkMode'], relayOrigin=NETWORK['relayOrigin'],
                       evidence=['official-attested-initial-enrollment', 'systemd-distinct-uids-no-new-privileges',
                                 'key-state-DAC-denial', 'normal-admin-auth-and-HTTP-ticket-handoff',
                                 'monitoring-during-stop', 'persistent-maintenance-across-restarts',
@@ -299,12 +303,15 @@ def qualify(args):
 
 
 def main(argv=None):
+    global NETWORK
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release-dir')
     parser.add_argument('--version', required=True)
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--private-lan', metavar='CANONICAL_IP')
     parser.add_argument('--restore-baseline', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    NETWORK = install.deployment_network(args.private_lan)
     if args.restore_baseline:
         restore_probe(args.version, args.apply)
     else:

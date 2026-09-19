@@ -1,4 +1,6 @@
 import {VERSION} from '../version.js';
+import {networkHost} from '../updater/web/broker-client.mjs';
+import {networkInterfaces} from 'node:os';
 import {UPDATER,systemApps} from './system-apps.mjs';
 import {updaterConfig,updaterRoutes} from './updater.mjs';
 import {lstatSync} from 'node:fs';
@@ -24,14 +26,18 @@ export const APPS=[
  {id:'notes-lab',label:'Notes Lab',mode:'stream',description:'Synthetic editable notes'},
  {id:'signal-lab',label:'Signal Lab',mode:'stream',description:'Synthetic live signals'},
 ];
-export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=false,keepsakesPort=4181,data=ROOT+'.data/keepsakes',sessionMs=8*60*60*1000,profile='development',hostname='127.0.0.1',maintenanceFile=process.env.RELAY_MAINTENANCE_FILE,updater}={}){
- const updaterSettings=updaterConfig(updater,hostname);
+export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=false,keepsakesPort=4181,data=ROOT+'.data/keepsakes',sessionMs=8*60*60*1000,profile='development',hostname='127.0.0.1',networkMode='loopback',maintenanceFile=process.env.RELAY_MAINTENANCE_FILE,updater}={}){
+ const bind=networkHost(hostname,networkMode);
+ if(!Number.isInteger(port)||port<0||port>65535)throw Error('Invalid configured port');
+ if(networkMode==='private-lan'&&!Object.values(networkInterfaces()).flat().some(n=>n.family==='IPv4'&&!n.internal&&n.address===bind))throw Error('Private LAN IPv4 must be assigned to this host');
+ if(networkMode==='private-lan'&&profile!=='standalone')throw Error('Private LAN requires standalone profile');
+ const updaterSettings=updaterConfig(updater,hostname,networkMode);
  if(updaterSettings&&Number(new URL(updaterSettings.uiOrigin).port||80)===port)throw Error('Invalid updater configuration: distinct port required');
  if(maintenanceFile!==undefined&&!isAbsolute(maintenanceFile))throw Error('Invalid maintenance file');
  const maintenance=()=>{if(!maintenanceFile)return false;try{lstatSync(maintenanceFile);return true;}catch(error){return error.code!=='ENOENT';}};
  const admit=()=>{if(maintenance())throw fail(503,'Relay is in maintenance. Try again after the update.');};
  iconPython(); // Validate trusted operator configuration before state or listener creation.
- if(!['127.0.0.1','localhost'].includes(hostname))throw Error('Invalid Relay hostname');
+
  if(!['development','standalone'].includes(profile))throw Error('Invalid Relay profile');
  if(profile==='standalone'&&native)throw Error('Standalone profile cannot start native integrations');
  await mkdir(runtime,{recursive:true,mode:0o700});await chmod(runtime,0o700);
@@ -39,7 +45,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  const app=express(),server=http.createServer(app),sessions=new Map();
  let setup=accounts.state.users.length?null:token();const authCsrf=token();
  const wss=new WebSocketServer({noServer:true,maxPayload:8192,perMessageDeflate:false});
- await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
+ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,bind,resolve);});
  const origin=`http://${hostname}:${server.address().port}`;
  const transport=new Transport({gatewayOrigin:origin});
  // Registration is not a reachability test: client-only DNS and offline apps are valid.

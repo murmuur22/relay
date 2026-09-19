@@ -67,6 +67,7 @@ def host_conflicts():
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from updater.broker.releases import extract, manifest_valid
+from updater.broker.driver import network_host
 
 SAFE_ENV = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'HOME': '/nonexistent',
             'GH_CONFIG_DIR': '/nonexistent', 'GH_PROMPT_DISABLED': '1',
@@ -157,7 +158,35 @@ def write_new(path, data, mode=0o600, gid=0):
         os.fsync(stream.fileno())
 
 
-def preflight_host():
+def deployment_network(private_lan=None):
+    mode, host = ('loopback', 'localhost') if private_lan is None else ('private-lan', private_lan)
+    try:
+        bind = network_host(host, mode)
+    except ValueError:
+        raise InstallError('Private LAN requires a canonical RFC1918 IPv4 literal') from None
+    return dict(networkMode=mode, hostname=host, bind=bind,
+                relayOrigin=f'http://{host}:4190', uiOrigin=f'http://{host}:4191')
+
+
+def preflight_network(private_lan=None, ports=(4190, 4191)):
+    network = deployment_network(private_lan)
+    if private_lan is not None:
+        # Binding alone is insufficient on Linux hosts with ip_nonlocal_bind enabled.
+        trusted_path('/usr/sbin/ip')
+        interfaces = json.loads(run(['/usr/sbin/ip', '-j', '-4', 'address', 'show']))
+        if not any(address.get('local') == private_lan for interface in interfaces for address in interface.get('addr_info', [])):
+            raise InstallError('Private LAN IPv4 must be assigned to this host')
+    for port in ports:
+        with socket.socket() as sock:
+            try:
+                sock.bind((network['bind'], port))
+            except OSError:
+                raise InstallError('Configured interface unavailable or required port occupied') from None
+    return network
+
+
+def preflight_host(private_lan=None):
+    deployment_network(private_lan)
     if sys.platform != 'linux' or platform.machine() != 'x86_64':
         raise InstallError('Linux x86_64 systemd host required')
     if not Path('/run/systemd/system').is_dir():
@@ -174,12 +203,7 @@ def preflight_host():
     pillow = run(['/usr/bin/python3', '-I', '-c', 'import PIL; from PIL import Image; print(PIL.__file__)'])
     trusted_path(pillow)
     run(['/usr/bin/gh', 'attestation', 'verify', '--help'])
-    for port in (4190, 4191):
-        with socket.socket() as sock:
-            try:
-                sock.bind(('127.0.0.1', port))
-            except OSError:
-                raise InstallError('Required loopback port is occupied') from None
+    preflight_network(private_lan)
     # Require room for downloaded/staged baseline plus a future state checkpoint.
     if shutil.disk_usage('/var/lib').free < 10 * 1024**3:
         raise InstallError('At least 10 GiB free required; size state backups separately')
@@ -189,7 +213,7 @@ def preflight_host():
 def prepare(args):
     if args.apply and os.geteuid() != 0:
         raise InstallError('--apply requires root')
-    preflight_host()
+    preflight_host(getattr(args, 'private_lan', None))
     # Copy external inputs to a private snapshot before checking signatures/digests.
     # No host account, unit, configuration or application state changes before verification.
     with tempfile.TemporaryDirectory(prefix='relay-verified-') as tmp:
@@ -228,11 +252,13 @@ def prepare(args):
         yield work, manifest
 
 
-def apply_install(work, manifest, version):
+def apply_install(work, manifest, version, private_lan=None):
+    network = deployment_network(private_lan)
     # Recheck immediately before first host mutation; never adopt an existing identity.
     if os.geteuid() != 0:
         raise InstallError('Root required')
     host_conflicts()
+    preflight_network(private_lan)
     os.umask(0o077)
     for name in ('relay', 'relay-updater-web', 'relay-updater-socket'):
         run(['/usr/sbin/groupadd', '--system', name])
@@ -252,8 +278,8 @@ def apply_install(work, manifest, version):
     for name in FILES[:2]:
         write_new('/etc/relay-updater/' + name, (work / name).read_bytes())
     write_new('/etc/relay-updater/bridge.key', secrets.token_bytes(48), 0o640, relay.pw_gid)
-    config = dict(mode='production', uiOrigin='http://localhost:4191',
-                  readinessUrl='http://localhost:4190/health/ready', relayUid=relay.pw_uid,
+    config = dict(mode='production', networkMode=network['networkMode'], uiOrigin=network['uiOrigin'],
+                  readinessUrl=network['relayOrigin']+'/health/ready', relayUid=relay.pw_uid,
                   socketGid=grp.getgrnam('relay-updater-socket').gr_gid,
                   installRoot='/opt/relay', stateRoot='/var/lib/relay', controlRoot='/var/lib/relay-updater',
                   maintenance='/var/lib/relay-updater-control/maintenance',
@@ -261,13 +287,15 @@ def apply_install(work, manifest, version):
                   bridgeKeyFile='/etc/relay-updater/bridge.key', node='/usr/bin/node',
                   python='/usr/bin/python3', gh='/usr/bin/gh')
     write_new('/etc/relay-updater/broker.json', json.dumps(config))
-    web = dict(uiOrigin=config['uiOrigin'], relayOrigin='http://localhost:4190',
-               socketPath=config['socketPath'], bind='127.0.0.1')
+    web = dict(uiOrigin=config['uiOrigin'], relayOrigin=network['relayOrigin'], networkMode=network['networkMode'],
+               socketPath=config['socketPath'], bind=network['bind'])
     write_new('/etc/relay-updater/web.json', json.dumps(web), 0o644)
     write_new('/etc/relay-updater/relay.env',
               'RELAY_UPDATER_SOCKET=/run/relay-updater-control/broker.sock\n'
               'RELAY_UPDATER_BRIDGE_KEY_FILE=/etc/relay-updater/bridge.key\n'
-              'RELAY_UPDATER_UI_ORIGIN=http://localhost:4191\n', 0o640, relay.pw_gid)
+              f"RELAY_UPDATER_UI_ORIGIN={network['uiOrigin']}\n"
+              f"RELAY_NETWORK_MODE={network['networkMode']}\n"
+              f"RELAY_HOSTNAME={network['hostname']}\n", 0o640, relay.pw_gid)
     write_new(config['maintenance'], b'', 0o644)
     for unit, source in UNIT_SOURCES.items():
         write_new('/etc/systemd/system/' + unit, (work / 'control' / source).read_bytes(), 0o644)
@@ -288,10 +316,11 @@ def main(argv=None):
     parser.add_argument('--release-dir', required=True, help='Absolute directory containing the four public release assets')
     parser.add_argument('--version', required=True, help='Exact vMAJOR.MINOR.PATCH tag, including public prereleases using that tag')
     parser.add_argument('--apply', action='store_true', help='Create dedicated accounts, paths, config and units, enroll verified baseline; do not start services')
+    parser.add_argument('--private-lan', metavar='CANONICAL_IP', help='Explicit trusted-network HTTP mode; exact assigned RFC1918 IPv4, no TLS')
     args = parser.parse_args(argv)
     with prepare(args) as (work, manifest):
         if args.apply:
-            apply_install(work, manifest, args.version)
+            apply_install(work, manifest, args.version, args.private_lan)
         else:
             print('Verified fresh-host plan: create relay and relay-updater-web nonlogin accounts, dedicated socket group;')
             print('install root-owned code/config, private Relay state, three systemd units and a gated verified baseline.')

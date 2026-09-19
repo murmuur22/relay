@@ -3,19 +3,22 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import net from 'node:net';
+import {networkInterfaces} from 'node:os';
 import {chromium,expect} from '@playwright/test';
 import {createGateway,ROOT} from '../../server/gateway.mjs';
 import {createUpdaterWeb} from '../../updater/web/server.mjs';
 import {browserLogin,password} from '../auth-helper.mjs';
 async function freePort(){const s=net.createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const p=s.address().port;await new Promise(r=>s.close(r));return p;}
-test('compiled independent maintenance tab exchanges real broker ticket, installs real fixture and survives Relay loss',{timeout:60000},async t=>{
- const uiOrigin=`http://127.0.0.1:${await freePort()}`;
+for(const networkMode of ['loopback','private-lan'])test(`${networkMode}: compiled independent maintenance tab exchanges real broker ticket, installs real fixture and survives Relay loss`,{timeout:90000},async t=>{
+ const hostname=networkMode==='loopback'?'127.0.0.1':Object.values(networkInterfaces()).flat().find(n=>n.family==='IPv4'&&!n.internal&&/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(n.address))?.address;
+ assert.ok(hostname,'No assigned private IPv4 interface');
+ const uiOrigin=`http://${hostname}:${await freePort()}`;
  const script="from updater.fixtures.harness import Sandbox\nfrom updater.broker.auth import atomic_json\nimport sys,json\nbox=Sandbox()\ntry:\n box.config['uiOrigin']=sys.argv[1]\n atomic_json(box.config_path,box.config)\n box.start()\n print(json.dumps({'root':str(box.root),'config':box.config}),flush=True)\n sys.stdin.readline()\nfinally:\n box.close()";
- const child=spawn('python3',['-u','-c',script,uiOrigin],{cwd:ROOT,stdio:['pipe','pipe','pipe']});let stdout='',stderr='',g,web,browser;child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);
+ const child=spawn('python3',['-u','-c',script.replace("box.config['uiOrigin']=sys.argv[1]","box.config['uiOrigin']=sys.argv[1]; box.config['networkMode']=sys.argv[2]"),uiOrigin,networkMode],{cwd:ROOT,stdio:['pipe','pipe','pipe']});let stdout='',stderr='',g,web,browser;child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);
  t.after(async()=>{await browser?.close();await web?.close();await g?.close();child.stdin.end('\n');if(child.exitCode===null){const timer=setTimeout(()=>child.kill('SIGKILL'),22000);await once(child,'exit');clearTimeout(timer);}});
  await expect.poll(()=>{if(child.exitCode!==null)throw Error(stderr);return stdout.includes('\n');},{timeout:15000}).toBe(true);const {root,config}=JSON.parse(stdout.split('\n')[0]);
- g=await createGateway({port:0,runtime:root+'/browser-relay',profile:'standalone',updater:{socketPath:config.socketPath,keyFile:config.bridgeKeyFile,uiOrigin},maintenanceFile:config.maintenance});
- web=await createUpdaterWeb({uiOrigin,relayOrigin:g.origin,socketPath:config.socketPath});browser=await chromium.launch({headless:true,chromiumSandbox:true});const context=await browser.newContext(),desktop=await context.newPage();await browserLogin(desktop,g.origin,root+'/browser-relay');
+ g=await createGateway({port:0,runtime:root+'/browser-relay',profile:'standalone',hostname,networkMode,updater:{socketPath:config.socketPath,keyFile:config.bridgeKeyFile,uiOrigin},maintenanceFile:config.maintenance});
+ web=await createUpdaterWeb({uiOrigin,relayOrigin:g.origin,socketPath:config.socketPath,networkMode,bind:hostname});browser=await chromium.launch({headless:true,chromiumSandbox:true});const context=await browser.newContext(),desktop=await context.newPage();await browserLogin(desktop,g.origin,root+'/browser-relay');
  await desktop.getByRole('button',{name:'Open Updater',exact:true}).click();
  const browse=desktop.locator('[data-window-id="system-updater"]');await expect(browse.getByLabel('Available release')).toHaveValue('v0.3.1');assert.equal(context.pages().length,1);
  // A narrow floating window on a wide desktop must stack actual release controls.

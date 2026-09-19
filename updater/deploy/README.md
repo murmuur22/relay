@@ -32,9 +32,18 @@ No production host is accessed by these development changes.
   `/var/lib/relay-updater-control/maintenance`; its root-owned parent is 0755.
   Only the socket lives in `/run/relay-updater-control`. The Relay unit and broker
   config agree on the persistent path. Never move the gate into volatile `/run`.
-- Exact loopback origins are `http://localhost:4190` and
+- Default exact loopback origins are `http://localhost:4190` and
   `http://localhost:4191`; services bind 127.0.0.1. Forward both exact ports over SSH.
   Do not disable Host/Origin checks or substitute a public bind.
+- Explicit `--private-lan CANONICAL_IP` installation sets `networkMode: "private-lan"`
+  in both broker.json and web.json and `RELAY_NETWORK_MODE=private-lan` plus
+  `RELAY_HOSTNAME=CANONICAL_IP` in relay.env. Both origins use that canonical,
+  assigned RFC1918 IPv4 on 4190/4191; web binds exactly that IP and broker readiness
+  targets the same host on 4190. Relay must use the standalone profile. The root
+  broker target stays fixed operator configuration, never a caller-supplied URL.
+  See the installation guide for coordinated settings and actual-interface tests.
+  This is trusted-network HTTP, NOT end-to-end TLS: a subnet router encrypts only
+  to the router, not the final HTTP LAN hop. No firewall/proxy/DNS changes occur.
 
 `broker.example.json` is deliberately non-installable with relayUid=0. The installer
 fills the actual newly allocated service UID/socket GID, never a guessed UID. It

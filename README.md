@@ -29,13 +29,13 @@ cd relay
 
 This is an early private self-hosted desktop. Linux x64 release packaging provides separate Relay-runtime and updater-control-plane archives; prereleases remain qualification candidates until explicitly promoted. Publication does not install anything on a server. Private planning documents, runtime credentials, libraries, generated screenshots and reference font binaries are excluded. Fresh checkouts use system font fallbacks; the local reference fonts have not been cleared for redistribution. Bundled integrations below remain development/test functionality, not part of the standalone server payload.
 
-No project-wide open-source license has been selected yet. Public visibility does not itself grant an open-source license; third-party dependencies retain their own terms. See `THIRD_PARTY_NOTICES.md`.
+Relay is licensed under the [MIT License](LICENSE). Third-party dependencies retain their own licenses and notices; see `THIRD_PARTY_NOTICES.md`. Private reference fonts remain excluded.
 
 ## Relay-only installation
 
 See [releases](https://github.com/murmuur22/relay/releases), [Linux installation](deploy/README.md), and [artifact verification](updater/release/README.md). Downloading and verifying official public artifacts does **not** require a GitHub account or login. The pinned repository/workflow identifies the trusted publisher, not an allowed installer identity.
 
-Fresh Linux x64/systemd installations use non-login `relay` and `relay-updater-web` accounts plus a narrowly scoped root broker. The installer defaults to inspection and requires explicit `--apply` for host changes; it refuses existing conflicting accounts, paths, units or state. Node/Python/Pillow/gh and Chromium system libraries are operator prerequisites. Initial access is private through SSH forwarding of localhost ports 4190 and 4191; public exposure/reverse-proxy support is not implied.
+Fresh Linux x64/systemd installations use non-login `relay` and `relay-updater-web` accounts plus a narrowly scoped root broker. The installer defaults to inspection and requires explicit `--apply` for host changes; it refuses existing conflicting accounts, paths, units or state. Node/Python/Pillow/gh and Chromium system libraries are operator prerequisites. Loopback plus SSH forwarding remains the default. Version 0.4.1 adds explicit `--private-lan CANONICAL_IP` for an assigned RFC1918 IPv4 address on ports 4190 and 4191, retaining exact Host/Origin and authentication checks. This is trusted-network HTTP, not end-to-end TLS; no proxy, DNS, router, firewall or Tailscale changes are configured.
 
 For a private server installation without Parcels, Keepsakes or synthetic apps, use `RELAY_PROFILE=standalone`, a fresh absolute `RELAY_STATE_DIR`, and an operator-supplied Python/Pillow interpreter through `RELAY_ICON_PYTHON`. `npm run setup:standalone` installs only Chromium and verifies Pillow. It does not install/start the bundled integrations. See [standalone deployment](deploy/README.md) for the systemd template, private forwarding, qualification and rollback boundaries.
 

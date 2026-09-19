@@ -13,11 +13,13 @@ Environment=NODE_ENV=production
 Environment=RELAY_PROFILE=standalone
 Environment=RELAY_STATE_DIR=/var/lib/relay
 Environment=RELAY_HOSTNAME=localhost
+Environment=RELAY_NETWORK_MODE=loopback
 Environment=PORT=4190
 Environment=RELAY_ICON_PYTHON=/usr/bin/python3
 Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/relay/current/browsers
 # Trusted operator-only optional file: set all three RELAY_UPDATER_* bridge
-# settings together. Never expose the bridge key to relay-updater-web.
+# settings together. Installer sets RELAY_NETWORK_MODE and RELAY_HOSTNAME here
+# for explicit private-LAN operation. Never expose the bridge key to web.
 EnvironmentFile=-/etc/relay-updater/relay.env
 Environment=RELAY_MAINTENANCE_FILE=/var/lib/relay-updater-control/maintenance
 StateDirectory=relay

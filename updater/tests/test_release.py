@@ -104,7 +104,8 @@ class ReleaseTests(unittest.TestCase):
             root = Path(tmp)
             source = root / 'source'
             source.mkdir()
-            (source / 'package.json').write_text(json.dumps(dict(name='we-relay', version='1.2.3', type='module', scripts={'postinstall':'unsafe'})))
+            (source / 'package.json').write_text(json.dumps(dict(name='we-relay', version='1.2.3', type='module', license='MIT', scripts={'postinstall':'unsafe'})))
+            (source / 'LICENSE').write_text('Synthetic MIT license fixture')
             for name in ('server/index.mjs', 'dist/index.html', 'dist/fonts/private.woff2', 'version.js', 'node_modules/playwright/package.json', 'browsers/chromium/chrome', '.runtime/accounts.json', 'integrations/private.txt', 'updater/web/broker-client.mjs', 'tools/icon-normalize.py'):
                 path = source / name
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,9 +121,14 @@ class ReleaseTests(unittest.TestCase):
                 names = archive.getnames()
                 self.assertIn('updater/web/broker-client.mjs', names)
                 self.assertIn('tools/icon-normalize.py', names)
+                self.assertIn('LICENSE', names)
+                license_file = archive.extractfile('LICENSE')
+                assert license_file is not None
+                self.assertEqual(license_file.read(), (source / 'LICENSE').read_bytes())
                 self.assertFalse(any('private' in n or '.runtime' in n or 'integrations' in n or '/fonts/' in n for n in names))
                 package = json.load(archive.extractfile('package.json'))
                 self.assertNotIn('scripts', package)
+                self.assertEqual(package.get('license'), 'MIT')
             self.assertEqual(result['version'], 'v1.2.3')
             from updater.broker.releases import verify_artifact
             self.assertTrue(verify_artifact(output / result['updaterArtifact']['name'], result['updaterArtifact'], updater=True))
@@ -137,7 +143,15 @@ class ReleaseTests(unittest.TestCase):
                 self.assertIn('updater/deploy/relay-updater-broker.service', names)
                 self.assertIn('deploy/verify-standalone.mjs', names)
                 self.assertFalse(any('private' in n or 'secret' in n or '/tests/' in n for n in names))
-                self.assertEqual(json.load(archive.extractfile('package.json'))['type'], 'module')
+                self.assertIn('LICENSE', names)
+                license_file = archive.extractfile('LICENSE')
+                assert license_file is not None
+                self.assertEqual(license_file.read(), (source / 'LICENSE').read_bytes())
+                package_file = archive.extractfile('package.json')
+                assert package_file is not None
+                metadata = json.load(package_file)
+                self.assertEqual(metadata['type'], 'module')
+                self.assertEqual(metadata.get('license'), 'MIT')
             self.assertGreater(result['artifact']['size'], 0)
             self.assertFalse((output / 'relay-release.attestation.json').exists())
             from updater.release.build import control_bundle

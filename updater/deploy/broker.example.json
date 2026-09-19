@@ -1,5 +1,6 @@
 {
   "mode": "production",
+  "networkMode": "loopback",
   "uiOrigin": "http://localhost:4191",
   "readinessUrl": "http://localhost:4190/health/ready",
   "relayUid": 0,

@@ -46,6 +46,7 @@ jobs:
           node --test --test-timeout=90000 tests/backend/updater*.test.mjs
           node --test --test-timeout=90000 updater/ui/tests/http-smoke.mjs updater/ui/tests/fixture-smoke.mjs
           node deploy/verify-standalone.mjs
+          node --test --test-timeout=130000 tests/backend/private-lan*.test.mjs tests/frontend/updater-real.test.mjs
       - name: Actual systemd mount-boundary install and rollback fixture
         run: |
           sudo install -m 0755 "$(command -v node)" /usr/bin/node

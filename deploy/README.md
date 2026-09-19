@@ -115,6 +115,63 @@ An initial installation has no prior version to roll back to. Any error after
 mutation leaves a partial installation for operator inspection; rerunning refuses
 it instead of silently repairing or deleting it.
 
+## Explicit private-LAN IPv4 mode (0.4.1 or later)
+
+Without a flag the installer keeps the existing localhost origins and exact
+127.0.0.1 listeners. For a trusted private network, opt in with
+`--private-lan CANONICAL_IP` on both inspection and apply. Only canonical IPv4
+literals in 10/8, 172.16/12 and 192.168/16 are accepted. No public, wildcard,
+link-local/metadata, multicast, hostname, IPv6, credential, path, query or numeric/
+octal alias is accepted. The address must be assigned locally (checked using
+root-owned `/usr/sbin/ip -j -4 address show`) and both exact port binds must be
+available before any account/config/unit/state mutation; apply repeats the check.
+
+For example, with `lan_ip` set to the intended host's assigned RFC1918 IPv4:
+
+```sh
+python3 deploy/install-release.py --release-dir "$assets" --version "$version" --private-lan "$lan_ip"
+# Separate explicit operator approval is required for apply:
+sudo /usr/bin/python3 deploy/install-release.py --release-dir "$assets" --version "$version" --private-lan "$lan_ip" --apply
+```
+
+Use newly built, matching 0.4.1-or-later runtime AND control-plane artifacts, not
+0.4.0 bundles with a newer installer. Both signed payloads must contain this
+network support. The independently installed control plane does not self-update.
+No packaging allowlist extension is required: helpers stay in the already included
+`updater/web/broker-client.mjs` and `updater/broker/driver.py`.
+
+The installer generates:
+
+- relay.env: `RELAY_NETWORK_MODE=private-lan`, `RELAY_HOSTNAME=CANONICAL_IP`,
+  and `RELAY_UPDATER_UI_ORIGIN=http://CANONICAL_IP:4191`, alongside the existing
+  socket/key paths. The service stays `RELAY_PROFILE=standalone`, `PORT=4190`.
+- web.json: `networkMode: "private-lan"`, `bind: "CANONICAL_IP"`,
+  `uiOrigin: "http://CANONICAL_IP:4191"`,
+  `relayOrigin: "http://CANONICAL_IP:4190"`, and the fixed broker socket path.
+- broker.json: `networkMode: "private-lan"`, that same UI origin and
+  `readinessUrl: "http://CANONICAL_IP:4190/health/ready"`.
+
+Relay also accepts those environment settings for a source standalone launch.
+The keyless updater environment entrypoint accepts `RELAY_NETWORK_MODE`,
+`RELAY_UPDATER_BIND`, `RELAY_UPDATER_UI_ORIGIN`, `RELAY_UPDATER_RELAY_ORIGIN`, and
+`RELAY_UPDATER_SOCKET`. Configure all components together; same host/different
+ports are mandatory. No request parameter controls the internal reauthentication
+target. Relay refuses invalid mode/profile/host/bridge settings before state writes.
+
+Private HTTP is a **trusted-network mode, not end-to-end TLS**. Passwords, session
+cookies and screen/input traffic are not encrypted by Relay. A VPN/subnet router
+encrypts the client-to-router segment only; its LAN hop to Relay is still HTTP.
+Use only an explicitly trusted network and trusted client devices. There is no
+firewall/router/DNS/Tailscale/proxy/certificate change in this mode. Do not forward
+these ports to the Internet. Only the independent first-party updater may share
+Relay's cookie host; the native-app cookie-host guard remains unchanged.
+
+For LAN activation use `http://$lan_ip:4190/health/ready`, then the same exact
+origin for login/private desktop links and `http://$lan_ip:4191/updater/` for the
+gesture-opened maintenance tab. Do not substitute localhost or rewrite Origin.
+An IP change requires coordinated operator configuration and restart, not a
+wildcard listener or automatic discovery in the production service.
+
 ## Initial activation after qualification and approval
 
 These commands are not run by the local development worker:
@@ -142,7 +199,9 @@ operator access, never chat/logs/issues. The owner chooses the administrator
 password. The setup credential is one-use, not a permanent login bypass. Updater
 browsing is in the desktop; Start update opens the independently authenticated tab
 at localhost:4191. Only that tab's explicit fresh-password consent can mutate.
-No public bind, reverse proxy, Tailscale Serve or LAN exposure is configured here.
+Those forwarding instructions are for the default loopback mode. Explicit LAN
+mode instead uses the configured private IP directly; no public bind, reverse
+proxy or Tailscale Serve is configured by either mode.
 
 ## Disposable GitHub-hosted systemd qualification
 
@@ -165,7 +224,13 @@ sudo env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted \
 ```
 
 The environment declarations are an explicit safety acknowledgment, not a
-cryptographically authenticated host detector. The script additionally requires
+cryptographically authenticated host detector. To qualify LAN, append
+`--private-lan "$lan_ip"` using that disposable runner's assigned private IPv4.
+The release workflow dispatch runs loopback and private-lan as separate matrix
+jobs on fresh hosted runners; LAN discovers the actual RFC1918 interface and
+fails if none exists. Both jobs must pass before promotion. Source preflight also
+runs real private-interface HTTP/WebSocket/Chromium and broker browser handoff
+tests (no mocked bind or Origin). The script additionally requires
 Linux/root/running systemd and refuses all existing installation paths, identities
 and units before any destructive work. Do not set those flags on arbitrary hosts.
 It never publishes, SSHs elsewhere, mounts host directories, or delegates.
@@ -228,6 +293,9 @@ python3 -m unittest updater.tests.test_deployment -v
 python3 -m unittest discover -s updater/tests -v
 python3 deploy/install-release.py --help
 python3 deploy/qualify-systemd.py --help
+node --test --test-timeout=130000 tests/backend/private-lan*.test.mjs tests/backend/updater-real.test.mjs tests/frontend/updater-real.test.mjs
+node deploy/verify-standalone.mjs
+node deploy/verify-standalone.mjs --private-lan
 ```
 
 Tests use temporary files, anonymous-verifier command seams and disposable local

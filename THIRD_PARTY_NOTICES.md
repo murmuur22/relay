@@ -1,6 +1,6 @@
 # Source and dependency notices
 
-Relay (Wicked Evil relay / WE relay) is a development prototype. A project-wide license has not been selected. Public source hosting is not a claim that all project code is under an open-source license.
+Relay (Wicked Evil relay / WE relay) is licensed under the MIT License; see the repository's `LICENSE` file. This covers Relay and its first-party code in this repository. Third-party dependencies retain their own copyrights, licenses and required notices.
 
 ## First-party integrations
 
@@ -8,7 +8,7 @@ Relay (Wicked Evil relay / WE relay) is a development prototype. A project-wide 
 - Keepsakes: https://github.com/murmuur22/keepsakes — snapshot commit recorded in the same manifest. Native URLs are adapted for the gateway; data libraries are not included.
 - Visual reference: https://github.com/murmuur22/wicked at `ee337dfb600afb454b36a8e4fd59187297b1dd4d`. Relay recreates the desktop interaction/visual approach rather than importing its deployed service configuration.
 
-These are separate projects by the repository owner. Their inclusion does not imply a new blanket license grant.
+These are separate projects by the repository owner. The MIT grant covers the first-party code distributed in this Relay repository; this change does not edit or select licenses for the separate upstream repositories.
 
 ## Dependencies
 

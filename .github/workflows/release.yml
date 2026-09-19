@@ -63,6 +63,7 @@ jobs:
           node --test --test-timeout=70000 tests/backend/updater-web.test.mjs tests/backend/updater-bridge.test.mjs
           node --test --test-timeout=90000 updater/ui/tests/http-smoke.mjs updater/ui/tests/fixture-smoke.mjs
           node deploy/verify-standalone.mjs
+          node --test --test-timeout=130000 tests/backend/private-lan*.test.mjs tests/backend/updater-real.test.mjs tests/frontend/updater-real.test.mjs
       - name: Package standalone runtime and independent control plane
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -92,6 +93,10 @@ jobs:
           gh release edit "$RELEASE_TAG" --repo murmuur22/relay --draft=false --prerelease --latest=false
   qualify:
     if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        network-mode: [loopback, private-lan]
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     environment: release
@@ -133,6 +138,13 @@ jobs:
             env -i PATH="$PATH" curl -q --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --max-filesize 1073741824 --output "$RUNNER_TEMP/public-release/$asset" "https://github.com/murmuur22/relay/releases/download/$RELEASE_TAG/$asset"
           done
       - name: Verify real provenance and qualify signed initial install on THIS disposable runner
+        env:
+          NETWORK_MODE: ${{ matrix.network-mode }}
         run: |
-          sudo env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME=/nonexistent GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted RELAY_DISPOSABLE_SYSTEMD=I_ACCEPT_DISPOSABLE_HOST_MUTATION /usr/bin/python3 deploy/qualify-systemd.py --release-dir "$RUNNER_TEMP/public-release" --version "$RELEASE_TAG" --apply
+          network_args=()
+          if [ "$NETWORK_MODE" = private-lan ]; then
+            PRIVATE_IP="$(node --input-type=module -e "import {networkInterfaces} from 'node:os'; import {privateIPv4} from './updater/web/broker-client.mjs'; const ip=Object.values(networkInterfaces()).flat().find(n=>n.family==='IPv4'&&!n.internal&&privateIPv4(n.address))?.address; if(!ip)process.exit(1); console.log(ip)")"
+            network_args=(--private-lan "$PRIVATE_IP")
+          fi
+          sudo env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME=/nonexistent GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted RELAY_DISPOSABLE_SYSTEMD=I_ACCEPT_DISPOSABLE_HOST_MUTATION /usr/bin/python3 deploy/qualify-systemd.py --release-dir "$RUNNER_TEMP/public-release" --version "$RELEASE_TAG" --apply "${network_args[@]}"
       # This job deliberately has no release-write permission or promotion step.

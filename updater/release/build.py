@@ -20,7 +20,7 @@ CONTROL_FILES = tuple('updater/broker/' + name + '.py' for name in
                       ('auth', 'server', 'releases', 'engine', 'observe', 'enroll', 'driver')) + (
     'updater/web/index.mjs', 'updater/web/server.mjs', 'updater/web/broker-client.mjs',
     'deploy/install-release.py', 'deploy/qualify-systemd.py', 'deploy/relay.service',
-    'deploy/verify-standalone.mjs', 'deploy/README.md',
+    'deploy/verify-standalone.mjs', 'deploy/README.md', 'LICENSE',
     'updater/web/relay-updater-web.service',
     'updater/deploy/relay-updater-broker.service', 'updater/deploy/README.md',
 )
@@ -60,7 +60,10 @@ def control_bundle(source, output, package):
             entry.size, entry.mode = info.st_size, 0o644
             with path.open('rb') as stream:
                 archive.addfile(entry, stream)
-        raw = json.dumps(dict(name='relay-updater', version=package['version'], type='module')).encode()
+        metadata = dict(name='relay-updater', version=package['version'], type='module')
+        if 'license' in package:
+            metadata['license'] = package['license']
+        raw = json.dumps(metadata).encode()
         entry = tarfile.TarInfo('package.json')
         entry.size, entry.mode = len(raw), 0o644
         archive.addfile(entry, io.BytesIO(raw))
@@ -103,7 +106,7 @@ def build(source, browsers, output, version, allow_nonlinux=False):
                 if stat.S_ISREG(info.st_mode):
                     relative = prefix + '/' + path.relative_to(base).as_posix()
                     selected.append((relative, path))
-    selected.extend((name, source / name) for name in ('version.js', 'updater/web/broker-client.mjs', 'tools/icon-normalize.py'))
+    selected.extend((name, source / name) for name in ('version.js', 'updater/web/broker-client.mjs', 'tools/icon-normalize.py', 'LICENSE'))
     size = 0
     seen = set()
     with tarfile.open(output / ARTIFACT, 'w:gz', compresslevel=6) as archive:
@@ -128,7 +131,7 @@ def build(source, browsers, output, version, allow_nonlinux=False):
             with path.open('rb') as stream:
                 archive.addfile(entry, stream)
         # Runtime metadata retains dependency identities but never package commands.
-        metadata = {k: package[k] for k in ('name', 'version', 'type', 'dependencies') if k in package}
+        metadata = {k: package[k] for k in ('name', 'version', 'type', 'dependencies', 'license') if k in package}
         raw = json.dumps(metadata, separators=(',', ':')).encode()
         entry = tarfile.TarInfo('package.json')
         entry.size, entry.mode = len(raw), 0o644

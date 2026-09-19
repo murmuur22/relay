@@ -7,6 +7,15 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 No changes recorded yet.
 
+## [0.4.1] — 2026-09-19
+
+Release preparation; deployment and private-LAN qualification are separate gates.
+
+### Added
+- MIT licensing for Relay's first-party code, with license metadata in both packages and the full license retained in both generated release archives. Third-party notices remain intact.
+- Explicit private-LAN mode for assigned, canonical RFC1918 IPv4 literals. Relay and its independent updater bind only that address; loopback remains the default and LAN exposure requires standalone mode.
+- Matching installer/qualification configuration and separate hosted loopback/LAN jobs. Exact Host/Origin/CSRF checks, administrator authorization, native cookie-host protection and signing-key isolation remain enforced. No wildcard/public listener or network infrastructure configuration is added.
+
 ## [0.4.0] — 2026-09-19
 
 Published Linux x64 release: [v0.4.0](https://github.com/murmuur22/relay/releases/tag/v0.4.0). Hosted Linux preflight, real systemd mount-boundary recovery, anonymous public attestation verification and signed initial-install qualification passed; see `TEST_REPORT.md`. Publication is not a production VM deployment.

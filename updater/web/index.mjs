@@ -7,8 +7,8 @@ let config;
 if(process.argv.length===4&&process.argv[2]==='--config'){
  if(!isAbsolute(process.argv[3]))throw Error('Absolute updater web config path required');
  config=JSON.parse(await readFile(process.argv[3],'utf8'));
-}else if(process.argv.length===2){config={uiOrigin:process.env.RELAY_UPDATER_UI_ORIGIN,relayOrigin:process.env.RELAY_UPDATER_RELAY_ORIGIN,socketPath:process.env.RELAY_UPDATER_SOCKET,bind:'127.0.0.1'};}else throw Error('Usage: node updater/web/index.mjs [--config /absolute/web.json]');
-if(!config||typeof config!=='object'||Array.isArray(config)||Object.keys(config).some(k=>!['uiOrigin','relayOrigin','socketPath','bind','staticDir'].includes(k)))throw Error('Invalid updater web configuration fields');
+}else if(process.argv.length===2){config={uiOrigin:process.env.RELAY_UPDATER_UI_ORIGIN,relayOrigin:process.env.RELAY_UPDATER_RELAY_ORIGIN,socketPath:process.env.RELAY_UPDATER_SOCKET,networkMode:process.env.RELAY_NETWORK_MODE??'loopback',bind:process.env.RELAY_UPDATER_BIND??'127.0.0.1'};}else throw Error('Usage: node updater/web/index.mjs [--config /absolute/web.json]');
+if(!config||typeof config!=='object'||Array.isArray(config)||Object.keys(config).some(k=>!['uiOrigin','relayOrigin','socketPath','bind','staticDir','networkMode'].includes(k)))throw Error('Invalid updater web configuration fields');
 const web=await createUpdaterWeb(config);
-console.log('Unprivileged updater web listening on configured loopback origin.');
+console.log('Unprivileged updater web listening on configured trusted origin.');
 let closing=false;for(const signal of ['SIGINT','SIGTERM'])process.on(signal,async()=>{if(closing)return;closing=true;await web.close();process.exit(0);});

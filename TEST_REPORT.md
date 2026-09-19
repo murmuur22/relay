@@ -1,5 +1,13 @@
 # Relay prototype verification
 
+## 0.4.1 private-LAN mode and MIT license — local verification
+
+Parent-run verification passed both builds, 105 backend tests, 55 frontend tests and full hybrid integration, 48 Python updater/deployment tests, 6 updater unit tests and 35 updater browser tests. Tests used actual assigned private interfaces for HTTP/WebSocket/browser traffic and the real disposable broker handoff, install/rollback and downtime-monitoring paths in both modes. A regression reproduced the independent updater accepting an unassigned bind up to `listen`; the fix rejects it before creating the listener. Scoped independent re-review found no remaining blocker.
+
+MIT licensing was explicitly authorized. Root/UI package metadata and both release archives retain the license, with byte-preservation regressions. Upstream repository licensing and third-party notices are not silently replaced.
+
+Private-LAN is explicit, standalone-only and restricted to an assigned canonical RFC1918 IPv4. Both services retain exact Host/Origin/CSRF and same-host/different-port checks. The default remains loopback. Trusted-network HTTP is not end-to-end TLS; no proxy/DNS/firewall/router/Tailscale changes are made by the mode. Hosted qualification and actual VM installation are separate gates recorded after execution.
+
 ## 0.4.0 published Linux release — hosted qualification
 
 Public release: https://github.com/murmuur22/relay/releases/tag/v0.4.0 . Tag source commit: `f793f8060a0a056afd5be3db95a6141e40d98708`. Published as a prerelease, verified, then explicitly promoted to the latest non-prerelease. The two archives and their attested manifest were downloaded without credentials; local verification also pinned the exact source commit. The production release-discovery code subsequently returned `v0.4.0` with `verified: true` using its credential-free verifier.

@@ -6,10 +6,10 @@ import {brokerRequest,loopbackOrigin,capability,actionFields} from '../updater/w
 import {fail,verify} from './accounts.mjs';
 import {systemApps} from './system-apps.mjs';
 import {VERSION} from '../version.js';
-export function updaterConfig(value={socketPath:process.env.RELAY_UPDATER_SOCKET,keyFile:process.env.RELAY_UPDATER_BRIDGE_KEY_FILE,uiOrigin:process.env.RELAY_UPDATER_UI_ORIGIN},hostname='127.0.0.1'){
+export function updaterConfig(value={socketPath:process.env.RELAY_UPDATER_SOCKET,keyFile:process.env.RELAY_UPDATER_BRIDGE_KEY_FILE,uiOrigin:process.env.RELAY_UPDATER_UI_ORIGIN},hostname='127.0.0.1',networkMode='loopback'){
  if(!value||!Object.values(value).some(v=>v!==undefined))return null;
  if(typeof value.socketPath!=='string'||!isAbsolute(value.socketPath)||typeof value.keyFile!=='string'||!isAbsolute(value.keyFile)||!value.uiOrigin||Object.keys(value).some(k=>!['socketPath','keyFile','uiOrigin'].includes(k)))throw Error('Invalid updater configuration: all three settings required');
- const url=loopbackOrigin(value.uiOrigin);if(url.hostname!==hostname)throw Error('Invalid updater configuration: same hostname required');return {...value};
+ const url=loopbackOrigin(value.uiOrigin,networkMode);if(url.hostname!==hostname)throw Error('Invalid updater configuration: same hostname required');return {...value};
 }
 async function issue(config,action,params){
  if(!config)throw fail(503,'Updater unavailable: not configured.');
