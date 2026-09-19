@@ -1,6 +1,18 @@
 # Relay prototype verification
 
-## Version 0.2.0 publication — current verification
+## Immersive motion and first-run setup — Unreleased
+
+Development branch: `feat/immersive-onboarding`, based on source version 0.2.0. The arrival overlay uses `[ESC] BYPASS INITIALIZATION`, a bounded monochrome signal-settling effect, inert covered content and managed keyboard/touch focus. Authentication loads underneath. Login/desktop/window/Navigation motion respects account preferences and device reduced motion; minimized native frames retain state.
+
+First-run enrollment now leads into the real first-app wizard or explicit defer. Existing accounts migrate as setup-complete. A server-backed first-app marker and idempotent endpoint prevent duplicate registration after retries, lost committed responses, reload or restart. Owner setup fragments are cleared before session discovery completes.
+
+Executed verification: **71 backend tests, 33 frontend tests and full hybrid integration passed**, including a fresh Git-index export with dependency setup and no private fonts/runtime state. Coverage includes partial preference merges/migration/corruption, authorization/CSRF and queued revocation, intro focus/input isolation, once-per-tab behavior, keyboard bypass without authentication, live reduced-motion changes, native frame retention, responsive onboarding, interrupted completion and a genuinely lost committed first-app response. The parent reproduced and fixed the intro interaction and duplicate-registration defects; independent source re-review found no remaining blocker in this development scope.
+
+A real synthetic first-run/native-app recording was generated at `screenshots/relay-immersive-demo.webm`, with no page exceptions and retained native form contents after minimize/restore. Intro, onboarding and Profile screenshots were visually inspected. Recordings/screenshots remain ignored local artifacts; they contain test fixtures, not real household apps. No sound, fake security diagnostics, new assets or secret shortcuts were added. No VM deployment or GitHub push is part of this update.
+
+Known limits: pre-login cannot know a new device's account preference, so it uses device reduced-motion and last locally cached booleans until authenticated. Motion is not a general physical-device/Safari qualification. Existing accounts do not replay setup; rolling back source after persisted preference changes may require the protected pre-update runtime backup described in docs/motion-onboarding.md.
+
+## Version 0.2.0 publication — previous verification
 
 `package.json` and the root lockfile now identify version **0.2.0**. `version.js` is the shared source for footer/Profile text and backend System diagnostics. `CHANGELOG.md` backfills the 0.1.0 public baseline and groups the subsequent account, settings and web-app work under 0.2.0, with an Unreleased section for ongoing changes. No historical micro-releases or production deployment are implied.
 

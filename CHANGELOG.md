@@ -5,7 +5,19 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
-No changes recorded yet.
+### Added
+- Restrained monochrome signal-settling intro with the exact keyboard/click/tap prompt `[ESC] BYPASS INITIALIZATION`, once per tab session. Bypass dismisses decoration only, never authentication.
+- Login fade, desktop icon/dock reveal, window opening/minimize/restore and Navigation motion. Native iframe state survives minimizing, and drag/resize remains immediate.
+- Independent per-account Intro animation and Interface animations controls. Device reduced-motion settings take priority, including changes while Relay is running; pre-login display can use the last locally saved motion booleans.
+- Protected first-run administrator wizard: create the admin password, optionally add the first real app, then enter the desktop. Setup can be deferred or resumed without creating another administrator.
+- Server-backed first-app progress and an idempotent registration endpoint, preventing duplicate apps after retries, lost responses or restart.
+
+### Fixed and hardened
+- Covered intro content is inert, with managed focus and reliable Escape/Tab behavior; hidden forms cannot receive accidental interaction.
+- Owner setup fragments are captured and cleared before waiting for session discovery.
+- Existing accounts do not replay first-run setup. Existing preference values are preserved while new motion defaults are added; malformed persisted flags still fail closed.
+
+These changes are local development work, not a published version or deployment.
 
 ## [0.2.0] — 2026-09-18
 

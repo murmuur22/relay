@@ -66,7 +66,7 @@ test('web registry, private/public metadata, grants, preferences and migration',
  assert.equal((await admin('/admin/apps','PATCH',draft)).status,404);
  assert.equal((await admin('/admin/apps/'+app.id,'PATCH',{label:'Edited'})).status,200);assert.equal((await viewer('/session')).status,401);
  await g.close();g=null;
- const saved=JSON.parse(await readFile(runtime+'/accounts.json','utf8'));assert.deepEqual(saved.users[0].preferences,{showAppStatus:true});delete saved.users[0].preferences;await writeFile(runtime+'/accounts.json',JSON.stringify(saved));
+ const saved=JSON.parse(await readFile(runtime+'/accounts.json','utf8'));assert.deepEqual(saved.users[0].preferences,{showAppStatus:true,introAnimation:true,interfaceAnimations:true});delete saved.users[0].preferences;await writeFile(runtime+'/accounts.json',JSON.stringify(saved));
  g=await createGateway({port:0,runtime});const again=client(g.origin,await authenticate(g.origin,runtime,'viewer'));assert.equal((await (await again('/session')).json()).user.preferences.showAppStatus,false);
  const a=client(g.origin,await authenticate(g.origin,runtime));assert.equal((await (await a('/session')).json()).user.preferences.showAppStatus,true);
  }finally{await browser?.close();await g?.close();await new Promise(r=>fixture.close(r));await rm(runtime,{recursive:true,force:true});}

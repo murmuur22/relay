@@ -101,6 +101,6 @@ test('persisted preference corruption refuses startup; absent legacy preference 
  const runtime=await mkdtemp(tmpdir()+'/relay-pref-hardening-');
  try{const accounts=new Accounts(runtime,APPS);await accounts.init();await accounts.enroll(password);const saved=JSON.parse(await readFile(runtime+'/accounts.json','utf8'));
  for(const preferences of [null,[],false,{}, {showAppStatus:'false'},{showAppStatus:true,extra:1}]){saved.users[0].preferences=preferences;await writeFile(runtime+'/accounts.json',JSON.stringify(saved));await assert.rejects(new Accounts(runtime,APPS).init(),/refusing enrollment/);}
- delete saved.users[0].preferences;await writeFile(runtime+'/accounts.json',JSON.stringify(saved));const migrated=new Accounts(runtime,APPS);await migrated.init();assert.deepEqual(migrated.state.users[0].preferences,{showAppStatus:true});
+ delete saved.users[0].preferences;await writeFile(runtime+'/accounts.json',JSON.stringify(saved));const migrated=new Accounts(runtime,APPS);await migrated.init();assert.deepEqual(migrated.state.users[0].preferences,{showAppStatus:true,introAnimation:true,interfaceAnimations:true});
  }finally{await rm(runtime,{recursive:true,force:true});}
 });

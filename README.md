@@ -58,6 +58,12 @@ Gateway binds **127.0.0.1:4180**. The isolated Keepsakes service binds **127.0.0
 
 Use the compiled gateway for the real app. Vite on4182 is frontend development/mock-fixture tooling, not a production or authenticated deployment path; proxy Origin handling is intentionally not relaxed for it.
 
+## Motion and first-run setup (Unreleased)
+
+The development branch adds a short monochrome arrival sequence with **[ESC] BYPASS INITIALIZATION**. Escape, click or tap bypasses only decoration; covered controls are inert while real authentication discovery continues. Login, desktop, windows and Navigation have restrained motion. Profile provides independent Intro animation and Interface animations controls, and device reduced-motion settings take priority.
+
+New installations guide the initial administrator from password creation into adding the first app or choosing Set up later. Existing accounts are not forced through setup. First-app progress is server-backed so interrupted responses, retries and reloads do not duplicate registration. See [motion and onboarding](docs/motion-onboarding.md) for preferences, migration and rollback boundaries. These changes remain under Unreleased; the last published source version is 0.2.0.
+
 ## Desktop controls
 
 - App shortcuts launch or restore one window per app.

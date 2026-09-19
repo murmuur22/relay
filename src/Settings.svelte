@@ -55,7 +55,7 @@
   const ok=await run(async()=>{await api('/admin/apps/'+s.id,remove?'DELETE':'PATCH',remove?{}:{label:s.label,enabled:s.enabled,...(s.kind==='web'?{address:webAddress(s.address),icon:s.icon,openMode:s.openMode,allowedOrigins:origins(s.originText)}:{})});await load();await onrefresh();message=remove?'App removed.':'App saved.';});if(ok)await back();
  }
  async function createApp(data){await api('/admin/apps','POST',data);await load();await onrefresh();busy=false;await back();message='App registered.';}
- async function preference(event){const value=event.currentTarget.checked;const ok=await run(async()=>{await api('/preferences','PATCH',{showAppStatus:value});await onrefresh();message='Status preference saved.';});if(!ok)event.target.checked=user.preferences?.showAppStatus!==false;}
+ async function preference(event,key='showAppStatus'){const target=event.currentTarget,value=target.checked;const ok=await run(async()=>{await api('/preferences','PATCH',{[key]:value});await onrefresh();message=key==='showAppStatus'?'Status preference saved.':'Motion preference saved.';});if(!ok)target.checked=user.preferences?.[key]!==false;}
  const mib=value=>`${(value/1024/1024).toFixed(1)} MiB`;
 </script>
 <div class="settings-window" bind:this={dialog} role="dialog" tabindex="-1" aria-modal="true" aria-label={kind==='admin'?'Control Panel':'Profile settings'} onkeydown={keydown}>
@@ -76,6 +76,7 @@
     </fieldset>
    </form>
    <fieldset disabled={busy} class="preference-panel"><legend>Apps</legend><label class="check"><input type="checkbox" checked={user.preferences?.showAppStatus!==false} onchange={preference}/>Show app status</label><p class="muted">Show connection observations on app shortcuts. Saved for your account across sessions; no password needed. Hiding status does not change access.</p></fieldset>
+  <fieldset disabled={busy} class="preference-panel"><legend>Motion</legend><label class="check"><input type="checkbox" checked={user.preferences?.introAnimation!==false} onchange={e=>preference(e,'introAnimation')}/>Intro animation</label><label class="check"><input type="checkbox" checked={user.preferences?.interfaceAnimations!==false} onchange={e=>preference(e,'interfaceAnimations')}/>Interface animations</label><p class="muted">Saved for your account. Your device’s reduced-motion preference always takes priority. Before sign-in, this browser uses its last motion settings; a new device uses defaults.</p></fieldset>
   {:else}
    <p class="settings-note">Application access only. No host, Docker, restart or update controls.</p>
    <div class="settings-tabs" role="tablist" aria-label="Control Panel pages">

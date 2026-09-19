@@ -23,7 +23,8 @@ test('real accounts pages, searchable tables, focused editors, app confirmation 
  try{
   await mkdir(ROOT+'screenshots',{recursive:true});
   await page.goto(await readFile(runtime+'/setup-url.txt','utf8'));
-  await page.getByLabel('password',{exact:true}).fill(password);await button('Create admin').click();
+  await page.keyboard.press('Escape');await expect(page.locator('.signal-intro')).toHaveCount(0);
+  await page.getByLabel('password',{exact:true}).fill(password);await expect(page.getByLabel('password',{exact:true})).toHaveValue(password);await button('Create admin').click();await button('Set up later').click();
   await button('Navigation').click();await button('Sign out').click();
   await expect(page.getByRole('heading',{name:'login',exact:true})).toBeVisible();await page.screenshot({path:ROOT+'screenshots/login.png'});
   await page.getByLabel('username',{exact:true}).fill('admin');await page.getByLabel('password',{exact:true}).fill(password);await button('Enter →').click();

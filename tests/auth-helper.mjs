@@ -9,7 +9,10 @@ export async function authenticate(origin,runtime,username='admin',pass=password
  const s=await (await fetch(origin+'/api/session',{headers:{cookie}})).json();return {cookie,s};
 }
 export async function browserLogin(page,origin,runtime){
- const {cookie}=await authenticate(origin,runtime);const [name,value]=cookie.split('=');
+ const auth=await authenticate(origin,runtime),api=client(origin,auth);
+ if(auth.s.user.role==='admin'&&!auth.s.user.mustChange&&!auth.s.user.onboardingComplete)assert.equal((await api('/onboarding/complete','POST',{})).status,200);
+ assert.equal((await api('/preferences','PATCH',{introAnimation:false,interfaceAnimations:false})).status,200);
+ const [name,value]=auth.cookie.split('=');
  await page.context().addCookies([{name,value,url:origin,httpOnly:true,sameSite:'Strict'}]);await page.goto(origin);
 }
 export function client(origin,auth){return async(path,method='GET',body)=>fetch(origin+'/api'+path,{method,headers:{cookie:auth.cookie,Origin:origin,'X-CSRF-Token':auth.s.csrf,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});}

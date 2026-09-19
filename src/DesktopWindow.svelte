@@ -1,9 +1,10 @@
 <script>
  import { onMount } from 'svelte';
  import StreamSurface from './StreamSurface.svelte';
+ import {windowMotion} from './motion.js';
  import {safeExternal} from './webapps.js';
  import { clampBounds,TITLE_HEIGHT } from './geometry.js';
- let {win,index,areaWidth,areaHeight,onchange,onfocus,onminimize,onclose,onreload}=$props();
+ let {win,index,areaWidth,areaHeight,onchange,onfocus,onminimize,onclose,onreload,motion=false}=$props();
  let restore=$state(null),gesture=$state(null),frame=$state(),bridgeCleanup=()=>{},nativeState=$state('loading');
  const nativeUrls={parcels:'/native/parcels/',keepsakes:'/native/keepsakes/'};
  let safeUrl=$derived(win.external?safeExternal(win.url,window.location.origin):nativeUrls[win.appId]===win.url?win.url:null);
@@ -15,7 +16,7 @@
  function nativeLoaded(){bridgeCleanup();try{const doc=frame.contentDocument;if(!doc)throw Error();const activate=()=>onfocus();doc.addEventListener('pointerdown',activate,true);doc.addEventListener('focusin',activate,true);bridgeCleanup=()=>{doc.removeEventListener('pointerdown',activate,true);doc.removeEventListener('focusin',activate,true);};const text=doc.body?.innerText||'';nativeState=doc.querySelector('body > pre')&&/error|unavailable|unauthorized/i.test(text)?'unavailable':'ready';}catch{nativeState='unavailable';}}
  onMount(()=>()=>bridgeCleanup());
 </script>
-<section class="desktop-window" class:focused={win.focused} class:gesturing={!!gesture} data-app={win.appId} data-window-id={win.id} aria-label={win.title+' window'} style:display={!win.visible||(narrow&&!win.focused)?'none':'flex'} style:left={bounds.x+'px'} style:top={bounds.y+'px'} style:width={bounds.width+4+'px'} style:height={bounds.height+TITLE_HEIGHT+'px'} style:z-index={10+index}>
+<section class="desktop-window" use:windowMotion={{enabled:motion,visible:win.visible&&(!narrow||win.focused)}} inert={!win.visible||(narrow&&!win.focused)} class:focused={win.focused} class:gesturing={!!gesture} data-app={win.appId} data-window-id={win.id} aria-label={win.title+' window'} style:left={bounds.x+'px'} style:top={bounds.y+'px'} style:width={bounds.width+4+'px'} style:height={bounds.height+TITLE_HEIGHT+'px'} style:z-index={10+index}>
  <!-- svelte-ignore a11y_no_static_element_interactions -->
  <div class="titlebar" onpointerdown={e=>begin(e,'drag')} onpointermove={move} onpointerup={()=>gesture=null} onpointercancel={()=>gesture=null} ondblclick={maximize}>
   <span class="window-title">{win.title}</span><span class="mode-label">{win.mode==='stream'?'streamed':'native'}</span>

@@ -85,6 +85,19 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  app.get('/api/admin/users',(req,res)=>res.json(accounts.state.users.map(publicUser)));
  app.post('/api/admin/users',wrap(async(req,res)=>res.json(await accounts.createUser(req.body||{}))));
  app.patch('/api/admin/users/:id',wrap(async(req,res)=>{const user=await accounts.updateUser(req.params.id,req.body||{});await revokeUser(user.id);res.json(user);}));
+ app.post('/api/onboarding/app',wrap(async(req,res)=>{
+  const user=req.session.user;
+  if(user.role!=='admin'||user.mustChange||user.onboardingComplete)throw fail(403,'Pending administrator onboarding required');
+  await validateDraft(req.body);
+  const service=await accounts.onboardingApp(req.session.userId,req.body);
+  for(const s of sessions.values())s.manager.apps=accounts.apps(accounts.state.users.find(u=>u.id===s.userId));
+  res.json(service);
+ }));
+ app.post('/api/onboarding/complete',wrap(async(req,res)=>{
+  if(req.session.user.role!=='admin'||req.session.user.mustChange)throw fail(403,'Admin access required');
+  if(req.body!==undefined&&(!req.body||typeof req.body!=='object'||Array.isArray(req.body)||Object.keys(req.body).length))throw fail(400,'Expected empty body');
+  res.json(await accounts.completeOnboarding(req.session.userId));
+ }));
  app.patch('/api/preferences',wrap(async(req,res)=>res.json(await accounts.preferences(req.session.userId,req.body))));
  app.use((req,res,next)=>{if(/^\/api\/admin\/apps(?=\/|\?|$)/.test(req.url))req.url=req.url.replace('/api/admin/apps','/api/admin/services');next();});
  const networkActive={check:0,preview:0};

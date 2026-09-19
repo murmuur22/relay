@@ -12,7 +12,7 @@ test('settings retain drafts across pages and search the displayed user status',
   const auth=await authenticate(g.origin,runtime),api=client(g.origin,auth);
   const user=await (await api('/admin/users','POST',{username:'alice',password})).json();
   await api('/admin/users/'+user.id,'PATCH',{password:password+'reset'});
-  const page=await browser.newPage();const [name,value]=auth.cookie.split('=');await page.context().addCookies([{name,value,url:g.origin}]);await page.goto(g.origin);
+  const page=await browser.newPage();const [name,value]=auth.cookie.split('=');await page.context().addCookies([{name,value,url:g.origin}]);await page.goto(g.origin);await page.getByRole('button',{name:'Set up later',exact:true}).click();
   await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:'Control Panel',exact:true}).click();
   await page.getByLabel('Search users').fill('Password reset');await expect(page.getByRole('table',{name:'Users',exact:true}).getByRole('rowheader',{name:'alice',exact:true})).toBeVisible();
   await page.getByLabel('Search users').fill('active');await expect(page.getByRole('table',{name:'Users',exact:true}).getByRole('rowheader',{name:'alice',exact:true})).toHaveCount(0);
