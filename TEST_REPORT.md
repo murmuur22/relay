@@ -1,6 +1,18 @@
 # Relay prototype verification
 
-## Settings refinement — current verification
+## Web apps wizard and status preference — current verification
+
+The Add app wizard registers HTTP(S) native or streamed apps, with name/address/icon, mode-specific options/checks/previews, access selection and review. UI terminology is Apps. Profile's Show app status preference defaults on, persists per account, hides dots/text when off and skips client status probes. Existing bundled entries, grants and account data remain compatible.
+
+Parent executed `npm run build && npm test` after integration and review fixes: **58 backend tests, 25 frontend tests and full hybrid integration passed**, with no failures/skips/cancellations. A clean Git-index export also passed fresh install/setup/build and the full suite without local fonts or private runtime data. Its first run exposed a fixed-delay wheel assertion; the regression now waits for the actual compositor scroll, and the complete clean-export rerun passed. Independent source re-review found no blocking security/logic issues within the documented development scope. Actual local HTTP fixtures exercised native tabs and sandboxed frames, streamed JPEG previews and typed input, per-session cookies, user access, client CORS evidence/server fallback and persistent preferences. The baseline real 512KiB ZIP byte comparison, admin-only Keepsakes and synthetic two-stream regression still pass.
+
+New boundary regressions cover DNS-pinned transport, metadata/self/Teredo restrictions and legitimate Tailnet unicast, DNS-independent registration, native cookie-host separation (including actual fixture headers), blocked redirects/egress/WebSockets, pending stream cancellation, preview/check expiry/disconnect/revocation, preview cancellation from the wizard, health fairness above transport capacity, failure-cache handling and corrupt preference state. Connection checks/previews no longer hold the global mutation queue. HTTP error responses are not reported as an unreachable server.
+
+This is local macOS/Chromium verification using synthetic content, not real home-service or production qualification. Native destinations must use a different authentication hostname, with dedicated-host deployment requirements documented in `docs/web-apps.md`. Generic WebSocket/audio/file-transfer support and universal website compatibility are not claimed. No VM changes or GitHub push were performed.
+
+Screenshot artifacts (ignored): `webapps-wizard.png`, `webapps-wizard-narrow.png`, `webapps-apps.png`, `webapps-profile.png`, `webapps-stream-preview.png`, `webapps-stream.png`.
+
+## Settings refinement — previous verification
 
 Profile and Control Panel use neutral black/stone/off-white surfaces, fields, focus rings and feedback; semantic colors remain on status dots. Control Panel has Users, Services and System tabs, searchable semantic tables, focused create/edit forms, removal confirmation, diagnostic grids and a resource-limits table. Drafts survive tab switches in memory; cancel/close discards them. Profile uses a compact account/security grid.
 

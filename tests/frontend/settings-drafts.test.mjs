@@ -18,7 +18,7 @@ test('settings retain drafts across pages and search the displayed user status',
   await page.getByLabel('Search users').fill('active');await expect(page.getByRole('table',{name:'Users',exact:true}).getByRole('rowheader',{name:'alice',exact:true})).toHaveCount(0);
   await page.getByLabel('Search users').fill('');await page.getByRole('button',{name:'New user',exact:true}).click();await page.getByLabel('New username').fill('draftuser');
   await page.getByRole('tab',{name:'Users',exact:true}).click();await expect(page.getByLabel('New username')).toHaveValue('draftuser');
-  await page.getByRole('tab',{name:'Services',exact:true}).click();await page.getByRole('tab',{name:'Users',exact:true}).click();await expect(page.getByLabel('New username')).toHaveValue('draftuser');
+  await page.getByRole('tab',{name:'Apps',exact:true}).click();await page.getByRole('tab',{name:'Users',exact:true}).click();await expect(page.getByLabel('New username')).toHaveValue('draftuser');
   await page.getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(await page.getByLabel('New username').count(),0);
  }finally{await browser.close();await g.close();await rm(runtime,{recursive:true,force:true});}
 });

@@ -16,7 +16,7 @@ async function narrow(page){
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  assert.equal(await page.locator('.settings-window').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
 }
-test('real accounts pages, searchable tables, focused editors, service confirmation and neutral responsive profile',{timeout:90000},async()=>{
+test('real accounts pages, searchable tables, focused editors, app confirmation and neutral responsive profile',{timeout:90000},async()=>{
  const runtime=await mkdtemp(ROOT+'.test-accounts-ui-');const g=await createGateway({port:0,runtime});const browser=await chromium.launch({headless:true,chromiumSandbox:true});const page=await browser.newPage({viewport:{width:1280,height:900}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const button=name=>page.getByRole('button',{name,exact:true});
  const tab=name=>page.getByRole('tab',{name,exact:true});
@@ -27,12 +27,14 @@ test('real accounts pages, searchable tables, focused editors, service confirmat
   await button('Navigation').click();await button('Sign out').click();
   await expect(page.getByRole('heading',{name:'login',exact:true})).toBeVisible();await page.screenshot({path:ROOT+'screenshots/login.png'});
   await page.getByLabel('username',{exact:true}).fill('admin');await page.getByLabel('password',{exact:true}).fill(password);await button('Enter →').click();
+  await expect(button('Navigation')).toBeVisible();
+  await page.evaluate(async()=>{const session=await(await fetch('/api/session')).json();const r=await fetch('/api/admin/services',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':session.csrf},body:JSON.stringify({template:'notes-lab',label:'Browser notes'})});if(!r.ok)throw Error('Builtin fixture creation failed');});
   await button('Navigation').click();await page.screenshot({path:ROOT+'screenshots/navigation.png'});await button('Control Panel').click();
   await expect(tab('Users')).toHaveAttribute('aria-selected','true');
   const users=page.getByRole('table',{name:'Users'});
   await expect(users.getByRole('columnheader')).toHaveText(['User','Role','Status','Grants','Actions']);
   await expect(users.locator('input,select,form')).toHaveCount(0);
-  await expect(tab('Users')).toBeEnabled();await tab('Users').press('ArrowRight');await expect(tab('Services')).toBeFocused();await tab('Services').press('ArrowLeft');
+  await expect(tab('Users')).toBeEnabled();await tab('Users').press('ArrowRight');await expect(tab('Apps')).toBeFocused();await tab('Apps').press('ArrowLeft');
   await button('New user').click();await expect(page.getByLabel('New username',{exact:true})).toBeFocused();
   await page.getByLabel('New username',{exact:true}).fill('alice');await page.getByLabel('Initial password',{exact:true}).fill(password);await page.getByLabel('Grant Parcels',{exact:true}).check();await button('Create user').click();
   await expect(users.getByRole('row').filter({hasText:'alice'})).toBeVisible();await expect(button('New user')).toBeFocused();
@@ -49,22 +51,22 @@ test('real accounts pages, searchable tables, focused editors, service confirmat
   await expect(users.getByRole('row').filter({hasText:'bob'}).getByRole('cell').nth(0)).toHaveText('admin');await expect(users.getByRole('row').filter({hasText:'bob'}).getByRole('cell').nth(1)).toHaveText('Disabled');
   await button('Edit user bob').click();await page.getByLabel('Disabled bob',{exact:true}).uncheck();await page.getByLabel('Role for bob').selectOption('user');await button('Save bob').click();await expect(users.getByRole('row').filter({hasText:'bob'}).getByRole('cell').nth(1)).toHaveText('Password reset');
   await neutral(page);await page.screenshot({path:ROOT+'screenshots/control-panel-users.png'});
-  await tab('Services').click();
-  const services=page.getByRole('table',{name:'Services'});
-  await expect(services.getByRole('columnheader')).toHaveText(['Service','Template','Mode','Status','Actions']);await expect(services.locator('input,select,form')).toHaveCount(0);
-  await button('New service').click();await expect(page.getByLabel('Service template')).toBeFocused();await page.getByLabel('Service label',{exact:true}).fill('Browser notes');await button('Add service').click();
-  await page.getByLabel('Search services').fill('browser');await expect(services.getByRole('row')).toHaveCount(2);await button('Edit service Browser notes').click();
-  await page.getByLabel('Service label',{exact:true}).fill('Discarded');await button('Back to services').click();await expect(button('Edit service Browser notes')).toBeFocused();
-  await button('Edit service Browser notes').click();await page.getByLabel('Enabled',{exact:true}).uncheck();await page.getByLabel('Service label',{exact:true}).fill('Renamed browser notes');await button('Save service').click();
-  await expect(page.getByRole('status')).toHaveText('Service saved.');await expect(button('Open Renamed browser notes')).toHaveCount(0);await expect(services.getByRole('cell',{name:'Disabled',exact:true})).toBeVisible();
-  await button('Edit service Renamed browser notes').click();await button('Remove service').click();await expect(page.getByRole('alertdialog')).toContainText('Renamed browser notes');await expect(button('Cancel removal')).toBeFocused();await page.keyboard.press('Escape');await expect(button('Remove service')).toBeFocused();
-  await button('Remove service').click();await expect(tab('Users')).toBeDisabled();await expect(button('Back to services')).toBeDisabled();await button('Confirm removal').focus();await page.keyboard.press('Tab');await expect(button('Cancel removal')).toBeFocused();await button('Cancel removal').click();await expect(page.getByLabel('Service label')).toHaveValue('Renamed browser notes');
-  await button('Remove service').click();await button('Confirm removal').click();await expect(page.getByRole('status')).toHaveText('Service removed.');await expect(button('New service')).toBeFocused();
-  await page.getByLabel('Search services').fill('');await neutral(page);await page.screenshot({path:ROOT+'screenshots/control-panel-services.png'});
+  await tab('Apps').click();
+  const apps=page.getByRole('table',{name:'Apps'});
+  await expect(apps.getByRole('columnheader')).toHaveText(['App','Template','Mode','Status','Actions']);await expect(apps.locator('input,select,form')).toHaveCount(0);
+  // Existing builtins remain editable/removable; web creation is covered by webapps.test.mjs.
+  await page.getByLabel('Search apps').fill('browser');await expect(apps.getByRole('row')).toHaveCount(2);await button('Edit app Browser notes').click();
+  await page.getByLabel('App label',{exact:true}).fill('Discarded');await button('Back to apps').click();await expect(button('Edit app Browser notes')).toBeFocused();
+  await button('Edit app Browser notes').click();await page.getByLabel('Enabled',{exact:true}).uncheck();await page.getByLabel('App label',{exact:true}).fill('Renamed browser notes');await button('Save app').click();
+  await expect(page.getByRole('status')).toHaveText('App saved.');await expect(button('Open Renamed browser notes')).toHaveCount(0);await expect(apps.getByRole('cell',{name:'Disabled',exact:true})).toBeVisible();
+  await button('Edit app Renamed browser notes').click();await button('Remove app').click();await expect(page.getByRole('alertdialog')).toContainText('Renamed browser notes');await expect(button('Cancel removal')).toBeFocused();await page.keyboard.press('Escape');await expect(button('Remove app')).toBeFocused();
+  await button('Remove app').click();await expect(tab('Users')).toBeDisabled();await expect(button('Back to apps')).toBeDisabled();await button('Confirm removal').focus();await page.keyboard.press('Tab');await expect(button('Cancel removal')).toBeFocused();await button('Cancel removal').click();await expect(page.getByLabel('App label')).toHaveValue('Renamed browser notes');
+  await button('Remove app').click();await button('Confirm removal').click();await expect(page.getByRole('status')).toHaveText('App removed.');await expect(button('Add app')).toBeFocused();
+  await page.getByLabel('Search apps').fill('');await neutral(page);await page.screenshot({path:ROOT+'screenshots/control-panel-apps.png'});
   await tab('System').click();await expect(page.getByRole('table',{name:'Resource limits'})).toBeVisible();await expect(page.getByText('Resident memory')).toBeVisible();await expect(page.locator('.settings-body')).not.toContainText('"sessionsPerUser"');await button('Refresh diagnostics').click();await expect(button('Refresh diagnostics')).toBeEnabled();await neutral(page);await page.screenshot({path:ROOT+'screenshots/control-panel-system.png'});
   await page.setViewportSize({width:390,height:844});
-  for(const name of ['Users','Services','System']){await tab(name).click();await narrow(page);await page.screenshot({path:ROOT+`screenshots/control-panel-${name.toLowerCase()}-narrow.png`});}
-  await page.setViewportSize({width:320,height:700});await tab('Services').click();await narrow(page);const scroller=page.getByRole('region',{name:'Services table'});assert.equal(await scroller.evaluate(el=>el.scrollWidth>el.clientWidth),true);await button('Edit service Notes Lab').click();await expect(page.getByLabel('Service label')).toBeFocused();await narrow(page);await button('Remove service').click();await narrow(page);await page.keyboard.press('Escape');await page.keyboard.press('Escape');await expect(button('Edit service Notes Lab')).toBeFocused();
+  for(const name of ['Users','Apps','System']){await tab(name).click();await narrow(page);await page.screenshot({path:ROOT+`screenshots/control-panel-${name.toLowerCase()}-narrow.png`});}
+  await page.setViewportSize({width:320,height:700});await tab('Apps').click();await narrow(page);const scroller=page.getByRole('region',{name:'Apps table'});assert.equal(await scroller.evaluate(el=>el.scrollWidth>el.clientWidth),true);await button('Edit app Notes Lab').click();await expect(page.getByLabel('App label')).toBeFocused();await narrow(page);await button('Remove app').click();await narrow(page);await page.keyboard.press('Escape');await page.keyboard.press('Escape');await expect(button('Edit app Notes Lab')).toBeFocused();
   await tab('Users').click();await button('New user').click();await narrow(page);await page.keyboard.press('Escape');await button('Close settings').click();await expect(button('Navigation')).toBeFocused();await page.setViewportSize({width:390,height:844});
   await button('Navigation').click();await button('Sign out').click();
   await page.getByLabel('username',{exact:true}).fill('alice');await page.getByLabel('password',{exact:true}).fill(password);await button('Enter →').click();

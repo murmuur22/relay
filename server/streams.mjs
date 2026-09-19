@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import {launchBrowser,routeWeb} from './web-browser.mjs';
 import { readFile, writeFile, rename } from "node:fs/promises";
 const virtualKey = (key) =>
   ({
@@ -37,7 +37,11 @@ export class Manager {
       for (const w of JSON.parse(
         await readFile(this.runtime + "/layout.json", "utf8"),
       ))
-        if (this.apps.some((a) => a.id === w.appId)) this.windows.set(w.id, w);
+        {
+          const app=this.apps.find(a=>a.id===w.appId);
+          if(!app||w.id!==app.id)continue;
+          this.windows.set(app.id,{...this.windowFor(app),x:number(w.x,0,4096,60),y:number(w.y,0,4096,80),width:number(w.width,320,1600,800),height:number(w.height,200,1000,500),visible:typeof w.visible==='boolean'?w.visible:true,focused:false});
+        }
     } catch {}
   }
   persist() {
@@ -50,6 +54,7 @@ export class Manager {
     this.persistence.queue=this.persistQueue;
     return this.persistQueue;
   }
+  windowFor(app){return {id:app.id,appId:app.id,title:app.label,mode:app.mode,x:app.id==='signal-lab'?120:60,y:80,width:800,height:500,visible:true,focused:false,...(app.kind==='web'?(app.mode==='native'?{url:app.address,external:true,openMode:app.openMode}:{}):(app.url?{url:app.url}:{}))};}
   async open(appId) {
     const app = this.apps.find((a) => a.id === appId);
     if (!app) throw Error("Unknown registered app");
@@ -57,19 +62,7 @@ export class Manager {
     if (this.closed) throw Error('Session closed');
     if (!w) {
       if(app.mode==='stream')this.checkQuota?.();
-      w = {
-        id: app.id,
-        appId,
-        title: app.label,
-        mode: app.mode,
-        x: appId === "signal-lab" ? 120 : 60,
-        y: 80,
-        width: 800,
-        height: 500,
-        visible: true,
-        focused: false,
-        ...(app.url ? { url: app.url } : {}),
-      };
+      w = this.windowFor(app);
       this.windows.set(w.id, w);
     }
     return this.patch(w.id, { visible: true, focused: true });
@@ -109,10 +102,13 @@ export class Manager {
   }
   async ensure(w) {
     this.opening ??= new Map();
-    if (this.windows.get(w.id) !== w) return null;
+    if (this.closed || this.windows.get(w.id) !== w) return null;
     if (this.resources.has(w.id)) return this.resources.get(w.id);
     if (this.opening.has(w)) return this.opening.get(w);
-    const promise = this.createResource(w).then(async (r) => {
+    this.creations ??= new Map();
+    const controller = new AbortController();
+    this.creations.set(w, controller);
+    const promise = this.createResource(w, controller.signal).then(async (r) => {
       if (this.windows.get(w.id) !== w) {
         r.disposed = true;
         await r.context.close();
@@ -126,24 +122,30 @@ export class Manager {
       return await promise;
     } finally {
       this.opening.delete(w);
+      this.creations.delete(w);
     }
   }
-  async createResource(w) {
+  async createResource(w, signal) {
     if (this.resources.has(w.id)) return this.resources.get(w.id);
     if (!this.browserPromise)
-      this.browserPromise = chromium.launch({
-        headless: true,
-        chromiumSandbox: true,
-      });
+      this.browserPromise = launchBrowser();
     const browser = await this.browserPromise;
+    signal?.throwIfAborted();
     const context = await browser.newContext({
       viewport: { width: w.width, height: w.height },
       serviceWorkers: "block",
       acceptDownloads: false,
     });
+    let closing;
+    const closeContext = () => closing ??= context.close().catch(() => {});
+    const abort = () => { void closeContext(); };
+    signal?.addEventListener('abort', abort, {once:true});
     try {
-      const url = `http://relay-synthetic.invalid/${w.appId}`;
-      await context.route("**/*", (route) =>
+      signal?.throwIfAborted();
+      const app=this.apps.find(a=>a.id===w.appId);
+      const url = app?.kind==='web'?app.address:`http://relay-synthetic.invalid/${w.appId}`;
+      if(app?.kind==='web')await routeWeb(context,app,this.transport,signal);
+      else await context.route("**/*", (route) =>
         route.request().url() === url &&
         route.request().resourceType() === "document"
           ? route.fulfill({ contentType: "text/html", body: this.synthetic(w) })
@@ -154,7 +156,7 @@ export class Manager {
       context.on("page", (p) => {
         if (p !== page) p.close().catch(() => {});
       });
-      await page.goto(url);
+      await page.goto(url,{waitUntil:'domcontentloaded',timeout:10000});
       const cdp = await context.newCDPSession(page);
       await cdp.send("Page.enable");
       const r = {
@@ -201,8 +203,10 @@ export class Manager {
       page.on("crash", () => {r.failed=true;this.state(r, "failed", "Browser page failed");});
       return r;
     } catch (error) {
-      await context.close().catch(() => {});
+      await closeContext();
       throw error;
+    } finally {
+      signal?.removeEventListener('abort', abort);
     }
   }
   synthetic(w) {
@@ -459,6 +463,7 @@ export class Manager {
   async remove(id) {
     const w = this.windows.get(id);
     this.windows.delete(id);
+    this.creations?.get(w)?.abort();
     // Creation reports its failure to attach; closing still completes cleanup.
     await Promise.all([this.dispose(id), this.opening?.get(w)?.catch(() => {})]);
     await this.persist();
@@ -512,6 +517,7 @@ export class Manager {
     this.closed=true;
     // Invalidate window identity before waiting for in-flight Chromium creation.
     this.windows.clear();
+    for (const controller of this.creations?.values() || []) controller.abort();
     await Promise.allSettled([...(this.opening?.values()||[])]);
     for (const id of [...this.resources.keys()]) await this.dispose(id);
     if (this.browserPromise) await (await this.browserPromise).close();

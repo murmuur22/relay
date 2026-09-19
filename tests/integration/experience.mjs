@@ -18,7 +18,8 @@ await mkdir(path.join(ROOT,'screenshots'),{recursive:true});
 try{
  await browserLogin(page,g.origin,runtime);
  await expect(page).toHaveTitle('Private desktop');
- await expect(page.locator('body')).not.toContainText(/relay|after wicked/i);
+ await expect(page.locator('header')).not.toContainText(/relay|after wicked/i);
+ await expect(page.locator('footer')).not.toContainText(/relay|after wicked/i); // Scoped health observations legitimately name Relay.
  await expect(page.locator('footer .maker')).toHaveText('Made by Wicked Evil Incorporated');
  await expect(page.locator('.desktop-signature')).toHaveCount(0);
  const locked=await fetch(g.origin);

@@ -193,7 +193,9 @@ test(
           deltaX: 0,
         }),
       );
-      await sleep(150);
+      // CDP wheel dispatch and compositor scroll are asynchronous, especially when
+      // other browser tests run concurrently. Wait for the actual effect.
+      await g.manager.resources.get(b.id).page.waitForFunction(() => scrollY > 0, null, {timeout:3000});
       assert.ok(
         (await g.manager.resources.get(b.id).page.evaluate(() => scrollY)) > 0,
       );
