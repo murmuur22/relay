@@ -1,3 +1,4 @@
+import {VERSION} from '../version.js';
 import express from 'express';
 import {publicApp,webConfig} from './webapps.mjs';
 import {Transport} from './transport.mjs';
@@ -116,7 +117,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   for(const s of sessions.values()){for(const response of s.responses)if(response.serviceId===req.params.id)response.destroy();s.manager.apps=accounts.apps(accounts.state.users.find(u=>u.id===s.userId));await s.manager.remove(req.params.id);}
   res.json(result);
  }));
- app.get('/api/admin/diagnostics',(req,res)=>res.json({version:'0.1.0',uptimeSeconds:Math.floor(process.uptime()),sessions:sessions.size,users:accounts.state.users.length,services:accounts.state.services.length,streams:[...sessions.values()].reduce((n,s)=>n+s.manager.resources.size,0),memory:process.memoryUsage(),limits:{sessionsPerUser:4,sessionsGlobal:16,streamsPerUser:2,streamsGlobal:8},externalConnections:'HTTP(S) web apps with approved origins; WebSockets and streamed file transfers unsupported'}));
+ app.get('/api/admin/diagnostics',(req,res)=>res.json({version:VERSION,uptimeSeconds:Math.floor(process.uptime()),sessions:sessions.size,users:accounts.state.users.length,services:accounts.state.services.length,streams:[...sessions.values()].reduce((n,s)=>n+s.manager.resources.size,0),memory:process.memoryUsage(),limits:{sessionsPerUser:4,sessionsGlobal:16,streamsPerUser:2,streamsGlobal:8},externalConnections:'HTTP(S) web apps with approved origins; WebSockets and streamed file transfers unsupported'}));
  app.post('/api/logout',wrap(async(req,res)=>{await revoke(req.session);res.clearCookie('relay_session',{path:'/',httpOnly:true,sameSite:'strict'});res.json({ok:true});}));
  const operation=fn=>wrap(async(req,res)=>{try{res.json(await fn(req,req.session.manager));}catch(e){throw fail(e.status||400,e.status?e.message:'Invalid window operation');}});
  const permit=(req,id)=>{if(!accounts.allowed(req.session.user,accounts.state.services.find(a=>a.id===id)))throw fail(403,'Service access denied');};

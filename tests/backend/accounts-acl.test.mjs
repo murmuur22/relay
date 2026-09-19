@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import {VERSION} from '../../version.js';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -35,7 +36,7 @@ test('admin user lifecycle, native/REST grants, profile passwords, registry and 
  assert.equal((await client(g.origin,granted)('/session')).status,401);
  assert.equal((await a('/admin/services/'+service.id,'DELETE')).status,200);
  assert.equal((await a('/admin/services').then(r=>r.json())).some(x=>x.id===service.id),false);
- const diag=await a('/admin/diagnostics').then(r=>r.json());assert.equal(diag.version,'0.1.0');assert.ok(diag.sessions>=1);assert.ok(!JSON.stringify(diag).includes(admin.cookie));
+ const diag=await a('/admin/diagnostics').then(r=>r.json());assert.equal(diag.version,VERSION);assert.ok(diag.sessions>=1);assert.ok(!JSON.stringify(diag).includes(admin.cookie));
  assert.equal((await a('/admin/users/'+alice.id,'PATCH',{password})).status,200);
  const reset=await authenticate(g.origin,runtime,'alice');assert.equal(reset.s.user.mustChange,true);assert.deepEqual(reset.s.apps,[]);
  assert.equal((await client(g.origin,reset)('/windows','POST',{appId:'parcels'})).status,403);

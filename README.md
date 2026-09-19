@@ -14,6 +14,10 @@ A small place for your digital things. The desktop keeps the character of Robbie
 
 Only trusted first-party integrations are served on Relay's own origin. Admins can now register HTTP(S) web apps using **Control Panel → Apps → Add app**: choose Native or Streamed, enter name/address/icon, test and preview the connection, select access, then review and save. Native web apps run directly in the visitor's browser (sandboxed desktop frame or separate tab); streamed web apps run in isolated Relay browser contexts with approved-origin outbound requests. Existing bundled entries and grants are preserved. No Clippings integration was added. See [Web apps and connection boundaries](docs/web-apps.md) before connecting sensitive apps.
 
+## Version and changelog
+
+The current source version is defined in `package.json` and shared through `version.js`. It appears quietly in the desktop/login footer, in every user's Profile settings (including narrow screens), and in administrator System diagnostics. See [CHANGELOG.md](CHANGELOG.md) for the full versioned history and update policy. Version numbers do not imply production deployment; new changes are recorded under Unreleased until grouped into a version.
+
 ## Public source checkout
 
 Repository: https://github.com/murmuur22/relay

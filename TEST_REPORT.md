@@ -1,6 +1,12 @@
 # Relay prototype verification
 
-## Web apps wizard and status preference — current verification
+## Version 0.2.0 publication — current verification
+
+`package.json` and the root lockfile now identify version **0.2.0**. `version.js` is the shared source for footer/Profile text and backend System diagnostics. `CHANGELOG.md` backfills the 0.1.0 public baseline and groups the subsequent account, settings and web-app work under 0.2.0, with an Unreleased section for ongoing changes. No historical micro-releases or production deployment are implied.
+
+The build and full suite passed locally and from a fresh Git-index export with dependency setup, without private fonts or runtime state: **58 backend tests, 26 frontend tests and real hybrid integration**. The new browser regression checks footer text/visibility, Profile on desktop/narrow widths, System diagnostics and package/lockfile/changelog agreement. Existing diagnostics assertions now use the shared version rather than a stale literal. Desktop/Profile screenshots were visually inspected. Independent source review found no blocking issue. Runtime secrets, personal data, private planning and unverified fonts remain excluded from publication.
+
+## Web apps wizard and status preference — previous verification
 
 The Add app wizard registers HTTP(S) native or streamed apps, with name/address/icon, mode-specific options/checks/previews, access selection and review. UI terminology is Apps. Profile's Show app status preference defaults on, persists per account, hides dots/text when off and skips client status probes. Existing bundled entries, grants and account data remain compatible.
 

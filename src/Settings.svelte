@@ -1,4 +1,5 @@
 <script>
+ import {VERSION} from '../version.js';
  import {onMount,tick} from 'svelte';
  import AppWizard from './AppWizard.svelte';
  import {webAddress,origins} from './webapps.js';
@@ -67,7 +68,7 @@
     <fieldset disabled={busy} class="form-grid">
      <legend>Account & security</legend>
      <label>Display name<input bind:value={displayName} required maxlength="64"/></label>
-     <div class="account-summary"><span>Signed in as</span><strong>{user.username}</strong><small>{user.role}</small></div>
+     <div class="account-summary"><span>Signed in as</span><strong>{user.username}</strong><small>{user.role}</small><small class="profile-version">Version {VERSION}</small></div>
      <label>Current password<input type="password" autocomplete="current-password" bind:value={currentPassword} required maxlength="128"/></label>
      <label>New password<input type="password" autocomplete="new-password" bind:value={password} minlength="14" maxlength="128" required={user.mustChange}/></label>
      <p class="full-width muted">Leave the new password blank to keep it. Password changes sign out all your sessions.</p>
