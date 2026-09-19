@@ -1,6 +1,6 @@
 {
   "name": "we-relay",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,11 @@
     "setup": "node tools/setup.mjs",
     "setup:standalone": "node tools/setup-standalone.mjs",
     "build": "vite build",
+    "setup:updater": "npm --prefix updater/ui ci --ignore-scripts && npm --prefix updater/ui run build",
+    "build:updater": "npm --prefix updater/ui run build",
+    "test:updater": "python3 -m unittest discover -s updater/tests -v && npm --prefix updater/ui run test:unit && npm --prefix updater/ui test",
+    "start:updater-web": "node updater/web/index.mjs",
+    "start:updater-broker": "python3 -m updater.broker.server",
     "start": "node server/index.mjs",
     "open": "node tools/open-local.mjs",
     "test:backend": "node --test tests/backend/*.test.mjs",
@@ -16,13 +21,14 @@
   },
   "dependencies": {
     "express": "5.2.1",
-    "ws": "8.21.3",
     "playwright": "1.63.0",
-    "svelte": "5.57.0"
+    "svelte": "5.57.0",
+    "three": "0.186.0",
+    "ws": "8.21.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@sveltejs/vite-plugin-svelte": "7.3.0",
-    "vite": "8.3.0",
-    "@playwright/test": "1.63.0"
+    "vite": "8.3.0"
   }
 }

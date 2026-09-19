@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import net from 'node:net';
+import http from 'node:http';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {createGateway} from '../../server/gateway.mjs';
+import {authenticate,client,password} from '../auth-helper.mjs';
+async function freePort(){const s=net.createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const port=s.address().port;await new Promise(r=>s.close(r));return port;}
+test('independent UI has real cookie/CSRF auth, filtered Relay reauth, survives Relay downtime read-only',async t=>{
+ const {createUpdaterWeb}=await import('../../updater/web/server.mjs');
+ const root=await mkdtemp(tmpdir()+'/relay-web-'),port=await freePort(),uiOrigin=`http://127.0.0.1:${port}`;await writeFile(root+'/key',Buffer.alloc(32,7),{mode:0o600});
+ const ticket='t'.repeat(64),token='r'.repeat(64),authorization='a'.repeat(64);let consumed=false;const calls=[];
+ const broker=net.createServer(s=>{let text='';s.on('data',b=>{text+=b;if(!text.includes('\n'))return;const r=JSON.parse(text);calls.push(r);let result;
+ if(r.action==='issue-ui')result={ticket,expiresAt:Date.now()+60000};else if(r.action==='issue-action')result={authorization,expiresAt:Date.now()+60000};else if(r.action==='redeem-ui'&&!consumed&&r.params.ticket===ticket&&r.params.origin===uiOrigin){consumed=true;result={token,userId:'test-user',expiresAt:Math.floor(Date.now()/1000)+3600,interfaceAnimations:false};}else if(['state','check','start'].includes(r.action)&&r.params.token===token)result={protocol:1,mode:'observe',currentVersion:'0.3.0',available:[],job:null,history:[],canInstall:false,reason:'Protocol fixture only'};
+ s.end(JSON.stringify(result?{ok:true,result}:{ok:false,error:'rejected'})+'\n');});});await new Promise(r=>broker.listen(root+'/socket',r));
+ const g=await createGateway({port:0,profile:'standalone',runtime:root+'/relay',updater:{socketPath:root+'/socket',keyFile:root+'/key',uiOrigin}});let closed=false;
+ const web=await createUpdaterWeb({uiOrigin,relayOrigin:g.origin,socketPath:root+'/socket',staticDir:root});
+ t.after(async()=>{await web.close();if(!closed)await g.close();await new Promise(r=>broker.close(r));await rm(root,{recursive:true,force:true});});
+ const request=(path,method='GET',body,headers={})=>fetch(uiOrigin+'/updater/api'+path,{method,headers:{Origin:uiOrigin,'Content-Type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})});
+ assert.equal((await (await request('/auth')).json()).authenticated,false);assert.equal((await request('/state')).status,401);
+ assert.equal((await request('/exchange','POST',{ticket},{Origin:'http://evil.test'})).status,403);assert.equal(await new Promise(resolve=>http.get(uiOrigin+'/updater/api/auth',{headers:{Host:'evil.test'}},res=>{res.resume();resolve(res.statusCode);})),403);
+ let r=await request('/exchange','POST',{ticket});assert.equal(r.status,200);const cookie=r.headers.get('set-cookie');assert.match(cookie,/HttpOnly/i);assert.match(cookie,/SameSite=Strict/i);assert.match(cookie,/Path=\/updater\//i);const sessionCookie=cookie.split(';')[0],{csrf,interfaceAnimations}=await r.json();assert.equal(interfaceAnimations,false);
+ assert.equal((await request('/exchange','POST',{ticket})).status,403);assert.equal((await request('/check','POST',{}, {cookie:sessionCookie})).status,403);
+ const headers={cookie:sessionCookie,'X-CSRF-Token':csrf};assert.equal((await request('/state','GET',null,headers)).status,200);
+ assert.equal((await request('/install','POST',{version:'v1.2.3',password,confirmed:true},headers)).status,401);
+ const auth=await authenticate(g.origin,root+'/relay'),relay=client(g.origin,auth);const both={...headers,cookie:sessionCookie+'; '+auth.cookie+'; other_private=must-not-forward'};
+ const seen=[];g.app.use;g.server.prependListener('request',req=>{if(req.url.startsWith('/api/'))seen.push({url:req.url,cookie:req.headers.cookie});});
+ assert.equal((await request('/install','POST',{version:'v1.2.3',password:'wrong',confirmed:true},both)).status,403);assert.equal((await relay('/session')).status,200);
+ assert.equal((await request('/install','POST',{version:'v1.2.3',password,confirmed:true},both)).status,200);
+ assert.ok(seen.filter(r=>r.url==='/api/updater/authorize').every(r=>r.cookie===auth.cookie));assert.equal(calls.at(-1).action,'start');assert.equal(calls.at(-1).params.authorization,authorization);
+ await g.close();closed=true;assert.equal((await request('/state','GET',null,headers)).status,200);assert.equal((await request('/install','POST',{version:'v1.2.3',password,confirmed:true},both)).status,503);
+ assert.equal((await request('/logout','POST',{},headers)).status,200);assert.equal((await request('/state','GET',null,headers)).status,401);
+});

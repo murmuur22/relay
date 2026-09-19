@@ -1,0 +1,133 @@
+name: Verified Linux x64 prerelease
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Existing public prerelease tag to qualify; does not publish or promote'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    # Configure required human reviewers before publishing.
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified upstream ref
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26.8.1'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+      - name: Validate exact stable-form tag against package and lockfile
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 -m updater.release.validate_tag "$RELEASE_TAG"
+      - name: Build both browser bundles without dependency lifecycle scripts
+        run: |
+          npm ci --ignore-scripts
+          npm --prefix updater/ui ci --ignore-scripts
+          npm run build
+          npm --prefix updater/ui run build
+          python3 -m pip install Pillow==11.3.0
+      - name: Install matching Linux Chromium with system dependencies
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-browsers
+        run: |
+          node node_modules/playwright/cli.js install --with-deps chromium
+          # Hosted Ubuntu AppArmor blocks user namespaces by default. Permit
+          # namespaces on this disposable runner; Chromium's sandbox stays ON.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Linux standalone and independent maintenance qualification
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-browsers
+        run: |
+          export RELAY_ICON_PYTHON="$(command -v python3)"
+          python3 -m unittest discover -s updater/tests -v
+          npm --prefix updater/ui run test:unit
+          node --test --test-timeout=70000 tests/backend/updater-web.test.mjs tests/backend/updater-bridge.test.mjs
+          node --test --test-timeout=90000 updater/ui/tests/http-smoke.mjs updater/ui/tests/fixture-smoke.mjs
+          node deploy/verify-standalone.mjs
+      - name: Package standalone runtime and independent control plane
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          npm prune --omit=dev --ignore-scripts
+          python3 -m updater.release.build --source "$GITHUB_WORKSPACE" --browsers "$RUNNER_TEMP/relay-browsers" --output "$RUNNER_TEMP/relay-release" --version "$RELEASE_TAG"
+      - name: Attest manifest binding BOTH payload hashes and sizes
+        id: attest
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        with:
+          subject-path: ${{ runner.temp }}/relay-release/relay-release.json
+      - name: Verify downloaded-bundle protocol without GitHub login
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp -- "$BUNDLE" "$RUNNER_TEMP/relay-release/relay-release.attestation.json"
+          GH_ANON_HOME="$(mktemp -d)"
+          trap 'rm -rf -- "$GH_ANON_HOME"' EXIT
+          env -i PATH="$PATH" LANG=C.UTF-8 HOME="$GH_ANON_HOME" GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 gh attestation verify "$RUNNER_TEMP/relay-release/relay-release.json" --bundle "$RUNNER_TEMP/relay-release/relay-release.attestation.json" --repo murmuur22/relay --signer-workflow murmuur22/relay/.github/workflows/release.yml --source-ref "refs/tags/$RELEASE_TAG" --deny-self-hosted-runners
+      - name: Publish public PRERELEASE, never latest (promotion is a separate human gate)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" --repo murmuur22/relay --verify-tag --draft --prerelease --latest=false --title "$RELEASE_TAG — Linux x64 qualification prerelease" --generate-notes "$RUNNER_TEMP/relay-release/relay-release.json" "$RUNNER_TEMP/relay-release/relay-release.attestation.json" "$RUNNER_TEMP/relay-release/relay-linux-x64.tar.gz" "$RUNNER_TEMP/relay-release/relay-updater-linux-x64.tar.gz"
+          gh release edit "$RELEASE_TAG" --repo murmuur22/relay --draft=false --prerelease --latest=false
+  qualify:
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment: release
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ inputs.version }}
+    steps:
+      - name: Reject non-stable-form qualification target
+        shell: bash
+        run: '[[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]'
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.version }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26.8.1'
+      - name: Prepare disposable system prerequisites (no root npm)
+        run: |
+          python3 -m updater.release.validate_tag "$RELEASE_TAG"
+          npm ci --ignore-scripts
+          node node_modules/playwright/cli.js install-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+          sudo install -m 0755 "$(command -v node)" /usr/bin/node
+          /usr/bin/node --version
+          /usr/bin/gh --version
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Download the four PUBLIC assets with no GitHub login
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/public-release"
+          for asset in relay-release.json relay-release.attestation.json relay-linux-x64.tar.gz relay-updater-linux-x64.tar.gz; do
+            env -i PATH="$PATH" curl -q --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --max-filesize 1073741824 --output "$RUNNER_TEMP/public-release/$asset" "https://github.com/murmuur22/relay/releases/download/$RELEASE_TAG/$asset"
+          done
+      - name: Verify real provenance and qualify signed initial install on THIS disposable runner
+        run: |
+          sudo env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME=/nonexistent GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted RELAY_DISPOSABLE_SYSTEMD=I_ACCEPT_DISPOSABLE_HOST_MUTATION /usr/bin/python3 deploy/qualify-systemd.py --release-dir "$RUNNER_TEMP/public-release" --version "$RELEASE_TAG" --apply
+      # This job deliberately has no release-write permission or promotion step.

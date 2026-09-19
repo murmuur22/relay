@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import net from 'node:net';
+import {readFile,writeFile,rm} from 'node:fs/promises';
+import {createHmac,randomBytes} from 'node:crypto';
+import {createGateway,ROOT} from '../../server/gateway.mjs';
+import {createUpdaterWeb} from '../../updater/web/server.mjs';
+import {brokerRequest} from '../../updater/web/broker-client.mjs';
+import {authenticate,client,password} from '../auth-helper.mjs';
+async function freePort(){const s=net.createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const p=s.address().port;await new Promise(r=>s.close(r));return p;}
+async function waitFor(fn,ms=30000){const end=Date.now()+ms;while(Date.now()<end){const v=await fn();if(v)return v;await new Promise(r=>setTimeout(r,40));}throw Error('Bounded fixture deadline exceeded');}
+test('real broker + Relay HMAC + web auth: single use, target binding, actual install/rollback and downtime monitoring',{timeout:90000},async t=>{
+ const uiOrigin=`http://127.0.0.1:${await freePort()}`;
+ const script="from updater.fixtures.harness import Sandbox\nfrom updater.broker.auth import atomic_json\nimport sys,json\nbox=Sandbox()\ntry:\n box.config['uiOrigin']=sys.argv[1]\n atomic_json(box.config_path,box.config)\n box.start()\n print(json.dumps({'root':str(box.root),'config':box.config}),flush=True)\n sys.stdin.readline()\nfinally:\n box.close()";
+ const process=spawn('python3',['-u','-c',script,uiOrigin],{cwd:ROOT,stdio:['pipe','pipe','pipe']});let stdout='',stderr='';process.stdout.on('data',b=>stdout+=b);process.stderr.on('data',b=>stderr+=b);let g,web;
+ t.after(async()=>{await web?.close();await g?.close();process.stdin.end('\n');if(process.exitCode===null){const timer=setTimeout(()=>process.kill('SIGKILL'),22000);await once(process,'exit');clearTimeout(timer);}});
+ const line=await waitFor(()=>{if(process.exitCode!==null)throw Error('Fixture startup failed: '+stderr);return stdout.includes('\n')&&stdout.split('\n')[0];},15000),{root,config}=JSON.parse(line);
+ const options={port:0,runtime:root+'/relay-integration',profile:'standalone',updater:{socketPath:config.socketPath,keyFile:config.bridgeKeyFile,uiOrigin},maintenanceFile:config.maintenance};
+ g=await createGateway(options);web=await createUpdaterWeb({uiOrigin,relayOrigin:g.origin,socketPath:config.socketPath});let auth=await authenticate(g.origin,options.runtime),api=client(g.origin,auth);
+ const launch=await (await api('/updater/launch','POST',{})).json(),ticket=new URL(launch.url).hash.slice(1);
+ const req=(path,method='GET',body,headers={})=>fetch(uiOrigin+'/updater/api'+path,{method,headers:{Origin:uiOrigin,'Content-Type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})});
+ let r=await req('/exchange','POST',{ticket});assert.equal(r.status,200);const cookie=r.headers.get('set-cookie').split(';')[0],{csrf}=await r.json(),headers={cookie:cookie+'; '+auth.cookie,'X-CSRF-Token':csrf};
+ assert.equal((await req('/exchange','POST',{ticket})).status,403);
+ const rpc=(action,params)=>brokerRequest(config.socketPath,{action,params});await assert.rejects(rpc('redeem-ui',{ticket,origin:uiOrigin}));await assert.rejects(rpc('state',{token:ticket}));
+ const key=await readFile(config.bridgeKeyFile);const sign=(action,params,timestamp=Math.floor(Date.now()/1000))=>{const nonce=randomBytes(16).toString('hex'),payload=Buffer.from(JSON.stringify(params)).toString('base64');return {action,timestamp,nonce,payload,mac:createHmac('sha256',key).update(`${timestamp}\n${nonce}\n${action}\n${payload}`).digest('hex')};};
+ const envelope=sign('issue-ui',{userId:'other-admin',interfaceAnimations:false,relayVersion:'0.3.0'}),issued=await brokerRequest(config.socketPath,envelope);await assert.rejects(brokerRequest(config.socketPath,envelope));await assert.rejects(brokerRequest(config.socketPath,{...envelope,mac:'0'.repeat(64)}));await assert.rejects(brokerRequest(config.socketPath,sign('issue-ui',{userId:'other-admin',interfaceAnimations:false},Math.floor(Date.now()/1000)-120)));
+ await assert.rejects(rpc('redeem-ui',{ticket:issued.ticket,origin:'http://evil.test'}));const other=await rpc('redeem-ui',{ticket:issued.ticket,origin:uiOrigin});
+ const authorization=await (await api('/updater/authorize','POST',{action:'install',version:'v0.3.1',password,confirmed:true})).json();await assert.rejects(rpc('start',{token:other.token,authorization:authorization.authorization,version:'v0.3.1'}));
+ r=await req('/check','POST',{},headers);assert.equal(r.status,200);const checked=await r.json();assert.equal(checked.mode,'fixture');assert.ok(checked.available.some(v=>v.version==='v0.3.1'&&v.verified));
+ r=await req('/install','POST',{version:'v0.3.1',password,confirmed:true},headers);assert.equal(r.status,200);
+ const state=async()=>{const r=await req('/state','GET',null,headers);assert.equal(r.status,200);return r.json();};
+ const success=await waitFor(async()=>{const s=await state();return ['succeeded','failed','rolled-back','rollback-failed'].includes(s.job?.phase)&&s;});assert.equal(success.job.phase,'succeeded');assert.equal(success.currentVersion,'v0.3.1');assert.ok(success.job.downloadedBytes>500000);assert.equal(success.job.downloadedBytes,success.job.totalBytes);
+ // Real gateway shutdown: existing updater cookie can still monitor broker state.
+ const relayPort=g.server.address().port;await g.close();g=null;assert.equal((await state()).job.phase,'succeeded');assert.equal((await req('/install','POST',{version:'v0.3.2',password,confirmed:true},headers)).status,503);
+ g=await createGateway({...options,port:relayPort});assert.equal((await req('/install','POST',{version:'v0.3.2',password,confirmed:true},headers)).status,401);
+ auth=await authenticate(g.origin,options.runtime);headers.cookie=cookie+'; '+auth.cookie;
+ assert.equal((await req('/install','POST',{version:'v0.3.2',password,confirmed:true},headers)).status,200);
+ const rolled=await waitFor(async()=>{const s=await state();return ['rolled-back','rollback-failed','failed','succeeded'].includes(s.job?.phase)&&s;});assert.equal(rolled.job.phase,'rolled-back');assert.equal(rolled.currentVersion,'v0.3.1');assert.equal(await readFile(config.stateRoot+'/fixture.txt','utf8'),'initial synthetic state');
+ await writeFile(config.maintenance,'test admission');assert.equal((await fetch(g.origin+'/api/session',{headers:{cookie:auth.cookie}})).status,503);assert.equal((await state()).job.phase,'rolled-back');assert.equal((await req('/rollback','POST',{password,confirmed:true},headers)).status,503);await rm(config.maintenance);
+ console.log(JSON.stringify({verification:'real disposable fixture only',install:success.job.phase,bytes:success.job.downloadedBytes,failingCandidate:rolled.job.phase,monitoringThroughRelayDowntime:true}));
+});

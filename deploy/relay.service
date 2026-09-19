@@ -7,14 +7,19 @@ Type=simple
 User=relay
 Group=relay
 WorkingDirectory=/opt/relay/current
-ExecStart=/opt/relay/node/bin/node /opt/relay/current/server/index.mjs
+SupplementaryGroups=relay-updater-socket
+ExecStart=/usr/bin/node /opt/relay/current/server/index.mjs
 Environment=NODE_ENV=production
 Environment=RELAY_PROFILE=standalone
 Environment=RELAY_STATE_DIR=/var/lib/relay
 Environment=RELAY_HOSTNAME=localhost
 Environment=PORT=4190
 Environment=RELAY_ICON_PYTHON=/usr/bin/python3
-Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/relay/browsers
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/relay/current/browsers
+# Trusted operator-only optional file: set all three RELAY_UPDATER_* bridge
+# settings together. Never expose the bridge key to relay-updater-web.
+EnvironmentFile=-/etc/relay-updater/relay.env
+Environment=RELAY_MAINTENANCE_FILE=/var/lib/relay-updater-control/maintenance
 StateDirectory=relay
 StateDirectoryMode=0700
 UMask=0077

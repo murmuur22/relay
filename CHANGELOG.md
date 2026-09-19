@@ -7,6 +7,29 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 No changes recorded yet.
 
+## [0.4.0] — 2026-09-19
+
+Release preparation: publication and Linux qualification are separate gates; version metadata alone does not establish deployment readiness.
+
+### Added
+- Administrator Updater now opens a draggable/resizable/minimizable desktop browser for release notes, selection, real status and the shared Three.js chamber. Start update hands the selected release to a separate maintenance tab; only explicit confirmation and a fresh Relay administrator password there can begin installation.
+- Session-scoped, bounded admin-only read/check bridge for desktop browsing, with authority rechecked after broker awaits and no rotation of an existing independent updater session. The system window remains outside editable web-app registration and server stream/window managers.
+- Standalone Three.js transfer chamber with byte-driven fragment assembly, decorative spiral download trails, release notes, server-reported phases/events/history and actual artifact-byte progress. The lazy-loaded renderer respects account/device reduced motion, freezes on connectivity loss and falls back to a static view without WebGL.
+- Separate updater web service and broker, protected maintenance admission, verified staging, matching-state backup/restoration, cancellation before activation and gated interrupted/failed recovery. Disposable fixtures exercise real HTTP payload transfer, Node service activation and readiness-failure rollback; they are not production release evidence.
+- Separate Linux x64 runtime and updater-control-plane release archives, both bound by one GitHub-attested manifest. Verification uses public downloads and a fresh credential-free Sigstore cache, not an operator GitHub login.
+- Inspect-by-default fresh-host installer, dedicated non-login service identities, protected code/key/state, durable maintenance, and guarded hosted systemd qualification. Conflicting installations are refused instead of overwritten. Prerelease publication and stable promotion are separate gates; no production deployment is implied.
+
+### Fixed
+- Stage verified candidates privately inside the install mount before atomic publication, rather than renaming across systemd writable mounts. Restore state contents without replacing the mounted state directory, using bounded no-follow descriptor operations and retaining a durable checkpoint through failure.
+- Both updater surfaces disable installation of the already installed version and explain why.
+- Updater content activates its desktop window without disrupting controls; local close and pending-launch cleanup no longer wait for unrelated application saves. Layout follows the resizable window width, not only the browser viewport.
+- The selected update version survives independent-tab refresh as a validated, non-secret history hint. Missing versions require explicit reselection; hints never authorize or automatically start installation.
+- Open authorization dialogs now disable submission visually when monitoring loses connectivity. New snapshots that revoke action eligibility or change the captured release/job invalidate consent and clear the password, requiring a fresh review instead of reviving an obsolete confirmation.
+- Decorative trail endpoints stay on one traversal across the loop boundary, preventing long flashing spokes as particles reset.
+
+### Verification boundary
+- Local macOS/Chromium development only. Scripted visual previews, real HTTP with protocol doubles, and actual disposable broker/service tests are labelled separately. Production installation, existing-state migration and updater self-updates are not provided by these results.
+
 ## [0.3.0] — 2026-09-19
 
 ### Added

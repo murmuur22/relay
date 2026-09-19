@@ -1,0 +1,36 @@
+# Operator template only. Not installed or Linux-qualified by local tests.
+# relay-updater-web must NOT belong to the Relay bridge-key group.
+# relay-updater-socket permits socket access only, not broker state/key access.
+[Unit]
+Description=Relay independent updater UI (unprivileged)
+After=network.target relay-updater-broker.service
+
+[Service]
+Type=simple
+User=relay-updater-web
+Group=relay-updater-web
+SupplementaryGroups=relay-updater-socket
+WorkingDirectory=/opt/relay-updater
+ExecStart=/usr/bin/node /opt/relay-updater/updater/web/index.mjs --config /etc/relay-updater/web.json
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET
+CapabilityBoundingSet=
+AmbientCapabilities=
+InaccessiblePaths=-/var/lib/relay -/var/lib/relay-updater -/etc/relay-updater/bridge.key
+MemoryMax=256M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

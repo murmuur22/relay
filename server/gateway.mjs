@@ -1,4 +1,8 @@
 import {VERSION} from '../version.js';
+import {UPDATER,systemApps} from './system-apps.mjs';
+import {updaterConfig,updaterRoutes} from './updater.mjs';
+import {lstatSync} from 'node:fs';
+import {isAbsolute} from 'node:path';
 import {Desktop} from './desktop.mjs';
 import {normalizeIcon,iconPython} from './icons.mjs';
 import express from 'express';
@@ -20,7 +24,12 @@ export const APPS=[
  {id:'notes-lab',label:'Notes Lab',mode:'stream',description:'Synthetic editable notes'},
  {id:'signal-lab',label:'Signal Lab',mode:'stream',description:'Synthetic live signals'},
 ];
-export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=false,keepsakesPort=4181,data=ROOT+'.data/keepsakes',sessionMs=8*60*60*1000,profile='development',hostname='127.0.0.1'}={}){
+export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=false,keepsakesPort=4181,data=ROOT+'.data/keepsakes',sessionMs=8*60*60*1000,profile='development',hostname='127.0.0.1',maintenanceFile=process.env.RELAY_MAINTENANCE_FILE,updater}={}){
+ const updaterSettings=updaterConfig(updater,hostname);
+ if(updaterSettings&&Number(new URL(updaterSettings.uiOrigin).port||80)===port)throw Error('Invalid updater configuration: distinct port required');
+ if(maintenanceFile!==undefined&&!isAbsolute(maintenanceFile))throw Error('Invalid maintenance file');
+ const maintenance=()=>{if(!maintenanceFile)return false;try{lstatSync(maintenanceFile);return true;}catch(error){return error.code!=='ENOENT';}};
+ const admit=()=>{if(maintenance())throw fail(503,'Relay is in maintenance. Try again after the update.');};
  iconPython(); // Validate trusted operator configuration before state or listener creation.
  if(!['127.0.0.1','localhost'].includes(hostname))throw Error('Invalid Relay hostname');
  if(!['development','standalone'].includes(profile))throw Error('Invalid Relay profile');
@@ -43,6 +52,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   if(mutation&&queuedWrites>=32)return res.status(429).json({error:'Busy. Try again shortly.'});
   const run=async()=>{
    if(res.destroyed)return;
+   admit();
    if(req.session){const s=getSession(req);if(!s)throw fail(401,'Authentication required');req.session=s;if(mutation&&req.headers['x-csrf-token']!==s.csrf)throw fail(403,'CSRF required');if(req.path.startsWith('/api/admin')&&(s.user.role!=='admin'||s.user.mustChange))throw fail(403,'Admin access required');}
    await fn(req,res);
   };
@@ -68,6 +78,8 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  };
  app.disable('x-powered-by');
  app.use((req,res,next)=>{res.set({'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});if(req.headers.host!==new URL(origin).host||(req.headers.origin&&req.headers.origin!==origin))return res.status(403).json({error:'Invalid Host or Origin'});next();});
+ app.get('/health/ready',(req,res)=>res.json({status:'ready',version:VERSION,maintenance:maintenance()}));
+ app.use((req,res,next)=>{if(maintenance()&&!(['GET','HEAD'].includes(req.method)&&(req.path==='/'||/^\/desktop(?:\/|$)/.test(req.path)||req.path.startsWith('/assets/')||req.path.startsWith('/fonts/'))))return res.status(503).json({error:'Relay is in maintenance. Try again after the update.'});next();});
  app.use('/api',express.json({limit:'16kb'}));
  app.get('/api/auth',(req,res)=>res.json({setup:!!setup,csrf:authCsrf}));
  const authGuard=(req,res,next)=>{if(req.headers.origin!==origin||req.headers['x-csrf-token']!==authCsrf)return res.status(403).json({error:'Origin and CSRF required'});next();};
@@ -85,9 +97,10 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   const s=getSession(req);if(!s)return res.status(401).json({error:'Authentication required'});req.session=s;next();
  });
  app.use('/api',(req,res,next)=>{if(!['GET','HEAD'].includes(req.method)&&(req.headers.origin!==origin||req.headers['x-csrf-token']!==req.session.csrf))return res.status(403).json({error:'Origin and CSRF required'});next();});
- app.get('/api/session',(req,res)=>{const s=req.session;res.json({csrf:s.csrf,user:publicUser(s.user),apps:accounts.apps(s.user).map(publicApp),windows:[...s.manager.windows.values()],limits:{maxStreams:2}});});
- const desktop=new Desktop(runtime,()=>accounts.state.services);
- const desktopAuthority=req=>()=>{const s=getSession(req);if(!s||s!==req.session)throw fail(401,'Authentication required');return accounts.apps(s.user);};
+ app.get('/api/session',(req,res)=>{const s=req.session;res.json({csrf:s.csrf,user:publicUser(s.user),apps:[...accounts.apps(s.user).map(publicApp),...systemApps(s.user)],windows:[...s.manager.windows.values()],limits:{maxStreams:2}});});
+ updaterRoutes(app,{config:updaterSettings,wrap,getSession,admit});
+ const desktop=new Desktop(runtime,()=>[...accounts.state.services,UPDATER]);
+ const desktopAuthority=req=>()=>{admit();const s=getSession(req);if(!s||s!==req.session)throw fail(401,'Authentication required');return [...accounts.apps(s.user),...systemApps(s.user)];};
  app.get('/api/desktop',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req)))));
  app.post('/api/desktop/folders',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s)=>desktop.folder(s,req.body)))));
  app.patch('/api/desktop/items/:id',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.patch(s,apps,req.params.id,req.body)))));
@@ -168,6 +181,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  }));
  app.get('/api/metrics',operation((req,m)=>m.metrics()));
  server.on('upgrade',(req,socket,head)=>{
+  if(maintenance()){socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');return;}
   const s=getSession(req),match=/^\/ws\/stream\/([a-z0-9-]+)$/.exec(req.url);
   if(req.headers.host!==new URL(origin).host||req.headers.origin!==origin||!s||!match||!accounts.allowed(s.user,accounts.state.services.find(a=>a.id===match[1]))||s.manager.windows.get(match[1])?.mode!=='stream'){socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return;}
   wss.handleUpgrade(req,socket,head,ws=>{ws.on('error',()=>{});s.sockets.add(ws);ws.once('close',()=>s.sockets.delete(ws));s.manager.attach(match[1],ws);});

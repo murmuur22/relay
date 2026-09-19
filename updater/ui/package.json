@@ -1,0 +1,17 @@
+{
+  "name": "relay-updater-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "playwright test",
+    "test:unit": "node --test --test-timeout=10000 tests/*.test.mjs",
+    "test:http": "npm run build && node --test --test-timeout=30000 tests/http-smoke.mjs",
+    "test:fixture": "npm run build && node --test --test-timeout=70000 tests/fixture-smoke.mjs"
+  },
+  "dependencies": {"three": "0.186.0"},
+  "devDependencies": {"vite": "8.3.0", "@playwright/test": "1.63.0"}
+}

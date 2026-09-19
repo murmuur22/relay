@@ -27,15 +27,29 @@ git clone https://github.com/murmuur22/relay.git
 cd relay
 ```
 
-This is a development prototype, not a production deployment or installable release. Private planning documents, runtime credentials, libraries, generated screenshots and reference font binaries are excluded. Fresh checkouts use system font fallbacks; the local reference fonts have not been cleared for redistribution. The existing bundled integrations remain test/demo functionality, not authorization to deploy them.
+This is an early private self-hosted desktop. Linux x64 release packaging provides separate Relay-runtime and updater-control-plane archives; prereleases remain qualification candidates until explicitly promoted. Publication does not install anything on a server. Private planning documents, runtime credentials, libraries, generated screenshots and reference font binaries are excluded. Fresh checkouts use system font fallbacks; the local reference fonts have not been cleared for redistribution. Bundled integrations below remain development/test functionality, not part of the standalone server payload.
 
 No project-wide open-source license has been selected yet. Public visibility does not itself grant an open-source license; third-party dependencies retain their own terms. See `THIRD_PARTY_NOTICES.md`.
 
 ## Relay-only installation
 
+See [releases](https://github.com/murmuur22/relay/releases), [Linux installation](deploy/README.md), and [artifact verification](updater/release/README.md). Downloading and verifying official public artifacts does **not** require a GitHub account or login. The pinned repository/workflow identifies the trusted publisher, not an allowed installer identity.
+
+Fresh Linux x64/systemd installations use non-login `relay` and `relay-updater-web` accounts plus a narrowly scoped root broker. The installer defaults to inspection and requires explicit `--apply` for host changes; it refuses existing conflicting accounts, paths, units or state. Node/Python/Pillow/gh and Chromium system libraries are operator prerequisites. Initial access is private through SSH forwarding of localhost ports 4190 and 4191; public exposure/reverse-proxy support is not implied.
+
 For a private server installation without Parcels, Keepsakes or synthetic apps, use `RELAY_PROFILE=standalone`, a fresh absolute `RELAY_STATE_DIR`, and an operator-supplied Python/Pillow interpreter through `RELAY_ICON_PYTHON`. `npm run setup:standalone` installs only Chromium and verifies Pillow. It does not install/start the bundled integrations. See [standalone deployment](deploy/README.md) for the systemd template, private forwarding, qualification and rollback boundaries.
 
 Development mode remains the default for the commands below and retains the bundled test integrations. Do not copy development account/registry state into standalone mode; incompatible builtin entries are refused, not silently removed.
+
+## Independent administrator updater — 0.4.0
+
+An **Updater** system shortcut opens a trusted, read-only **desktop window** for active administrators. Browse releases, notes and current status alongside the Three.js chamber. It is not an editable web-app registry entry, streamed page or arbitrary same-origin iframe. It requires a configured updater broker; normal development commands do not install or enable privileged maintenance services.
+
+**Start update** opens a separate maintenance tab carrying the selected release for review. Installation does not begin until the administrator explicitly confirms and enters the current password in that tab. A blocked/closed tab or failed launch cannot start an update. Keeping execution and progress in the independent service lets that tab remain available when Relay restarts. Desktop window position/size are local to the current page session; a private app link can reopen the browser window after reload.
+
+The monochrome Three.js chamber gathers fragments using received artifact bytes and displays server-reported verification, activation, restart and recovery phases. Spiral trails illustrate activity, not network speed or whole-update progress. Device/account reduced motion and missing WebGL retain functional controls. Monitoring survives Relay shutdown; each mutation still requires a current Relay administrator session and password confirmation.
+
+Build the independent package with `npm run setup:updater` (or `npm run build:updater` after dependencies are installed). Run `npm run test:updater`, then the compiled HTTP/real disposable fixture tests documented in [updater UI](updater/ui/README.md). The root `npm test` also covers the launcher and maintenance bridge. See [operator boundaries](updater/deploy/README.md) before any installation: Linux/systemd, genuine release attestation and existing-state migration remain deployment gates, not established by local fixtures. No production updater has been enabled by this development work.
 
 ## Run locally (development profile)
 
@@ -126,7 +140,7 @@ See `docs/benchmark-results.json` and `docs/benchmark-results.md`. Do not substi
 
 ## What is deliberately unfinished
 
-- No Tailscale Serve deployment, Debian/GPU qualification or production Docker/release pipeline. Public source hosting is for continued development only.
+- No Tailscale Serve/public-Internet deployment or production Docker image. Linux x64 release packaging and guarded systemd qualification are provided; consult `TEST_REPORT.md` and the actual release status for executed evidence. Debian/GPU, WAN and operator-specific deployment still require target checks.
 - No live Journalmax/Proxmox/home-service connection has been configured or tested. HTTP(S) web app registration works against synthetic local fixture sites, but is not a promise of universal website compatibility. Persistent third-party browser profiles, general-purpose browsing, streamed WebSockets/audio/file-transfer bridges and unrestricted popups are not implemented.
 - No file-transfer bridge for streamed third-party apps; the working upload/download path is the native first-party mode.
 - Persistent local accounts and server-enforced ACLs are implemented, but this is not a production identity service or a hostile multi-tenant platform. No public exposure, router forwarding, MFA, recovery workflow or external identity provider.

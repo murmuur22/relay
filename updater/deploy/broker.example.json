@@ -1,0 +1,16 @@
+{
+  "mode": "production",
+  "uiOrigin": "http://localhost:4191",
+  "readinessUrl": "http://localhost:4190/health/ready",
+  "relayUid": 0,
+  "socketGid": 0,
+  "installRoot": "/opt/relay",
+  "stateRoot": "/var/lib/relay",
+  "controlRoot": "/var/lib/relay-updater",
+  "maintenance": "/var/lib/relay-updater-control/maintenance",
+  "socketPath": "/run/relay-updater-control/broker.sock",
+  "bridgeKeyFile": "/etc/relay-updater/bridge.key",
+  "node": "/usr/bin/node",
+  "python": "/usr/bin/python3",
+  "gh": "/usr/bin/gh"
+}

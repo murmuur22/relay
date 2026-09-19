@@ -1,0 +1,62 @@
+name: Linux release preflight
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: linux-release-preflight-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  preflight:
+    if: github.repository == 'murmuur22/relay'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26.8.1'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Build both bundles and provision disposable browser prerequisites
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-browsers
+        run: |
+          npm ci --ignore-scripts
+          npm --prefix updater/ui ci --ignore-scripts
+          npm run build
+          npm run build:updater
+          python3 -m pip install Pillow==11.3.0
+          node node_modules/playwright/cli.js install --with-deps chromium
+          # This is a fresh hosted VM, not an operator/production host.
+          # Chromium remains sandbox-enabled; allow its user namespaces here.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Python security and real standalone runtime regressions
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-browsers
+        run: |
+          export RELAY_ICON_PYTHON="$(command -v python3)"
+          python3 -m unittest discover -s updater/tests -v
+          npm --prefix updater/ui run test:unit
+          node --test --test-timeout=90000 tests/backend/updater*.test.mjs
+          node --test --test-timeout=90000 updater/ui/tests/http-smoke.mjs updater/ui/tests/fixture-smoke.mjs
+          node deploy/verify-standalone.mjs
+      - name: Actual systemd mount-boundary install and rollback fixture
+        run: |
+          sudo install -m 0755 "$(command -v node)" /usr/bin/node
+          sudo useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin relay
+          sudo env -i PATH=/usr/bin:/bin CI=true GITHUB_ACTIONS=true PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m updater.tests.test_mount_sandbox --disposable-github-systemd
+      - name: Build both allowlisted Linux payloads without publishing
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-browsers
+        run: |
+          VERSION="v$(node -p 'JSON.parse(require("fs").readFileSync("package.json","utf8")).version')"
+          python3 -m updater.release.validate_tag "$VERSION"
+          npm prune --omit=dev --ignore-scripts
+          python3 -m updater.release.build --source "$GITHUB_WORKSPACE" --browsers "$PLAYWRIGHT_BROWSERS_PATH" --output "$RUNNER_TEMP/relay-preflight-artifacts" --version "$VERSION"
+          # No attestation, release, tag or deployment is created by this job.

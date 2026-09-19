@@ -47,7 +47,7 @@ try{
  await new Promise((resolve,reject)=>{fixture.once('error',reject);fixture.listen(0,'127.0.0.1',resolve);});
  gateway=await createGateway({port:0,runtime,profile:'standalone',hostname:'localhost'});
  assert.equal(gateway.server.address().address,'127.0.0.1');assert.equal(gateway.nativeService,undefined);assert.deepEqual(gateway.accounts.templates,[]);
- const initial=await login();assert.deepEqual(initial.apps,[]);
+ const initial=await login();assert.deepEqual(initial.apps.filter(a=>a.kind!=='system'),[]);assert.deepEqual(initial.apps.map(a=>a.id),['system-updater']);assert.deepEqual(gateway.accounts.state.services,[]);
  for(const id of ['parcels','keepsakes','notes-lab','signal-lab']){
   assert.equal((await fetch(gateway.origin+'/native/'+id+'/',{headers:{cookie:auth.cookie}})).status,404);
   assert.equal((await fetch(gateway.origin+'/api/admin/services',{method:'POST',headers:{cookie:auth.cookie,Origin:gateway.origin,'X-CSRF-Token':auth.session.csrf,'Content-Type':'application/json'},body:JSON.stringify({template:id})})).status,400);
@@ -85,7 +85,7 @@ try{
  await gateway.close();gateway=null;
  gateway=await createGateway({port:0,runtime,profile:'standalone',hostname:'localhost'});
  assert.equal((await fetch(gateway.origin+'/api/session',{headers:{cookie:oldCookie}})).status,401);
- const restored=await login();assert.equal(restored.user.id,userId);assert.deepEqual(restored.apps.map(a=>a.id),[app.id]);assert.equal(restored.user.onboardingComplete,true);assert.equal(restored.user.preferences.showAppStatus,false);
+ const restored=await login();assert.equal(restored.user.id,userId);assert.deepEqual(restored.apps.filter(a=>a.kind!=='system').map(a=>a.id),[app.id]);assert.equal(restored.apps.filter(a=>a.id==='system-updater').length,1);assert.equal(restored.user.onboardingComplete,true);assert.equal(restored.user.preferences.showAppStatus,false);
  const saved=await api('/desktop');assert.ok(saved.items.some(i=>i.id===folder));assert.equal(saved.items.find(i=>i.id===item.id).icon.url,icon.url);assert.equal((await fetch(gateway.origin+icon.url,{headers:{cookie:auth.cookie}})).status,200);assert.equal(gateway.nativeService,undefined);
  console.log('PASS restart: login, user, web app, preferences, folder and private icon preserved; old session rejected');
 }finally{

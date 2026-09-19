@@ -12,7 +12,7 @@ These are separate projects by the repository owner. Their inclusion does not im
 
 ## Dependencies
 
-Node and Python dependency versions are recorded in lockfiles. Installed packages retain their respective license notices. Parcels includes redistributable library notices under `integrations/parcels/public/licenses/` for Three.js and fflate. Chromium is installed by Playwright, not bundled in this source repository.
+Node and Python dependency versions are recorded in lockfiles. Installed packages retain their respective license notices. The desktop and independent updater both use Three.js 0.186.0; its MIT notice is included in each built bundle under `licenses/three.txt`. Parcels also includes redistributable library notices under `integrations/parcels/public/licenses/` for Three.js and fflate. Chromium is installed by Playwright for source checkouts; Linux release payloads include the matching Chromium runtime and its bundled notices under `browsers/`. The standalone server release excludes the development-only first-party integrations and private reference fonts.
 
 ## Fonts and local artifacts
 

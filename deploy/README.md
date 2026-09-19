@@ -1,71 +1,238 @@
-# Private standalone deployment
+# Private Linux installation and disposable systemd qualification
 
-Standalone runs **Relay only**. It starts no Parcels/Keepsakes backend, seeds no builtin/demo apps, and refuses incompatible development registry state. External web apps can be registered afterward; registration does not install an upstream service.
+This directory implements a **fresh-host** Relay-only installation. It does not
+migrate an existing source checkout or state, expose a public listener, access
+another application, install dependencies, or grant host privileges to a human
+account. Run only after explicit operator approval on the intended host.
 
-This is a private systemd deployment path, not a public-Internet release pipeline. Keep existing services and their data/configuration separate.
+Local tests are not Linux qualification. Neither a public release nor a successful
+macOS fixture establishes that these units, Chromium or provenance verification
+work on a Linux machine. The qualification command below must actually succeed
+before recording that evidence.
 
-## Layout and prerequisites
+## Trust and service layout
 
-- Linux x86_64 Node26.8.1 toolchain at `/opt/relay/node` (verify the official HTTPS archive against its published SHA256 manifest).
-- Source pinned to a verified Git commit under `/opt/relay/releases/<commit>`; `/opt/relay/current` selects the active release.
-- Built `dist/` and runtime npm dependencies. Code and browser binaries should be root-owned and not writable by the service user.
-- Dedicated non-login, non-sudo OS user/group `relay`.
-- Private state `/var/lib/relay`, mode0700; accounts, folders, icons and setup credentials stay here, not in the release tree.
-- Playwright Chromium under `/opt/relay/browsers`, with its Debian browser libraries/fonts installed by the operator. Use Playwright's `install-deps --dry-run chromium` to inspect the package plan before installation. Do not disable the browser sandbox as an installation workaround.
-- A Python interpreter with Pillow for icon normalization. Debian's `python3-pil` with `/usr/bin/python3` is an option; this is a decoder dependency, not a Keepsakes installation.
+| Path / identity | Ownership and purpose |
+| --- | --- |
+| `relay` | New system user, own primary group, `/nonexistent`, `nologin`; no sudo, Docker, SSH or human-home access |
+| `relay-updater-web` | Separate system user and primary group; same nonlogin/no-home restrictions |
+| `relay-updater-socket` | Only supplementary group granted to those users; access to broker socket only |
+| `/opt/relay/releases`, `/opt/relay/current` | Root-owned verified runtime releases and selected symlink; not writable by Relay |
+| `/opt/relay-updater` | Root-owned independently verified broker/web/UI code; not self-updated |
+| `/var/lib/relay` | `relay:relay`, 0700; accounts, private desktop state, protected setup URL |
+| `/var/lib/relay-updater` | Root-only 0700; broker journal, capabilities and matching-state backups |
+| `/etc/relay-updater` | Root-owned configuration; broker.json 0600, bridge.key root:relay 0640, web.json 0644 |
+| `/var/lib/relay-updater-control/maintenance` | Persistent root-controlled gate; parent 0755, marker 0644 |
+| `/run/relay-updater-control/broker.sock` | Runtime socket, root:relay-updater-socket 0660; directory root-owned |
 
-For a Relay-only artifact, exclude `integrations/`, tests, private runtime/data, screenshots and unverified font binaries from the server release. Root `npm ci --ignore-scripts` and `npm run build` do not install the nested integration packages. After building, `npm prune --omit=dev --ignore-scripts` can remove build/test-only dependencies. Do not run the development `npm run setup` on this installation.
+Relay and web run with NoNewPrivileges, empty capability sets, protected system
+and homes, private temporary storage and resource limits. Web additionally hides
+Relay state, broker state and the signing key in its mount namespace. The root
+broker exposes only the fixed protocol verbs and controls only `relay.service`;
+it does not accept a shell, unit name, arbitrary destination or migration hook.
 
-## Runtime environment
+Both Node services use `/usr/bin/node`. The web entrypoint is
+`/opt/relay-updater/updater/web/index.mjs`, working directory `/opt/relay-updater`.
+Python is `/usr/bin/python3`, gh is `/usr/bin/gh`. These are generic root-owned
+system prerequisites, never executables below a maintenance user's home.
 
-The provided `relay.service` sets:
+## Operator prerequisites (not installed by the scripts)
 
-```text
-RELAY_PROFILE=standalone
-RELAY_STATE_DIR=/var/lib/relay
-RELAY_HOSTNAME=localhost
-PORT=4190
-RELAY_ICON_PYTHON=/usr/bin/python3
-PLAYWRIGHT_BROWSERS_PATH=/opt/relay/browsers
-```
+- Linux x86_64 with running systemd, Python >=3.10, Node >=26.8.1 at `/usr/bin/node`.
+  Use distribution packages or a separately verified official Node archive and
+  root-owned installation/symlink. Never pipe remote scripts into a root shell.
+  Do not point the unit at an actions/setup-node or nvm user-writable tool cache.
+- Root-owned Python/Pillow (for Debian/Ubuntu, `python3-pil`), including its parent
+  directories. No user-site imports. Root-owned gh with `gh attestation verify`,
+  downloaded-bundle, source-ref and hosted-runner verification support.
+- Chromium system libraries and fonts matching the bundled Playwright Chromium.
+  Review the matching Playwright `install-deps --dry-run chromium` package list
+  as a nonroot build user, then approve/install distro packages separately.
+  Do not run root npm, download an unverified browser, disable Chromium's sandbox,
+  or globally disable AppArmor/user-namespace protections to make a smoke pass.
+  Ubuntu user-namespace/AppArmor restrictions remain an actual qualification gate.
+- Standard `systemctl`, `systemd-analyze`, `useradd`, `groupadd`, `nologin` and (for
+  qualification) `runuser`, `test`, procfs; sudo is for the operator/CI runner only.
+- At least 10 GiB free in `/var/lib`; reserve additional space for actual state
+  checkpoints. `/opt` and `/var/lib` must share a filesystem. Default ports
+  4190 and 4191 must be free. Port overrides are deliberately not supported by
+  this installer; do not relax Host/Origin checking.
+- A reviewed, trusted installer checkout (including `updater/broker/releases.py`),
+  or previously authenticated control-plane tree. Treat installer code as a
+  privileged program: do not run a downloaded unverified installer as root.
+  No mutable human UID/name is embedded in the trust policy.
 
-`RELAY_STATE_DIR` and a supplied `RELAY_ICON_PYTHON` must be absolute paths. Supported hostnames are deliberately only `127.0.0.1` and `localhost`; this chooses the exact origin/cookie hostname, not a public listener. The bind remains127.0.0.1. Unsupported configuration fails rather than silently falling back to another profile.
+The installer refuses existing users/groups, application directories, configuration,
+state (even empty), symlinks in destination ancestors, loaded/generated units,
+unit files or drop-ins. It does not overwrite/adopt a partially installed system.
+No `--force`, custom destination, fixture-verifier or migration bypass exists.
 
-With the operator environment set, `npm run setup:standalone` checks Pillow and installs matching Chromium only. The template uses a nonroot user, private temporary storage, read-only system/code, empty capability bounding set and resource limits (MemoryMax2G, CPUQuota100%, TasksMax512). The operator must verify these settings on the actual host. Do not add namespace/JIT restrictions that break Chromium and then bypass its sandbox.
+## Release assets and inspect/apply
 
-Optionally add host-specific `InaccessiblePaths=` entries in a unit drop-in to hide neighboring services' private directories and Docker socket from Relay's mount namespace. This must not change those directories' actual permissions or disrupt their owning services.
+Obtain these **public** assets for one exact `vMAJOR.MINOR.PATCH` tag. A public
+prerelease may use that exact tag; a draft/private release is not supported:
 
-## Qualification before activation
+- `relay-release.json`
+- `relay-release.attestation.json`
+- `relay-linux-x64.tar.gz`
+- `relay-updater-linux-x64.tar.gz`
 
-Build first. Run `node deploy/verify-standalone.mjs` as nonroot, with the same browser/Python environment and matching systemd hardening, but a **separate temporary qualification directory**. The smoke never uses `RELAY_STATE_DIR`; optionally set `RELAY_QUALIFY_DIR` to an existing private writable test parent.
+The manifest binds runtime `artifact` and `updaterArtifact` by exact name, SHA256
+and byte size. Both archives must pass before any account/unit/config/state
+mutation. The script snapshots external inputs into private temporary storage,
+verifies the downloaded manifest using `gh attestation verify --bundle` with
+fixed `murmuur22/relay`, `.github/workflows/release.yml`, exact source tag and
+`--deny-self-hosted-runners`, then validates both archives and safe extraction.
+It excludes ambient GitHub tokens/config and never asks for `gh auth login`.
+Anonymous public HTTPS access to GitHub/Sigstore trust material is required.
 
-The smoke exercises real enrollment/login, an empty builtin catalog, a local synthetic streamed app, received frames and typed input, private PNG icon decoding, restart persistence and absence of `--no-sandbox` in both owned browser command lines. It removes its temporary state and processes. Do not qualify by creating test accounts in the real production state or probing real household data.
-
-Then install/verify the unit (`systemd-analyze verify`), reload systemd, enable/start `relay.service`, inspect status/logs, verify the loopback listener and unauthenticated API denial, and recheck any neighboring application health. A successful service start is not a substitute for the browser smoke.
-
-## Private access
-
-Forward the **same port** to preserve the exact origin:
+Example download as an ordinary user (replace the version only with the actual
+published tag; downloads are untrusted until the installer verifies them):
 
 ```sh
-ssh -N -L localhost:4190:127.0.0.1:4190 YOUR_SSH_USER@YOUR_VM
+version=v0.4.0
+assets=$(mktemp -d)
+for name in relay-release.json relay-release.attestation.json relay-linux-x64.tar.gz relay-updater-linux-x64.tar.gz; do
+  curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 180 \
+    "https://github.com/murmuur22/relay/releases/download/$version/$name" -o "$assets/$name" || exit 1
+done
+python3 deploy/install-release.py --release-dir "$assets" --version "$version"
+# Only after review and explicit approval:
+sudo /usr/bin/python3 deploy/install-release.py --release-dir "$assets" --version "$version" --apply
 ```
 
-Open `http://localhost:4190`. The localhost cookie hostname is distinct from a separate local preview at127.0.0.1. The tunnel must be active; this is not a LAN/public listener. A future HTTPS/Gatehouse setup requires explicit external-origin/cookie/proxy design, not globally disabling Host/Origin checks.
+Default mode inspects the host, verifies assets and prints a plan. Its only writes
+are disposable verification scratch files, removed on exit. `--apply` creates the
+accounts/groups, root-owned code/key/config, private state, persistent closed gate
+and three units, validates units and reloads systemd. Then the installed genuine
+`updater.broker.enroll` path independently downloads/verifies the official runtime
+again and creates the protected baseline receipt. The resulting receipt must
+match the first verified manifest. No receipt is fabricated by the installer.
+This second transfer deliberately requires the public release to remain available.
 
-Initial enrollment requires the owner-only `/var/lib/relay/setup-url.txt`. Obtain/open it privately through operator access, never paste its credential into chat/logs/Git. The owner chooses the admin password. After enrollment, use normal login; the protected file is not a permanent bypass. For custom state directories, the development `npm run open` helper is not the remote operator workflow.
+Apply **does not start or enable any service and does not remove maintenance**.
+An initial installation has no prior version to roll back to. Any error after
+mutation leaves a partial installation for operator inspection; rerunning refuses
+it instead of silently repairing or deleting it.
 
-## Operations, backup and updates
+## Initial activation after qualification and approval
 
-- Status: `sudo systemctl status relay --no-pager`
-- Logs: `sudo journalctl -u relay --no-pager` (do not add logging of setup URLs, cookies, credentials or typed content).
-- Stop/restart: `sudo systemctl stop relay` / `sudo systemctl restart relay`. Restart invalidates sessions and ephemeral upstream browser logins.
-- Back up `/var/lib/relay` with owner-only permissions, preferably with Relay stopped for a consistent multi-file snapshot. Store copies off the VM as part of an explicitly configured backup plan; RAID or the source repository is not a state backup.
-- For updates, review the changelog, stage a verified commit separately, install/build its pinned dependencies and browsers, qualify it with separate state, stop Relay, back up state, atomically change `current`, and restart/verify. Do not modify the neighboring application's unit/container/configuration.
-- Roll back by selecting the previous qualified release and, where schema compatibility requires it, restoring its matching protected state backup while stopped. On a first installation there is no prior release: stop/disable Relay and retain state for diagnosis rather than deleting accounts.
+These commands are not run by the local development worker:
 
-The admin Control Panel does not manage systemd or perform root updates. A GitHub push does not automatically update this server.
+```sh
+sudo systemctl start relay-updater-broker.service relay-updater-web.service relay.service
+curl --fail --max-time 10 http://localhost:4190/health/ready
+```
 
-## Limits
+Require the exact expected package version, `status: ready` and `maintenance: true`.
+Inspect unit status, loopback listeners, ownership and logs without printing setup
+credentials. On this fresh baseline only, after verification and approval, remove
+the initial gate, restart the broker so it rereads recovery status, and optionally
+enable the three units for boot. Do not remove a gate left by an interrupted update
+using this initial-install procedure. A readiness endpoint is not a Chromium smoke.
 
-No public sharing, public port, reverse-proxy route, SMB mount or other application installation is implied. This installation procedure explicitly supplies a fresh state directory and a standalone Python executable. Selecting the profile alone does not allocate new state: omitted settings retain the development defaults. Do not copy a development catalog containing builtins into it. System fallback fonts are used until reference-font redistribution rights are cleared. Linux qualification is targeted acceptance, not a load/soak test, hostile multi-tenant audit or proof that every website is compatible.
+Privately forward both exact origins:
+
+```sh
+ssh -N -L localhost:4190:127.0.0.1:4190 -L localhost:4191:127.0.0.1:4191 YOUR_SSH_USER@YOUR_VM
+```
+
+Open `http://localhost:4190`. Obtain `/var/lib/relay/setup-url.txt` through protected
+operator access, never chat/logs/issues. The owner chooses the administrator
+password. The setup credential is one-use, not a permanent login bypass. Updater
+browsing is in the desktop; Start update opens the independently authenticated tab
+at localhost:4191. Only that tab's explicit fresh-password consent can mutate.
+No public bind, reverse proxy, Tailscale Serve or LAN exposure is configured here.
+
+## Disposable GitHub-hosted systemd qualification
+
+Parent/CI owns execution. Use a **fresh disposable ubuntu-24.04 x64 hosted VM**, not
+self-hosted CI, Docker-in-Docker, a privileged container, an operator workstation,
+or any production machine. Run source/fixture tests first. Provision the exact
+root-owned prerequisites above through reviewed package/archive steps; `apt-get`
+for distro packages is acceptable, root npm and remote-shell installers are not.
+In particular the runner's default Node version/path is not sufficient evidence.
+
+The release worker's control archive must include all three units and the two
+scripts. Download the four public signed assets into an external absolute directory.
+The exact command, after those prerequisites, is:
+
+```sh
+sudo env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted \
+  RELAY_DISPOSABLE_SYSTEMD=I_ACCEPT_DISPOSABLE_HOST_MUTATION \
+  /usr/bin/python3 deploy/qualify-systemd.py \
+  --release-dir "$assets" --version "$version" --apply
+```
+
+The environment declarations are an explicit safety acknowledgment, not a
+cryptographically authenticated host detector. The script additionally requires
+Linux/root/running systemd and refuses all existing installation paths, identities
+and units before any destructive work. Do not set those flags on arbitrary hosts.
+It never publishes, SSHs elsewhere, mounts host directories, or delegates.
+
+What the actual command exercises:
+
+1. Anonymous real provenance verification of both assets; genuine gated baseline
+   enrollment, actual systemd start and expected-version readiness.
+2. Actual separate process UIDs, NoNewPrivs/capabilities in procfs, exact groups and
+   no home/login; real unprivileged read denial for Relay state and bridge key.
+3. Normal synthetic administrator enrollment/login with randomly generated
+   credentials held only in memory. Actual desktop read/launch API, one-use ticket
+   exchange and independent updater cookie. This is HTTP integration, not browser
+   rendering or a claim of an executed click/Three.js/Chromium smoke.
+4. Persistent gate across broker and Relay restart, admission denial and independent
+   monitoring during actual Relay stop/start.
+5. Real expected-version readiness rejection, a stopped synthetic-state checkpoint
+   of the genuinely signed baseline, and the installed engine's code/state restore
+   primitive inside `relay-qualification-restore.service`, a bounded transient
+   systemd unit with the broker's ProtectSystem/ReadWritePaths and other hardening.
+   The internal probe requires the explicit disposable flags plus a root-only
+   marker created only after this fresh installation. It cannot be used as a
+   general existing-host recovery entrypoint. No second release is invented;
+   no signature/receipt is bypassed.
+
+There is only one signed baseline initially. This **does not exercise a second
+signed release install or the UI rollback verb**. The separate real HMAC fixture
+suite covers transfer/install/failure/cancel/rollback/interruption; it is not public
+provenance evidence. Systemd qualification also does not reboot the VM, simulate
+power loss, prove Chromium namespace compatibility, or validate production data.
+Run the standalone sandbox/stream/icon smoke separately under equivalent service
+hardening before production activation; see the existing `verify-standalone.mjs`.
+
+On success or failure the qualifier gates/stops its newly created services and
+retains protected state/receipts for diagnosis. Destroy the disposable VM afterward;
+never upload accounts, bridge keys, authority journals, setup URLs or cookies as
+CI artifacts. Only the final sanitized result and selected nonsecret metadata
+should be retained. A failing command is not qualified.
+
+## Recovery, limits and local verification
+
+For an interrupted apply: stop only the newly created Relay units, preserve the
+maintenance marker, inventory the paths above, and retain protected backups before
+any operator-approved repair/removal. Do not `rm -rf` the layout or delete accounts
+as an automatic cleanup. Existing state migration and partial-install repair are
+separate tasks. On a first install, stop/disable and preserve diagnostic state;
+there is no earlier signed version or matching checkpoint to select.
+
+For an interrupted update: retain broker journal, verified current/prior releases,
+matching stopped-state backup and persistent marker. Never clear maintenance just
+to dismiss an error. The restore primitive preserves the gate on failure. Rollback
+must restore both code and matching state; choosing a symlink alone is insufficient.
+The independent control plane never self-updates. Neighboring applications are
+outside all of these procedures.
+
+Local checks:
+
+```sh
+python3 -m unittest updater.tests.test_deployment -v
+python3 -m unittest discover -s updater/tests -v
+python3 deploy/install-release.py --help
+python3 deploy/qualify-systemd.py --help
+```
+
+Tests use temporary files, anonymous-verifier command seams and disposable local
+HTTP/Node fixtures. They cover refusal/overwrite/symlinks, ownership requirements,
+fixed provenance flags, both artifact digests, signature failure before extraction,
+inspect-vs-apply, unit configuration and disposable-host guards. They do not create
+OS accounts or run Linux systemd on the development machine. Record real hosted
+execution separately; no Linux/production success is asserted by this document.

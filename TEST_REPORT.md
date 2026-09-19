@@ -1,6 +1,46 @@
 # Relay prototype verification
 
-## Version 0.3.0 standalone preparation — current verification
+## 0.4.0 public Linux release preparation — local evidence
+
+A clean Git-index export with fresh dependency setup passed both builds, **99 backend tests, 53 frontend tests, full hybrid integration, 43 updater Python tests, 6 updater unit tests, 35 updater browser tests, and both compiled HTTP/disposable install/rollback smokes**. Private state, planning material, host references, credentials and unverified fonts were excluded by the staged-tree audit. Missing local font warnings use the documented public fallback; the Three.js chunk remains lazy-loaded.
+
+Independent pre-publication review found no remaining source blocker after corrections for systemd cross-mount staging and mounted-state restoration. Candidates now stage within the install mount; state restoration retains its root inode and durable checkpoint through bounded no-follow content replacement. The initial installer verifies one GitHub-attested manifest and both payload hashes before account/config/unit changes. Anonymous verification uses a fresh private writable Sigstore cache with no inherited GitHub credentials. This source review and local fixture success do **not** establish hosted systemd success or a real GitHub signature.
+
+Hosted gates are encoded in `.github/workflows/check.yml` (Linux preflight and actual mounted fixture lifecycle) and `.github/workflows/release.yml` (public prerelease, then explicit signed-install qualification). Source publication, valid attestation, signed initial enrollment under hardened systemd, stable promotion and production deployment are separate results. The initial qualification restores a genuine signed baseline; it does not invent a second signed version or claim full power-loss testing. See actual GitHub runs/release notes for subsequently completed hosted gates.
+
+## In-desktop updater browsing → independent maintenance — previous Unreleased verification
+
+Updater now opens a trusted native Svelte desktop window for release selection/notes, real broker status and the shared Three.js chamber. It supports one-window opening, Navigation/private routes, drag/resize/minimize/maximize, content focus, reload and local close. It is not registered with the server window/stream manager or embedded through a relaxed iframe policy. Start update opens a separate authenticated tab with the selected release for explicit final consent/password authorization; blocked/closed/denied launches make no install request.
+
+Parent executed both builds, the full Relay suite (**99 backend tests, 52 frontend tests and real hybrid integration passed**), **16 Python broker/release/safety tests**, **6 updater unit tests**, **34 updater browser tests**, the compiled HTTP smoke and the real disposable installation/readiness-failure rollback smoke. The final parent runs passed; one earlier worker browser run encountered an in-flight test-route teardown race, followed by unchanged successful worker and parent reruns. Root build emits the expected size warning for the separately lazy-loaded Three.js chunk; it does not load with the initial desktop bundle.
+
+Coverage includes read-bridge admin/Origin/CSRF/rate limits and revocation after broker awaits, real desktop-to-tab authentication, no popup until Start update, popup blocking/closure, denied/missing ticket, selected-target preservation and exact install payload after reload, continued independent monitoring after Relay logout/shutdown, multiwindow content focus, local close during held/rejected unrelated saves, pending-launch disposal, narrow floating-window container layout, static WebGL fallback and administrator revocation. Source review found the focus/close issues; their red regressions and fixes were verified, and scoped re-review reported no remaining blocker. Browser verification is Chromium, not physical-device/Safari qualification.
+
+Only the validated non-secret reviewed version is retained in the independent tab's history state; no ticket, password or mutation capability is persisted there. Desktop geometry is local to the current page session; private URLs reopen the browser window, not its previous arbitrary dimensions. Missing selected releases require explicit reselection. The server-side desktop read capability is session-scoped and does not rotate the independent updater cookie.
+
+Actual compiled screenshot: `screenshots/relay-updater-desktop.png` shows the normal floating browse window with visible Start update control. `screenshots/relay-updater-opened.png` shows the separately authenticated tab. Both use disposable accounts and fixture releases; no live server update was started for those captures. Logs are `/tmp/relay-browse-parent-regression.log`, `/tmp/relay-browse-parent-ui.log`, and `/tmp/relay-browse-parent-python.log`.
+
+Source remains **0.3.0**, changes under `CHANGELOG.md` Unreleased, with pinned root Three.js dependency and no workspace-link packaging dependency. Nothing committed, pushed or deployed. All production/Linux/attestation limits below still apply.
+
+## Independent administrator updater — previous Unreleased local verification
+
+Source version remains **0.3.0** on `feat/admin-updater`; updater changes are recorded under Unreleased. The updater has its own web process, browser bundle and maintenance broker, with an administrator-only system launcher, single-use monitoring tickets and fresh-password mutation authorization. The Three.js chamber uses broker bytes/phases for assembly and progress, with explicitly decorative spiral trails, reduced-motion handling and a static WebGL fallback.
+
+Executed locally against temporary synthetic state:
+
+- `npm run build && npm test`: **98 backend tests, 50 frontend tests and the real hybrid integration passed**. Existing ZIP-byte comparison, native upload/notes, two independent remote pages, input isolation, pause/resume and reconnect remain passing.
+- Independent UI suite: **4 unit tests and 30 Chromium browser tests passed** in parent-run verification. Coverage includes byte-driven geometry, all-packet trail continuity across loop wraps, real rendered motion versus frozen reduced-motion frames, narrow WebGL/static layouts, safe release text, action payload shapes, connectivity recovery, and permanent retirement of consent when release/job eligibility changes.
+- Python broker/release/safety suite: **16 tests passed**, including actual disposable HTTP transfer, activation, matching-state rollback, cancellation, interrupted recovery, archive safety and allowlisted packaging.
+- Compiled updater HTTP smoke passed real cookies/CSRF and action bridging with a synthetic broker endpoint. The separate compiled real-fixture smoke passed actual broker/service installation, deliberately failed readiness, restoration of the prior release and matching state, and continued monitoring after the test Relay gateway closed.
+- Standalone qualification passed enrollment with an empty editable catalog/no native process, sandboxed client/server Chromium frames and typed input, configured Pillow private image normalization, and restart persistence with rejection of the old session.
+
+Independent source review found and then accepted fixes for trail-wrap discontinuity and stale confirmation eligibility/target binding. New regressions were observed failing before implementation; the final scoped re-review reported no remaining security or logic concerns. This is a focused code review, not a production security audit.
+
+The animated preview at `screenshots/updater-synthetic-motion.webm` is intentionally scripted visual evidence, not a real server update or speed measurement. Screenshot names distinguish synthetic UI states from actual disposable broker success/rollback. Desktop and narrow WebGL/static-fallback layouts were visually inspected. These ignored artifacts contain no real household data.
+
+Limits: macOS/Chromium only. No new Git commit, push, GitHub Release or VM deployment. Real GitHub attestation, Linux/systemd/power-loss qualification, migration of an existing unverified nonempty installation, Safari and physical-device testing remain unverified. Disposable HMAC-signed fixtures do not establish production release provenance. The updater does not self-update.
+
+## Version 0.3.0 standalone preparation — previous verification
 
 Added a Relay-only profile with no builtin catalog/native process/routes, strict localhost-origin configuration, independent state/Python paths, Chromium-only setup, a nonroot bounded systemd template and a runtime-only qualification smoke. Development mode remains compatible with the existing native test integrations; standalone refuses incompatible development registry state instead of deleting it.
 

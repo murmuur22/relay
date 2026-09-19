@@ -17,7 +17,7 @@ test('ACLs retain hidden shortcuts without granting access; corrupt trees refuse
 }));
 const json=async r=>{assert.equal(r.status,200,await r.clone().text());return r.json();};
 test('personal desktop migration, folders, collisions, cycles, reset and persistence',{timeout:15000},()=>fixture(async(g,runtime,api,auth)=>{
- let d=await json(await api('/desktop'));assert.equal(d.ownerId,auth.s.user.id);assert.equal(d.items.length,4);assert.ok(d.items.every(i=>/^[a-f0-9]{8}$/.test(i.key)));const app=d.items[0];
+ let d=await json(await api('/desktop'));assert.equal(d.ownerId,auth.s.user.id);assert.deepEqual(new Set(d.items.map(i=>i.appId)),new Set(auth.s.apps.map(a=>a.id)));assert.equal(d.items.filter(i=>i.appId==='system-updater').length,1);assert.ok(d.items.every(i=>/^[a-f0-9]{8}$/.test(i.key)));const app=d.items.find(i=>i.appId==='parcels');
  d=await json(await api('/desktop/folders','POST',{parentId:null,label:'Work'}));const folder=d.itemId;
  d=await json(await api('/desktop/items/'+app.id,'PATCH',{parentId:folder,label:'Personal',icon:{type:'builtin',name:'star'}}));assert.equal(d.items.find(i=>i.id===app.id).label,'Personal');
  assert.equal((await api('/desktop/items/'+folder,'PATCH',{parentId:folder})).status,400);
