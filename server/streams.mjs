@@ -23,6 +23,10 @@ const virtualKey = (key) =>
   })[key] || (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
 const number = (n, min, max, fallback) =>
   Number.isFinite(n) ? Math.round(Math.max(min, Math.min(max, n))) : fallback;
+const bounds = value => {
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==4||!['x','y','width','height'].every(k=>Number.isFinite(value[k])))throw Error('Invalid restore bounds');
+ return {x:number(value.x,0,4096,0),y:number(value.y,0,4096,0),width:number(value.width,320,1600,800),height:number(value.height,200,1000,500)};
+};
 export class Manager {
   constructor(runtime, apps) {
     this.runtime = runtime;
@@ -40,7 +44,7 @@ export class Manager {
         {
           const app=this.apps.find(a=>a.id===w.appId);
           if(!app||w.id!==app.id)continue;
-          this.windows.set(app.id,{...this.windowFor(app),x:number(w.x,0,4096,60),y:number(w.y,0,4096,80),width:number(w.width,320,1600,800),height:number(w.height,200,1000,500),visible:typeof w.visible==='boolean'?w.visible:true,focused:false});
+          this.windows.set(app.id,{...this.windowFor(app),x:number(w.x,0,4096,60),y:number(w.y,0,4096,80),width:number(w.width,320,1600,800),height:number(w.height,200,1000,500),visible:typeof w.visible==='boolean'?w.visible:true,focused:false,maximized:w.maximized===true,...(w.restoreBounds?{restoreBounds:bounds(w.restoreBounds)}:{})});
         }
     } catch {}
   }
@@ -54,7 +58,7 @@ export class Manager {
     this.persistence.queue=this.persistQueue;
     return this.persistQueue;
   }
-  windowFor(app){return {id:app.id,appId:app.id,title:app.label,mode:app.mode,x:app.id==='signal-lab'?120:60,y:80,width:800,height:500,visible:true,focused:false,...(app.kind==='web'?(app.mode==='native'?{url:app.address,external:true,openMode:app.openMode}:{}):(app.url?{url:app.url}:{}))};}
+  windowFor(app){return {id:app.id,appId:app.id,title:app.label,mode:app.mode,x:app.id==='signal-lab'?120:60,y:80,width:800,height:500,visible:true,focused:false,maximized:false,...(app.kind==='web'?(app.mode==='native'?{url:app.address,external:true,openMode:app.openMode}:{}):(app.url?{url:app.url}:{}))};}
   async open(appId) {
     const app = this.apps.find((a) => a.id === appId);
     if (!app) throw Error("Unknown registered app");
@@ -70,6 +74,12 @@ export class Manager {
   async patch(id, changes) {
     const w = this.windows.get(id);
     if (!w) throw Error("Unknown window");
+    if ('maximized' in changes && typeof changes.maximized !== 'boolean') throw Error('Invalid maximize state');
+    const restore = 'restoreBounds' in changes ? bounds(changes.restoreBounds) : null;
+    if(restore)w.restoreBounds=restore;
+    if(changes.maximized===true&&!w.maximized&&!restore)w.restoreBounds=bounds({x:w.x,y:w.y,width:w.width,height:w.height});
+    if(changes.maximized===false&&w.maximized&&w.restoreBounds)changes={...w.restoreBounds,...changes};
+    if('maximized'in changes)w.maximized=changes.maximized;
     // Commit ownership before yielding; release invalidates queued input immediately.
     const releases = [];
     if (changes.focused === true) {

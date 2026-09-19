@@ -1,4 +1,6 @@
 import {VERSION} from '../version.js';
+import {Desktop} from './desktop.mjs';
+import {normalizeIcon} from './icons.mjs';
 import express from 'express';
 import {publicApp,webConfig} from './webapps.mjs';
 import {Transport} from './transport.mjs';
@@ -73,12 +75,25 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   authBusy++;
   try{const user=accounts.state.users.find(u=>u.username===req.body?.username);const valid=await verify(req.body?.password,user?.password||accounts.dummy);if(!user||!valid||user.disabled){failures++;throw fail(401,'Invalid username or password');}if(accounts.state.users.find(u=>u.id===user.id)!==user)throw fail(401,'Account changed. Sign in again.');await login(req,res,user);}finally{authBusy--;}
  }));
+ app.get(/^\/desktop(?:\/.*)?$/, (req,res)=>{if(req.originalUrl.length>4096||req.path.split('/').length>131)return res.status(414).json({error:'Desktop path too long'});res.sendFile(ROOT+'dist/index.html');});
  app.use((req,res,next)=>{
   if(req.path==='/'||req.path.startsWith('/assets/')||req.path.startsWith('/fonts/'))return next();
   const s=getSession(req);if(!s)return res.status(401).json({error:'Authentication required'});req.session=s;next();
  });
  app.use('/api',(req,res,next)=>{if(!['GET','HEAD'].includes(req.method)&&(req.headers.origin!==origin||req.headers['x-csrf-token']!==req.session.csrf))return res.status(403).json({error:'Origin and CSRF required'});next();});
  app.get('/api/session',(req,res)=>{const s=req.session;res.json({csrf:s.csrf,user:publicUser(s.user),apps:accounts.apps(s.user).map(publicApp),windows:[...s.manager.windows.values()],limits:{maxStreams:2}});});
+ const desktop=new Desktop(runtime,()=>accounts.state.services);
+ const desktopAuthority=req=>()=>{const s=getSession(req);if(!s||s!==req.session)throw fail(401,'Authentication required');return accounts.apps(s.user);};
+ app.get('/api/desktop',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req)))));
+ app.post('/api/desktop/folders',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s)=>desktop.folder(s,req.body)))));
+ app.patch('/api/desktop/items/:id',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.patch(s,apps,req.params.id,req.body)))));
+ app.delete('/api/desktop/items/:id',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.remove(s,apps,req.params.id)))));
+ app.get('/api/desktop/icons/:id',wrap(async(req,res)=>{const bytes=await desktop.readIcon(req.session.userId,desktopAuthority(req),req.params.id);res.set({'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}).send(bytes);}));
+ const commitIcon=wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.upload(req.session.userId,s,apps,req.params.id,req.normalizedIcon))));
+ app.post('/api/desktop/items/:id/icon',express.raw({type:()=>true,limit:'1mb'}),wrap(async(req,res)=>{
+  const authority=desktopAuthority(req),state=await desktop.load(req.session.userId);desktop.item(state,req.params.id,authority());
+  req.normalizedIcon=await normalizeIcon(req.body,req.headers['content-type']);authority();await commitIcon(req,res,error=>{throw error;});
+ },{queued:false}));
  const revokeUser=async id=>{await Promise.all([...sessions.values()].filter(s=>s.userId===id).map(revoke));};
  app.patch('/api/profile',wrap(async(req,res)=>{const user=await accounts.profile(req.session.userId,req.body||{});if('password' in req.body)await revokeUser(user.id);res.json(user);}));
  app.use('/api/admin',(req,res,next)=>{if(req.session.user.role!=='admin'||req.session.user.mustChange)return res.status(403).json({error:'Admin access required'});next();});

@@ -1,6 +1,16 @@
 # Relay prototype verification
 
-## Immersive motion and first-run setup — Unreleased
+## Personal desktop folders, appearance and private routing — Unreleased
+
+Branch: `feat/desktop-folders-routing`. Implemented per-user nested folders, grid-snapped shortcut moves, right-click/keyboard/touch actions, personal names/icons, normalized private raster uploads, clickable breadcrumbs and readable stable-key URLs. The existing maximize control persists restore geometry and is reflected in private app URLs. Global app definitions/grants are unchanged by personal customization. Public sharing remains a separate proposal in `docs/public-sharing-plan.md`.
+
+Parent executed `npm run build && npm test`: **80 backend tests, 47 frontend tests and full hybrid integration passed**, then repeated fresh dependency setup/build/full tests from a clean Git-index export without private fonts or runtime state. Coverage includes real PNG/JPEG/WebP normalization/private reads/quotas, folder cycles/collisions/reparenting/persistence, revoked metadata/regrant, removed-history capacity recovery, private deep-link login, foreign/invalid routes, native form continuity, maximize/history/reload, keyboard/touch alternatives, and delayed responses/queued writes across account switches. Red regressions reproduced obsolete maximize after newer folder/app navigation, hidden unavailable-route recovery controls and malformed slugs after Unicode expansion; fixes passed. The existing ZIP-byte, native data, streaming, motion and onboarding suites remain passing.
+
+Independent source re-review found no blocking issue after those fixes. Desktop folder/path, context-menu, icon-gallery, maximized synthetic-app and narrow screenshots were inspected. All screenshots and image fixtures are synthetic, not real user content or household-service evidence.
+
+Limits: single-gateway-process JSON persistence with atomic rename, not a cross-process database/fsync guarantee; fixed ordinal slots can reflow between screen sizes and scroll locally; animated drag ghosts and edge auto-scroll remain polish. Browser verification is Chromium plus emulated touch, not Safari/physical-device qualification. Icon decoding is bounded but may finish after disconnect; stale commits are rejected. No public sharing, GitHub push or VM deployment is included.
+
+## Immersive motion and first-run setup — previous Unreleased verification
 
 Development branch: `feat/immersive-onboarding`, based on source version 0.2.0. The arrival overlay uses `[ESC] BYPASS INITIALIZATION`, a bounded monochrome signal-settling effect, inert covered content and managed keyboard/touch focus. Authentication loads underneath. Login/desktop/window/Navigation motion respects account preferences and device reduced motion; minimized native frames retain state.
 

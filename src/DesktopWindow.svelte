@@ -4,15 +4,15 @@
  import {windowMotion} from './motion.js';
  import {safeExternal} from './webapps.js';
  import { clampBounds,TITLE_HEIGHT } from './geometry.js';
- let {win,index,areaWidth,areaHeight,onchange,onfocus,onminimize,onclose,onreload,motion=false}=$props();
- let restore=$state(null),gesture=$state(null),frame=$state(),bridgeCleanup=()=>{},nativeState=$state('loading');
+ let {win,index,areaWidth,areaHeight,onchange,onfocus,onminimize,onclose,onreload,onmaximize,motion=false}=$props();
+ let restore=$derived(win.maximized),gesture=$state(null),frame=$state(),bridgeCleanup=()=>{},nativeState=$state('loading');
  const nativeUrls={parcels:'/native/parcels/',keepsakes:'/native/keepsakes/'};
  let safeUrl=$derived(win.external?safeExternal(win.url,window.location.origin):nativeUrls[win.appId]===win.url?win.url:null);
  let narrow=$derived(areaWidth<640);
  let bounds=$derived(narrow?{x:0,y:0,width:areaWidth-4,height:areaHeight-TITLE_HEIGHT}:win);
  function begin(e,kind){if(e.button!==0||e.target.closest('.window-controls'))return;e.preventDefault();onfocus();if(restore||narrow)return;gesture={kind,x:e.clientX,y:e.clientY,bounds:{x:win.x,y:win.y,width:win.width,height:win.height}};e.currentTarget.setPointerCapture(e.pointerId);}
  function move(e){if(!gesture)return;const dx=e.clientX-gesture.x,dy=e.clientY-gesture.y,b=gesture.bounds;onchange(clampBounds(gesture.kind==='drag'?{...b,x:b.x+dx,y:b.y+dy}:{...b,width:b.width+dx,height:b.height+dy},areaWidth,areaHeight));}
- function maximize(){if(restore){onchange(clampBounds(restore,areaWidth,areaHeight));restore=null;}else{restore={x:win.x,y:win.y,width:win.width,height:win.height};onchange({x:0,y:0,width:areaWidth-4,height:areaHeight-TITLE_HEIGHT});}onfocus();}
+ function maximize(){onmaximize();}
  function nativeLoaded(){bridgeCleanup();try{const doc=frame.contentDocument;if(!doc)throw Error();const activate=()=>onfocus();doc.addEventListener('pointerdown',activate,true);doc.addEventListener('focusin',activate,true);bridgeCleanup=()=>{doc.removeEventListener('pointerdown',activate,true);doc.removeEventListener('focusin',activate,true);};const text=doc.body?.innerText||'';nativeState=doc.querySelector('body > pre')&&/error|unavailable|unauthorized/i.test(text)?'unavailable':'ready';}catch{nativeState='unavailable';}}
  onMount(()=>()=>bridgeCleanup());
 </script>

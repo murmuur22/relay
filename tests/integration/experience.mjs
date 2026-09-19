@@ -70,7 +70,11 @@ try{
  await expect(surface).toBeVisible();
  await expect(page.locator('[data-app="notes-lab"] .stream-status')).toContainText('live',{timeout:15000});
  await expect(page.locator('[data-app="signal-lab"] .stream-status')).toContainText('live',{timeout:15000});
- await surface.click({position:{x:80,y:150}});await page.keyboard.type('Hello from your desktop.');
+ await surface.click({position:{x:80,y:150}});
+ // The app query now owns reload focus. Wait for real cross-window activation,
+ // rather than typing while the authenticated focus PATCH is still in flight.
+ await expect.poll(()=>g.manager.resources.get('notes-lab').page.evaluate(()=>document.activeElement===document.querySelector('textarea'))).toBe(true);
+ await page.keyboard.type('Hello from your desktop.');
  await expect.poll(async()=>g.manager.resources.get('notes-lab').page.locator('textarea').inputValue()).toBe('Hello from your desktop.');
  assert.equal(await g.manager.resources.get('signal-lab').page.locator('textarea').inputValue(),'');
  const beforeMove={...g.manager.windows.get('notes-lab')};
