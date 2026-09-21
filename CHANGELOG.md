@@ -5,7 +5,8 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
-No changes recorded yet.
+### Fixed
+- Updater discovery retains candidates genuinely verified during the current check if a later release times out or fails verification. Failed candidates are never offered; a failure before any verified result still fails closed. The existing eight-second budget and install-time re-verification remain unchanged. This requires a separately approved updater maintenance repair, not a replacement of the published 0.5.0 artifacts or control-plane self-update.
 
 ## [0.5.0] — 2026-09-21
 

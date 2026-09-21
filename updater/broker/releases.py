@@ -214,8 +214,16 @@ class Releases:
             version = release.get('tag_name')
             if release.get('draft') or release.get('prerelease') or not isinstance(version, str) or not VERSION.fullmatch(version):
                 continue
-            with tempfile.TemporaryDirectory(dir=work) as tmp:
-                manifest = self.verified_manifest(version, tmp, deadline=deadline)
+            try:
+                with tempfile.TemporaryDirectory(dir=work) as tmp:
+                    manifest = self.verified_manifest(version, tmp, deadline=deadline)
+            except (Denied, OSError, ValueError):
+                # Discovery is bounded, not all-or-nothing: an older release
+                # must not discard candidates already genuinely verified in
+                # this check. Never return the failed/unverified candidate.
+                if not entries:
+                    raise
+                break
             entries[version] = dict(version=version, notes=str(release.get('body') or '')[:8000], size=manifest['artifact']['size'], verified=True)
         self.entries = entries
         return list(entries.values())

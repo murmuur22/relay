@@ -6,6 +6,11 @@ on:
         description: 'Published stable release to discover with the unchanged v0.4.2 verifier'
         required: true
         type: string
+      source-ref:
+        description: 'Updater source revision to check (old baseline or reviewed repair)'
+        required: true
+        default: '5466bd50b3a756955ae9dbd6ceb3f5fde29e7af1'
+        type: string
 permissions:
   contents: read
 jobs:
@@ -15,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: '5466bd50b3a756955ae9dbd6ceb3f5fde29e7af1'
+          ref: ${{ inputs.source-ref }}
           persist-credentials: false
       - name: Verify ordinary stable release discovery without GitHub credentials
         env:
@@ -31,5 +36,5 @@ jobs:
               start = time.monotonic()
               entries = Releases(dict(mode='production', gh='/usr/bin/gh')).check(Path(directory))
               assert any(e['version'] == target and e['verified'] is True for e in entries)
-              print('PASS unchanged v0.4.2 stable discovery:', target, 'elapsed seconds:', round(time.monotonic() - start, 2))
+              print('PASS credential-free stable discovery:', target, 'elapsed seconds:', round(time.monotonic() - start, 2))
           PY
