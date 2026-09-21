@@ -1,5 +1,11 @@
 # Relay prototype verification
 
+## 0.5.0 published signed-release qualification
+
+Source tag: `a70950ef3e146ebdc65d0f1859a4a23564a7b2fb`. [Linux preflight](https://github.com/murmuur22/relay/actions/runs/35625920256), [signed release build](https://github.com/murmuur22/relay/actions/runs/35626306419), and [signed qualification](https://github.com/murmuur22/relay/actions/runs/35626660077) passed. Qualification included fresh initial installs plus genuine signed 0.4.2 → 0.5.0 installation and matching-state rollback in BOTH loopback and private-LAN modes. The unchanged installed 0.4.2 engine/web performed HTTP password/CSRF-consented operations; accounts/desktop state, old control-plane/config/units, readiness on 4180 and session revocation were checked. Public downloads passed anonymous exact-source provenance, both payload hashes/sizes, package versions and MIT license checks. Promoted to latest stable; no production VM update was performed.
+
+These hosted tests used explicit verified target admission because the candidate was still a prerelease; ordinary stable discovery is a separate gate. After promotion, the unchanged discovery path timed out twice on the macOS test host under its existing eight-second total budget while verifying older releases. A dedicated credential-free hosted discovery workflow checks this independently; do not equate signed installation success with discovery reliability. Other limits remain: synthetic hosted state, no browser clicks in the signed upgrade harness, no power-loss testing.
+
 ## 0.5.0 streamed navigation and upgrade preparation — local verification
 
 A clean staged-tree export with fresh npm/uv setup passed both builds, the complete Relay backend/frontend suite and real hybrid integration, Python updater/deployment tests, and updater unit/browser suites. The staged publication audit excluded protected state, private paths, credentials and uncleared fonts. New deterministic browser fixtures verify multi-hop redirects at their actual destination origin, per-hop DNS/allowlist checks, redirect methods/cookies/CSP, long runtime URLs, bounded request bodies, remote Back/Forward, failed-navigation recovery, logout cancellation, and HTTP 204/replaced-navigation history behavior.

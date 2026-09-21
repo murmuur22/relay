@@ -1,0 +1,35 @@
+name: Existing updater release discovery
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Published stable release to discover with the unchanged v0.4.2 verifier'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '5466bd50b3a756955ae9dbd6ceb3f5fde29e7af1'
+          persist-credentials: false
+      - name: Verify ordinary stable release discovery without GitHub credentials
+        env:
+          TARGET: ${{ inputs.version }}
+        run: |
+          env -i PATH=/usr/bin:/bin TARGET="$TARGET" /usr/bin/python3 - <<'PY'
+          import os, re, tempfile, time
+          from pathlib import Path
+          from updater.broker.releases import Releases
+          target = os.environ['TARGET']
+          assert re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', target)
+          with tempfile.TemporaryDirectory() as directory:
+              start = time.monotonic()
+              entries = Releases(dict(mode='production', gh='/usr/bin/gh')).check(Path(directory))
+              assert any(e['version'] == target and e['verified'] is True for e in entries)
+              print('PASS unchanged v0.4.2 stable discovery:', target, 'elapsed seconds:', round(time.monotonic() - start, 2))
+          PY
