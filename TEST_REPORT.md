@@ -1,8 +1,22 @@
 # Relay prototype verification
 
+## 0.5.0 streamed navigation and upgrade preparation — local verification
+
+A clean staged-tree export with fresh npm/uv setup passed both builds, the complete Relay backend/frontend suite and real hybrid integration, Python updater/deployment tests, and updater unit/browser suites. The staged publication audit excluded protected state, private paths, credentials and uncleared fonts. New deterministic browser fixtures verify multi-hop redirects at their actual destination origin, per-hop DNS/allowlist checks, redirect methods/cookies/CSP, long runtime URLs, bounded request bodies, remote Back/Forward, failed-navigation recovery, logout cancellation, and HTTP 204/replaced-navigation history behavior.
+
+Independent review reproduced an HTTP 204 navigation leaving history busy; the correction tracks the current main-frame request so an obsolete abort cannot settle a newer load. Request body limits are also checked before extra decoding/concatenation, with missing/incomplete bodies rejected. Red/green regressions were executed for both corrections.
+
+Independent re-review passed after those corrections, including real binary-body byte-integrity probes. A separate run of all four compiled navigation scenarios using WebKit as the client browser also passed (the remote streamed browser remains Chromium); this is local engine evidence, not a physical Safari-device certification.
+
+A separate live Google probe through the updated isolated transport reached the real `/sorry/` unusual-traffic response after search rather than the previous proxy-failure blank page. That is redirect-delivery evidence, not proof of unrestricted Google search, anti-bot compatibility or every external resource origin. Native embedding protections and exact-origin approval remain unchanged; wildcards remain deferred.
+
+Hosted jobs now cover the new navigation/body regressions and provide an explicit opt-in signed 0.4.2-to-candidate install/rollback using the unchanged installed old control plane, matching-state restoration and port 4180. Local harness tests do not establish actual signed Linux execution; publication/hosted results are recorded after execution. This preparation does not install the release on an operator VM.
+
 ## 0.4.2 updater systemd interface enumeration — local verification
 
 A clean staged-tree export passed fresh dependency setup, both builds, the full Relay backend/frontend/hybrid integration suite, Python updater/deployment tests, and updater unit/browser suites. The narrow AF_NETLINK policy fix retains empty capability sets and NoNewPrivileges. The new hosted probe exercises actual interface enumeration under systemd and requires zero effective capabilities; its execution and signed dual-mode installation qualification are separate publication gates.
+
+Version 0.4.2 subsequently passed hosted Linux preflight ([35470143668](https://github.com/murmuur22/relay/actions/runs/35470143668)), signed release build ([35470317526](https://github.com/murmuur22/relay/actions/runs/35470317526)), and both loopback/private-LAN signed initial-install qualifications ([35470507732](https://github.com/murmuur22/relay/actions/runs/35470507732)). The actual systemd interface-enumeration probe asserted zero effective capabilities. Public assets were anonymously verified against tag commit `5466bd50b3a756955ae9dbd6ceb3f5fde29e7af1` before stable promotion. These runs establish initial installation, not a second-signed-version upgrade.
 
 The preceding 0.4.1 signed hosted qualification passed loopback but failed private-LAN updater startup (`uv_interface_addresses`, error 97). Version 0.4.2 corrects that service address-family restriction without weakening assigned-interface validation.
 

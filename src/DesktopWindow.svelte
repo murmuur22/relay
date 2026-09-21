@@ -7,6 +7,8 @@
  import { clampBounds,TITLE_HEIGHT } from './geometry.js';
  let {win,index,areaWidth,areaHeight,onchange,onfocus,onminimize,onclose,onreload,onmaximize,motion=false,api}=$props();
  let restore=$derived(win.maximized),gesture=$state(null),frame=$state(),bridgeCleanup=()=>{},nativeState=$state('loading');
+ let navigation=$state({canGoBack:false,canGoForward:false,busy:true}),navigationPending=$state(false),navigationError=$state('');
+ async function travel(direction){if(navigationPending)return;navigationPending=true;navigationError='';try{await api('/windows/'+encodeURIComponent(win.id)+'/navigate','POST',{direction});}catch(e){navigationError=e.message;}finally{navigationPending=false;}}
  const nativeUrls={parcels:'/native/parcels/',keepsakes:'/native/keepsakes/'};
  let safeUrl=$derived(win.external?safeExternal(win.url,window.location.origin):nativeUrls[win.appId]===win.url?win.url:null);
  let narrow=$derived(areaWidth<640);
@@ -21,15 +23,15 @@
  <!-- svelte-ignore a11y_no_static_element_interactions -->
  <div class="titlebar" onpointerdown={e=>begin(e,'drag')} onpointermove={move} onpointerup={()=>gesture=null} onpointercancel={()=>gesture=null} ondblclick={maximize}>
   <span class="window-title">{win.title}</span><span class="mode-label">{win.mode==='stream'?'streamed':'native'}</span>
-  <div class="window-controls"><button aria-label={'Reload '+win.title} title="Reload app" onclick={onreload}>↻</button><button aria-label={'Minimize '+win.title} title="Minimize" onclick={onminimize}>−</button><button aria-label={(restore?'Restore size ':'Maximize ')+win.title} title={restore?'Restore':'Maximize'} onclick={maximize}>{restore?'❐':'□'}</button><button aria-label={'Close '+win.title} title="Close app" onclick={onclose}>×</button></div>
+  <div class="window-controls">{#if win.mode==='stream'}<button aria-label={'Back in '+win.title} title="Back in remote page" disabled={!navigation.canGoBack||navigation.busy||navigationPending} onclick={()=>travel('back')}>←</button><button aria-label={'Forward in '+win.title} title="Forward in remote page" disabled={!navigation.canGoForward||navigation.busy||navigationPending} onclick={()=>travel('forward')}>→</button>{/if}<button aria-label={'Reload '+win.title} title="Reload app" onclick={onreload}>↻</button><button aria-label={'Minimize '+win.title} title="Minimize" onclick={onminimize}>−</button><button aria-label={(restore?'Restore size ':'Maximize ')+win.title} title={restore?'Restore':'Maximize'} onclick={maximize}>{restore?'❐':'□'}</button><button aria-label={'Close '+win.title} title="Close app" onclick={onclose}>×</button></div>
  </div>
  <div class="window-content">
   {#if win.mode==='system'&&win.appId==='system-updater'}
    {#key win.reload}<UpdaterBrowser {api} {motion} visible={win.visible} onactivate={onfocus} />{/key}
   {:else if win.mode==='native'}
-   {#if safeUrl&&win.external}<div class="external-native"><p class="embedding-note">Direct from this device · embedding may be blocked. <a href={safeUrl} target="_blank" rel="noopener noreferrer">Open in new tab</a></p><iframe bind:this={frame} src={safeUrl} title={win.title} sandbox="allow-scripts allow-forms" referrerpolicy="no-referrer"></iframe></div>
+   {#if safeUrl&&win.external}<div class="external-native"><p class="embedding-note">Blank or blocked? The site may refuse embedding or require features restricted by the sandbox. Relay cannot control this iframe's Back/Forward history. <a href={safeUrl} target="_blank" rel="noopener noreferrer">Open in new tab</a> for normal browser navigation; admins can make New tab the default in Apps.</p><iframe bind:this={frame} src={safeUrl} title={win.title} sandbox="allow-scripts allow-forms" referrerpolicy="no-referrer"></iframe></div>
    {:else if safeUrl}<iframe bind:this={frame} src={safeUrl} title={win.title} onload={nativeLoaded}></iframe>{#if nativeState!=='ready'}<div class="native-notice" role="status">{nativeState==='loading'?'Loading native app…':'Native app unavailable — use reload to retry.'}</div>{/if}{:else}<div class="surface-message">Unregistered native app URL. Content was not loaded.</div>{/if}
-  {:else}<StreamSurface {win} onactivate={onfocus}/>{/if}
+  {:else}<StreamSurface {win} onactivate={onfocus} onnavigation={value=>navigation=value}/>{#if navigationError}<p role="alert">{navigationError}</p>{/if}{/if}
  </div>
  {#if !narrow&&!restore}<button class="resize-handle" aria-label={'Resize '+win.title} onpointerdown={e=>begin(e,'resize')} onpointermove={move} onpointerup={()=>gesture=null} onpointercancel={()=>gesture=null}></button>{/if}
 </section>

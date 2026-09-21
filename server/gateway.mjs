@@ -173,7 +173,15 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  const operation=fn=>wrap(async(req,res)=>{try{res.json(await fn(req,req.session.manager));}catch(e){throw fail(e.status||400,e.status?e.message:'Invalid window operation');}});
  const permit=(req,id)=>{if(!accounts.allowed(req.session.user,accounts.state.services.find(a=>a.id===id)))throw fail(403,'Service access denied');};
  app.post('/api/windows',operation((req,m)=>{permit(req,req.body?.appId);return m.open(req.body.appId);}));
- for(const method of ['patch','delete','post'])app[method]('/api/windows/:id'+(method==='post'?'/reload':''),operation(async(req,m)=>{permit(req,req.params.id);if(method==='patch')return m.patch(req.params.id,req.body||{});if(method==='post')return m.reload(req.params.id);if(!m.windows.has(req.params.id))throw Error();await m.remove(req.params.id);return {closed:true};}));
+ for(const action of ['navigate','reload'])app.post('/api/windows/:id/'+action,wrap(async(req,res)=>{
+  permit(req,req.params.id);
+  if(action==='navigate'&&(!req.body||Object.keys(req.body).length!==1||!['back','forward'].includes(req.body.direction)))throw fail(400,'Expected a back or forward direction only');
+  if(action==='reload'&&req.body!==undefined&&(!req.body||typeof req.body!=='object'||Array.isArray(req.body)||Object.keys(req.body).length))throw fail(400,'Expected empty reload body');
+  const result=action==='navigate'?await req.session.manager.navigate(req.params.id,req.body.direction):await req.session.manager.reload(req.params.id);
+  if(getSession(req)!==req.session)throw fail(401,'Authentication required');
+  permit(req,req.params.id);res.json(result);
+ },{queued:false}));
+ for(const method of ['patch','delete'])app[method]('/api/windows/:id',operation(async(req,m)=>{permit(req,req.params.id);if(method==='patch')return m.patch(req.params.id,req.body||{});if(!m.windows.has(req.params.id))throw Error();await m.remove(req.params.id);return {closed:true};}));
  let health={checkedAt:0,keepsakes:false,parcels:false},probing;
  const webHealth=new HealthProbes({gatewayOrigin:origin});
  const appHealth=a=>webHealth.probe(a);

@@ -17,6 +17,24 @@ def installer():
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_safari_safe_fresh_defaults_and_qualification(self):
+        from unittest.mock import patch
+        m = installer()
+        for host in (None, '10.20.30.40'):
+            self.assertTrue(m.deployment_network(host)['relayOrigin'].endswith(':4180'))
+            self.assertTrue(m.deployment_network(host)['uiOrigin'].endswith(':4191'))
+        with patch.object(m.socket, 'socket') as socket:
+            m.preflight_network()
+            self.assertEqual(socket.return_value.__enter__.return_value.bind.call_args_list,
+                             [unittest.mock.call(('127.0.0.1', 4180)), unittest.mock.call(('127.0.0.1', 4191))])
+        self.assertIn('Environment=PORT=4180\n', (ROOT / 'deploy/relay.service').read_text())
+        spec = importlib.util.spec_from_file_location('relay_port_qualify', ROOT / 'deploy/qualify-systemd.py')
+        q = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(q)
+        with patch.object(q, 'http', return_value=(200, dict(status='ready', version='0.4.2', maintenance=False), '')) as request:
+            q.ready('v0.4.2', False)
+            request.assert_called_once_with(4180, '/health/ready')
+
     def test_anonymous_provenance_and_both_payloads(self):
         import hashlib
         import json
@@ -210,6 +228,20 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn('/opt/relay-updater/deploy/qualify-systemd.py', command)
         self.assertIn('--restore-baseline', command)
         self.assertIn('--wait', command)
+
+    def test_fresh_install_explicit_port_overrides_old_signed_unit(self):
+        # Old signed units retain 4190; the new fresh-host configuration must
+        # deliberately select 4180 without editing the independently signed code.
+        from unittest.mock import patch
+        m = installer()
+        with patch.object(m.os, 'geteuid', return_value=0), patch.object(m, 'host_conflicts'), patch.object(m, 'preflight_network'), patch.object(m.os, 'umask'), patch.object(m, 'run'), patch.object(m.pwd, 'getpwnam') as user, patch.object(m.grp, 'getgrnam'), patch.object(m.Path, 'mkdir'), patch.object(m.Path, 'chmod'), patch.object(m.os, 'chown'), patch.object(m.shutil, 'copytree'), patch.object(m.Path, 'read_bytes', return_value=b'signed unit unchanged'), patch.object(m.Path, 'read_text', return_value='{"mode":"production","version":"v0.4.2","sha256":"digest"}'), patch.object(m, 'write_new') as write:
+            user.return_value.pw_uid = 123
+            user.return_value.pw_gid = 123
+            m.grp.getgrnam.return_value.gr_gid = 124
+            m.apply_install(Path('/synthetic'), {'artifact': {'sha256': 'digest'}}, 'v0.4.2')
+            writes = {str(c.args[0]): c.args[1] for c in write.call_args_list}
+            self.assertIn('PORT=4180\n', writes['/etc/relay-updater/relay.env'])
+            self.assertEqual(writes['/etc/systemd/system/relay.service'], b'signed unit unchanged')
 
     def test_apply_rechecks_conflicts_before_any_command(self):
         from unittest.mock import patch

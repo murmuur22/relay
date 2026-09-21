@@ -1,6 +1,7 @@
 import {fail} from './accounts.mjs';
-export function webURL(value){
- if(typeof value!=='string'||value.length>2048||!/^https?:\/\//i.test(value)||value!==value.trim())throw fail(400,'Enter an explicit absolute HTTP or HTTPS address.');
+export const RUNTIME_URL_LIMIT=32768;
+export function webURL(value,maxLength=2048){
+ if(typeof value!=='string'||value.length>maxLength||!/^https?:\/\//i.test(value)||value!==value.trim())throw fail(400,'Enter an explicit absolute HTTP or HTTPS address.');
  let u;try{u=new URL(value);}catch{throw fail(400,'Invalid address or port.');}
  if(!['http:','https:'].includes(u.protocol)||u.username||u.password||u.hash||value.includes('#'))throw fail(400,'HTTP(S) only; credentials and fragments are not allowed.');
  return u;

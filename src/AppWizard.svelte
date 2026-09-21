@@ -30,7 +30,7 @@
  {:else if draft.step===3}
   {#if draft.mode==='native'}
    <label class="check"><input type="radio" bind:group={draft.openMode} value="window"/>Desktop window</label><label class="check"><input type="radio" bind:group={draft.openMode} value="tab"/>New tab</label>
-   <p class="full-width muted">Your device must reach this address. Use a different hostname from Relay; cookies are shared across ports. Embedding, mixed-content and browser privacy restrictions may block a window or preview; a new tab may work instead. Relay permissions control this launcher, not the upstream site. An iframe loading is not proof of health.</p>
+   <p class="full-width muted">Your device must reach this address. Use a different hostname from Relay; cookies are shared across ports. Sites can refuse embedding with X-Frame-Options or CSP frame-ancestors. The iframe sandbox, mixed-content and privacy restrictions can also block sign-in or leave a blank preview; Relay does not bypass these protections. Choose New tab above for the site's normal browser experience. Relay cannot control cross-origin iframe Back/Forward history. Permissions control this launcher, not the upstream site; a loaded iframe is not proof of health.</p>
   {:else}
    <label class="full-width">Additional approved origins<textarea bind:value={draft.originText} rows="3" placeholder="https://assets.example (one origin per line)"></textarea></label>
    <p class="full-width muted">The initial origin is approved automatically. Other origins require explicit approval. Redirects and assets outside this list are blocked. WebSockets, file pickers and download bridges are unsupported. Some websites will not work; this is not a general-purpose browser.</p>

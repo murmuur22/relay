@@ -70,7 +70,7 @@ def ready(version, maintenance):
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         try:
-            status, body, _ = http(4190, '/health/ready')
+            status, body, _ = http(4180, '/health/ready')
             if status == 200 and body == dict(status='ready', version=version[1:], maintenance=maintenance):
                 return
         except (OSError, ValueError):
@@ -124,22 +124,22 @@ def ungate():
 
 
 def authenticate(password):
-    status, auth, _ = http(4190, '/api/auth')
+    status, auth, _ = http(4180, '/api/auth')
     require(status == 200, 'Normal auth discovery failed')
     data = dict(username='admin', password=password)
     if auth['setup']:
         data['setup'] = urlsplit(Path('/var/lib/relay/setup-url.txt').read_text().strip()).fragment
-    status, _, cookie = http(4190, '/api/enroll' if auth['setup'] else '/api/login', 'POST', data, csrf=auth['csrf'])
+    status, _, cookie = http(4180, '/api/enroll' if auth['setup'] else '/api/login', 'POST', data, csrf=auth['csrf'])
     require(status == 200 and bool(cookie), 'Normal administrator enrollment/login failed')
-    status, session, _ = http(4190, '/api/session', cookie=cookie)
+    status, session, _ = http(4180, '/api/session', cookie=cookie)
     require(status == 200 and session['user']['role'] == 'admin', 'Administrator session failed')
     return cookie, session['csrf']
 
 
 def launch_monitor(cookie, csrf):
-    status, value, _ = http(4190, '/api/updater/state', cookie=cookie)
+    status, value, _ = http(4180, '/api/updater/state', cookie=cookie)
     require(status == 200, 'Desktop read bridge failed')
-    status, value, _ = http(4190, '/api/updater/launch', 'POST', {}, cookie, csrf)
+    status, value, _ = http(4180, '/api/updater/launch', 'POST', {}, cookie, csrf)
     require(status == 200, 'Normal desktop launch failed')
     url = urlsplit(value['url'])
     require(url.scheme == 'http' and url.netloc == f"{NETWORK['hostname']}:4191" and url.path == '/updater/' and not url.query, 'Unsafe launch target')
@@ -259,7 +259,7 @@ def qualify(args):
         run(['/usr/bin/systemctl', 'start', *install.UNITS])
         wait_control()
         ready(args.version, True)
-        require(http(4190, '/api/auth')[0] == 503, 'Initial maintenance admission open')
+        require(http(4180, '/api/auth')[0] == 503, 'Initial maintenance admission open')
         ungate()
         # Broker cached the initial closed-gate reason; restart only after readiness validation.
         run(['/usr/bin/systemctl', 'restart', 'relay-updater-broker.service'])
@@ -274,7 +274,7 @@ def qualify(args):
         run(['/usr/bin/systemctl', 'restart', 'relay-updater-broker.service', 'relay.service'])
         wait_control()
         ready(args.version, True)
-        require(http(4190, '/api/auth')[0] == 503 and GATE.exists(), 'Restart lost durable admission gate')
+        require(http(4180, '/api/auth')[0] == 503 and GATE.exists(), 'Restart lost durable admission gate')
         require(http(4191, '/updater/api/state', cookie=monitor)[0] == 200, 'Broker restart lost monitoring capability')
         run(['/usr/bin/systemctl', 'stop', 'relay.service'])
         require(http(4191, '/updater/api/state', cookie=monitor)[0] == 200, 'Independent monitoring failed during stop')
@@ -283,7 +283,7 @@ def qualify(args):
         signed_baseline_restore(args.version)
         ready(args.version, False)
         cookie, csrf = authenticate(password)
-        require(http(4190, '/api/updater/state', cookie=cookie)[0] == 200, 'Read bridge failed after recovery')
+        require(http(4180, '/api/updater/state', cookie=cookie)[0] == 200, 'Read bridge failed after recovery')
         result = dict(passed=True, version=args.version, networkMode=NETWORK['networkMode'], relayOrigin=NETWORK['relayOrigin'],
                       evidence=['official-attested-initial-enrollment', 'systemd-distinct-uids-no-new-privileges',
                                 'key-state-DAC-denial', 'normal-admin-auth-and-HTTP-ticket-handoff',

@@ -10,6 +10,21 @@ macOS fixture establishes that these units, Chromium or provenance verification
 work on a Linux machine. The qualification command below must actually succeed
 before recording that evidence.
 
+## Unreleased deployment changes
+
+Fresh installer and qualification defaults now use Relay **4180** and independent
+Updater **4191**. Safari/WebKit blocks the former Relay port 4190 before sending
+HTTP; do not disable browser port protections. `relay.env` explicitly sets
+`PORT=4180`, including when this reviewed installer installs the signed v0.4.2
+baseline whose unit still declares 4190. The signed unit/archive is not rewritten.
+This is a fresh-install default, NOT an existing-host migration. Normal runtime
+updates never rewrite operator configuration, systemd units, or the independently
+installed v0.4.2 control plane. Existing explicit `PORT=4180` remains authoritative.
+
+Optional release dispatch upgrade qualification is described below. Its local
+regressions do not establish hosted success; run it only after publishing the
+actual signed candidate and retain the resulting hosted run URL separately.
+
 ## Trust and service layout
 
 | Path / identity | Ownership and purpose |
@@ -55,7 +70,7 @@ system prerequisites, never executables below a maintenance user's home.
   qualification) `runuser`, `test`, procfs; sudo is for the operator/CI runner only.
 - At least 10 GiB free in `/var/lib`; reserve additional space for actual state
   checkpoints. `/opt` and `/var/lib` must share a filesystem. Default ports
-  4190 and 4191 must be free. Port overrides are deliberately not supported by
+  4180 and 4191 must be free. Port overrides are deliberately not supported by
   this installer; do not relax Host/Origin checking.
 - A reviewed, trusted installer checkout (including `updater/broker/releases.py`),
   or previously authenticated control-plane tree. Treat installer code as a
@@ -144,12 +159,12 @@ The installer generates:
 
 - relay.env: `RELAY_NETWORK_MODE=private-lan`, `RELAY_HOSTNAME=CANONICAL_IP`,
   and `RELAY_UPDATER_UI_ORIGIN=http://CANONICAL_IP:4191`, alongside the existing
-  socket/key paths. The service stays `RELAY_PROFILE=standalone`, `PORT=4190`.
+  socket/key paths. The service stays `RELAY_PROFILE=standalone`, `PORT=4180`.
 - web.json: `networkMode: "private-lan"`, `bind: "CANONICAL_IP"`,
   `uiOrigin: "http://CANONICAL_IP:4191"`,
-  `relayOrigin: "http://CANONICAL_IP:4190"`, and the fixed broker socket path.
+  `relayOrigin: "http://CANONICAL_IP:4180"`, and the fixed broker socket path.
 - broker.json: `networkMode: "private-lan"`, that same UI origin and
-  `readinessUrl: "http://CANONICAL_IP:4190/health/ready"`.
+  `readinessUrl: "http://CANONICAL_IP:4180/health/ready"`.
 
 Relay also accepts those environment settings for a source standalone launch.
 The keyless updater environment entrypoint accepts `RELAY_NETWORK_MODE`,
@@ -166,7 +181,7 @@ firewall/router/DNS/Tailscale/proxy/certificate change in this mode. Do not forw
 these ports to the Internet. Only the independent first-party updater may share
 Relay's cookie host; the native-app cookie-host guard remains unchanged.
 
-For LAN activation use `http://$lan_ip:4190/health/ready`, then the same exact
+For LAN activation use `http://$lan_ip:4180/health/ready`, then the same exact
 origin for login/private desktop links and `http://$lan_ip:4191/updater/` for the
 gesture-opened maintenance tab. Do not substitute localhost or rewrite Origin.
 An IP change requires coordinated operator configuration and restart, not a
@@ -178,7 +193,7 @@ These commands are not run by the local development worker:
 
 ```sh
 sudo systemctl start relay-updater-broker.service relay-updater-web.service relay.service
-curl --fail --max-time 10 http://localhost:4190/health/ready
+curl --fail --max-time 10 http://localhost:4180/health/ready
 ```
 
 Require the exact expected package version, `status: ready` and `maintenance: true`.
@@ -191,10 +206,10 @@ using this initial-install procedure. A readiness endpoint is not a Chromium smo
 Privately forward both exact origins:
 
 ```sh
-ssh -N -L localhost:4190:127.0.0.1:4190 -L localhost:4191:127.0.0.1:4191 YOUR_SSH_USER@YOUR_VM
+ssh -N -L localhost:4180:127.0.0.1:4180 -L localhost:4191:127.0.0.1:4191 YOUR_SSH_USER@YOUR_VM
 ```
 
-Open `http://localhost:4190`. Obtain `/var/lib/relay/setup-url.txt` through protected
+Open `http://localhost:4180`. Obtain `/var/lib/relay/setup-url.txt` through protected
 operator access, never chat/logs/issues. The owner chooses the administrator
 password. The setup credential is one-use, not a permanent login bypass. Updater
 browsing is in the desktop; Start update opens the independently authenticated tab
@@ -269,6 +284,80 @@ retains protected state/receipts for diagnosis. Destroy the disposable VM afterw
 never upload accounts, bridge keys, authority journals, setup URLs or cookies as
 CI artifacts. Only the final sanitized result and selected nonsecret metadata
 should be retained. A failing command is not qualified.
+
+## Optional signed version-upgrade qualification (v0.4.2 control plane)
+
+After publishing the candidate public prerelease, dispatch `release.yml` with
+`version` set to that exact stable-form tag and optional `upgrade-from=v0.4.2`.
+Blank `upgrade-from` keeps the existing dual-mode fresh-install qualification.
+Supplying v0.4.2 adds a SEPARATE loopback/private-lan matrix, each on its own fresh
+GitHub-hosted ubuntu-24.04 runner; it never reuses the fresh-install matrix's host.
+The jobs are read-only for GitHub and cannot publish/promote or contact production.
+The selected workflow ref and candidate checkout must contain this harness.
+
+Parent/operator command, only after the signed candidate is public (set
+`candidate` to the real tag; do not dispatch a placeholder):
+
+```sh
+gh workflow run release.yml --repo murmuur22/relay --ref "$candidate" \
+  -f version="$candidate" -f upgrade-from=v0.4.2
+```
+
+The hosted job downloads all four OLD v0.4.2 assets anonymously. The reviewed new
+installer verifies both archives, installs the genuine old control plane and
+runtime, and explicitly configures 4180/4191 before any service starts. It never
+adopts existing state, identities, units/drop-ins, or `/opt/relay-qualification`.
+Both the fresh-host guards and a second explicit disposable-upgrade acknowledgment
+are mandatory. The internal worker additionally requires a root-owned private
+marker matching baseline, target and network mode, plus systemd NoNewPrivileges.
+These acknowledgments are safety guards, not cryptographic host identification;
+NEVER set them on production or an operator machine.
+
+The coordinator puts only its reviewed harness scripts in the separate root-owned
+`/opt/relay-qualification`, stops the original broker, and runs a bounded transient
+`relay-qualification-upgrade.service` with broker-equivalent
+ProtectSystem/ReadWritePaths isolation. It imports Engine, Broker, Driver and
+Releases from `/opt/relay-updater` and checks that the installed control plane is
+v0.4.2. The original installed v0.4.2 independent web service remains running.
+Neither the installed signed control-plane tree nor its unit is replaced.
+
+Ordinary production release discovery continues to EXCLUDE prereleases. For this
+qualification ONLY, the installed `Releases.verified_manifest` verifies the exact
+explicit target tag before it is placed in the engine's in-memory checked-release
+selection. Normal discovery is not patched or relaxed. The existing
+`Engine.run_install` independently downloads/verifies the manifest again, transfers
+the real artifact and checks its size/digest. No fixture verifier, fabricated
+receipt, signature bypass, alternate feed, shell endpoint or direct `run_install`
+call is used.
+
+The worker enrolls a synthetic administrator normally, completes onboarding and
+creates personal desktop state through authenticated APIs. It launches independent
+monitoring through the real one-use ticket exchange, submits explicit HTTP install
+consent with the current password and independent CSRF, and waits for the actual
+engine job. It checks target-version readiness on 4180, engine-generated production
+receipt, preserved accounts/desktop bytes and metadata, and unchanged old control
+plane/configuration/units. Old Relay sessions must expire. It logs in again, adds
+post-update personal state through the API, and submits real HTTP rollback consent.
+Rollback must restore the original signed release and its matching pre-update state
+without replacing the mounted state root. Control-plane bytes/metadata, units and
+configuration are compared again. Only a completely successful sequence emits the
+sanitized `passed: true` result; credentials/state/hashes are not printed or uploaded.
+
+This is real signed engine/HTTP qualification when executed successfully, not a
+browser-click/rendering test, normal production prerelease discovery, host reboot,
+power-loss test or production deployment. Both signed versions must remain public;
+network/attestation failures fail closed, not substitute fixture evidence. Services
+are gated/stopped afterward even on success; the disposable VM is discarded.
+Do not copy this procedure to an existing host. The user installs the promoted
+release separately through their normal updater; this qualification grants no
+production-update authorization.
+
+Local harness tests (no host installation):
+
+```sh
+python3 -m unittest updater.tests.test_deployment updater.tests.test_private_lan updater.tests.test_upgrade_qualification -v
+python3 deploy/qualify-upgrade.py --help
+```
 
 ## Recovery, limits and local verification
 

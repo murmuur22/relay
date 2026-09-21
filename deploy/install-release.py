@@ -165,10 +165,10 @@ def deployment_network(private_lan=None):
     except ValueError:
         raise InstallError('Private LAN requires a canonical RFC1918 IPv4 literal') from None
     return dict(networkMode=mode, hostname=host, bind=bind,
-                relayOrigin=f'http://{host}:4190', uiOrigin=f'http://{host}:4191')
+                relayOrigin=f'http://{host}:4180', uiOrigin=f'http://{host}:4191')
 
 
-def preflight_network(private_lan=None, ports=(4190, 4191)):
+def preflight_network(private_lan=None, ports=(4180, 4191)):
     network = deployment_network(private_lan)
     if private_lan is not None:
         # Binding alone is insufficient on Linux hosts with ip_nonlocal_bind enabled.
@@ -291,6 +291,7 @@ def apply_install(work, manifest, version, private_lan=None):
                socketPath=config['socketPath'], bind=network['bind'])
     write_new('/etc/relay-updater/web.json', json.dumps(web), 0o644)
     write_new('/etc/relay-updater/relay.env',
+              'PORT=4180\n'
               'RELAY_UPDATER_SOCKET=/run/relay-updater-control/broker.sock\n'
               'RELAY_UPDATER_BRIDGE_KEY_FILE=/etc/relay-updater/bridge.key\n'
               f"RELAY_UPDATER_UI_ORIGIN={network['uiOrigin']}\n"

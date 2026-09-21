@@ -3,7 +3,7 @@ import https from 'node:https';
 import {lookup} from 'node:dns/promises';
 import {isIP} from 'node:net';
 import {networkInterfaces} from 'node:os';
-import {webURL} from './webapps.mjs';
+import {webURL,RUNTIME_URL_LIMIT} from './webapps.mjs';
 import {fail} from './accounts.mjs';
 const host=u=>u.hostname.replace(/^\[|\]$/g,'');
 function ipv4(a){const p=a.split('.').map(Number);return p.length===4&&p.every(n=>Number.isInteger(n)&&n>=0&&n<=255)?p:null;}
@@ -22,12 +22,12 @@ export function cleanHeaders(headers){const banned=new Set(['connection','keep-a
 export class Transport{
  constructor({gatewayOrigin,lookup:resolve=lookup,dnsTimeout=2500}={}){this.dnsTimeout=dnsTimeout;this.gateway=gatewayOrigin?new URL(gatewayOrigin):null;this.lookup=resolve;this.active=new Set();this.pending=0;this.closed=false;this.local=new Set(['127.0.0.1','::1',...Object.values(networkInterfaces()).flat().map(i=>i.address)]);}
  async resolve(hostname){let timer;try{return await Promise.race([this.lookup(hostname,{all:true,verbatim:true}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(fail(400,'DNS lookup timed out')),this.dnsTimeout);})]);}finally{clearTimeout(timer);}}
- registration(value,policy){const u=webURL(value);if(policy){const approved=[webURL(policy.address).origin,...(policy.allowedOrigins||[]).map(v=>webURL(v).origin)];if(!approved.includes(u.origin))throw fail(400,'Destination origin is not approved');}
+ registration(value,policy,maxLength=2048){const u=webURL(value,maxLength);if(policy){const approved=[webURL(policy.address).origin,...(policy.allowedOrigins||[]).map(v=>webURL(v).origin)];if(!approved.includes(u.origin))throw fail(400,'Destination origin is not approved');}
   const hostname=host(u);if(isIP(hostname)&&!safeIP(hostname))throw fail(400,'Destination network is not allowed');
   if(this.gateway&&Number(u.port||(u.protocol==='https:'?443:80))===Number(this.gateway.port)&&(this.local.has(hostname)||hostname.startsWith('127.')||/^localhost\.?$/i.test(hostname)))throw fail(400,'Relay cannot be registered as an upstream app');
   return u;
  }
- async validate(value,policy){const u=this.registration(value,policy);
+ async validate(value,policy){const u=this.registration(value,policy,RUNTIME_URL_LIMIT);
  const hostname=host(u);const records=isIP(hostname)?[{address:hostname,family:isIP(hostname)}]:await this.resolve(hostname);
  if(!records.length||records.some(r=>!safeIP(r.address)))throw fail(400,'Destination network is not allowed');
  if(this.gateway&&Number(u.port||(u.protocol==='https:'?443:80))===Number(this.gateway.port)&&records.some(r=>this.local.has(r.address)||r.address.startsWith('127.')))throw fail(400,'Relay cannot be registered as an upstream app');

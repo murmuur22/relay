@@ -7,6 +7,23 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 No changes recorded yet.
 
+## [0.5.0] — 2026-09-21
+
+### Added
+- Back and Forward controls for streamed desktop windows, driven by the remote browser's actual history, with disabled states for unavailable directions, disconnection and navigation in progress. Native cross-origin iframe history is not presented as controllable.
+- Visible, query-free navigation failure notices with Back/Reload recovery, including recovery from an initial page-load failure.
+- Optional guarded hosted qualification of a genuine signed upgrade from the unchanged 0.4.2 control plane, followed by matching-state rollback. Actual hosted execution is recorded separately in TEST_REPORT.md.
+
+### Fixed
+- Intercept each HTTP redirect hop through Chromium Fetch and Relay's validated, DNS-pinned transport, preserving the real destination URL/origin, redirect methods, cookies and browser security policies. The deny-only fallback, sandbox and exact-origin restrictions remain enforced.
+- Allow bounded runtime resource URLs up to 32,768 characters while keeping administrator registration URLs capped at 2,048 characters.
+- Keep slow navigation/reload outside the global mutation queue so logout, closure and revocation can cancel work promptly. Bound redirect chains and release completed/blocked chain records.
+- Use Safari-compatible Relay port 4180 for fresh installations; the independent updater remains on 4191. Runtime updates preserve operator settings and do not self-update the control plane.
+
+### Guidance and limits
+- Native app setup and windows explain embedding restrictions (X-Frame-Options/CSP and sandbox/privacy limits) and the Open in new tab alternative. Relay does not strip upstream protections.
+- Wildcards remain deferred. External resource origins still require explicit approval; Google may challenge automated traffic. This release does not promise unrestricted browsing, anti-bot bypass, persistent browser profiles, streamed WebSockets/audio or file-transfer bridges.
+
 ## [0.4.2] — 2026-09-19
 
 ### Fixed

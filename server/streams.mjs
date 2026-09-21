@@ -1,4 +1,5 @@
 import {launchBrowser,routeWeb} from './web-browser.mjs';
+import {fail} from './accounts.mjs';
 import { readFile, writeFile, rename } from "node:fs/promises";
 const virtualKey = (key) =>
   ({
@@ -154,7 +155,8 @@ export class Manager {
       signal?.throwIfAborted();
       const app=this.apps.find(a=>a.id===w.appId);
       const url = app?.kind==='web'?app.address:`http://relay-synthetic.invalid/${w.appId}`;
-      if(app?.kind==='web')await routeWeb(context,app,this.transport,signal);
+      let installWeb;
+      if(app?.kind==='web')installWeb=await routeWeb(context,app,this.transport,signal);
       else await context.route("**/*", (route) =>
         route.request().url() === url &&
         route.request().resourceType() === "document"
@@ -163,10 +165,10 @@ export class Manager {
       );
       await context.routeWebSocket("**/*", (ws) => ws.close());
       const page = await context.newPage();
+      if(installWeb)await installWeb(page);
       context.on("page", (p) => {
         if (p !== page) p.close().catch(() => {});
       });
-      await page.goto(url,{waitUntil:'domcontentloaded',timeout:10000});
       const cdp = await context.newCDPSession(page);
       await cdp.send("Page.enable");
       const r = {
@@ -211,6 +213,22 @@ export class Manager {
         }
       });
       page.on("crash", () => {r.failed=true;this.state(r, "failed", "Browser page failed");});
+      const main=request=>request.isNavigationRequest()&&request.frame()===page.mainFrame();
+      page.on('request',request=>{if(main(request)){r.mainRequest=request;r.pageLoading=true;void this.navigationState(r);}});
+      page.on('response',response=>{if(response.request()===r.mainRequest){r.navigationError='';void this.navigationState(r);}});
+      page.on('requestfailed',request=>{
+        // 204 ends in ERR_ABORTED without a new document. Only the current
+        // request may settle loading: an obsolete abort can arrive later.
+        if(request!==r.mainRequest)return;
+        r.pageLoading=false;
+        if(request.failure()?.errorText==='net::ERR_ABORTED')void this.navigationState(r);
+        else this.navigationFailed(r);
+      });
+      page.on('domcontentloaded',()=>{r.pageLoading=false;void this.navigationState(r);});
+      page.on('framenavigated',frame=>{if(frame===page.mainFrame())void this.navigationState(r);});
+      try{await page.goto(url,{waitUntil:'domcontentloaded',timeout:10000});}
+      catch{signal?.throwIfAborted();this.navigationFailed(r);await cdp.send('Page.stopLoading').catch(()=>{});}
+      await this.navigationState(r);
       return r;
     } catch (error) {
       await closeContext();
@@ -237,6 +255,42 @@ export class Manager {
             ...(message ? { message } : {}),
           }),
         );
+  }
+  navigationFailed(r){
+    r.pageLoading=false;
+    r.navigationError='Page navigation failed or was blocked. Use Back or Reload. Check the connection and approved origins; redirects, request limits or browser restrictions may prevent this page from loading.';
+    void this.navigationState(r);
+  }
+  async navigationState(r){
+    const generation=r.historyGeneration=(r.historyGeneration||0)+1;
+    try{
+      const {currentIndex,entries}=await r.cdp.send('Page.getNavigationHistory');
+      if(r.disposed||generation!==r.historyGeneration)return;
+      r.navigation={canGoBack:currentIndex>0&&/^https?:/.test(entries[currentIndex-1].url),canGoForward:currentIndex<entries.length-1&&/^https?:/.test(entries[currentIndex+1].url),busy:!!(r.navigationBusy||r.pageLoading),error:r.navigationError||''};
+      for(const c of r.clients)if(c.ws.readyState===1)c.ws.send(JSON.stringify({type:'navigation',...r.navigation}));
+      return r.navigation;
+    }catch{return {canGoBack:false,canGoForward:false,busy:false};}
+  }
+  async navigate(id,direction){
+    const w=this.windows.get(id),r=this.resources.get(id);
+    if(!w||w.mode!=='stream'||!r||r.disposed)throw fail(400,'Stream is not ready');
+    if(!['back','forward','reload'].includes(direction))throw fail(400,'Invalid navigation action');
+    if(r.navigationBusy)throw fail(429,'Navigation already in progress');
+    r.navigationBusy=true;
+    try{
+      const state=await this.navigationState(r);
+      const available=direction==='reload'||(direction==='back'?state?.canGoBack:state?.canGoForward);
+      if(available){
+        await this.release(r);
+        if(this.closed||this.resources.get(id)!==r||this.windows.get(id)!==w)throw fail(400,'Stream closed');
+        await r.page[direction==='back'?'goBack':direction==='forward'?'goForward':'reload']({waitUntil:'domcontentloaded',timeout:10000});
+        r.navigationError='';
+      }
+    }catch{
+      if(r.disposed||this.closed)throw fail(400,'Stream closed');
+      this.navigationFailed(r);await r.cdp.send('Page.stopLoading').catch(()=>{});
+    }finally{r.navigationBusy=false;r.pageLoading=false;await this.navigationState(r);}
+    return r.navigation;
   }
   capture(w, r, resize = false) {
     const transition = (r.captureQueue || Promise.resolve()).then(async () => {
@@ -373,6 +427,7 @@ export class Manager {
             this.graceMs ?? 60000,
           ).unref();
       });
+      await this.navigationState(r);
       await this.capture(w, r);
     } catch {
       ws.send(
@@ -483,8 +538,7 @@ export class Manager {
     if (!w) throw Error("Unknown window");
     const r = this.resources.get(id);
     if (r) {
-      await this.release(r);
-      await r.page.reload();
+      await this.navigate(id,'reload');
     }
     return w;
   }

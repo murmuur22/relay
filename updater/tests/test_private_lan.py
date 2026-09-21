@@ -26,9 +26,9 @@ class PrivateLANTests(unittest.TestCase):
         with patch.object(module, 'HTTPConnection') as connection:
             connection.return_value.getresponse.return_value.read.return_value = b'{}'
             connection.return_value.getresponse.return_value.getheader.return_value = ''
-            module.http(4190, '/health/ready')
+            module.http(4180, '/health/ready')
             self.assertEqual(connection.call_args.args[0], '10.20.30.40')
-            self.assertEqual(connection.return_value.request.call_args.kwargs['headers']['Origin'], 'http://10.20.30.40:4190')
+            self.assertEqual(connection.return_value.request.call_args.kwargs['headers']['Origin'], 'http://10.20.30.40:4180')
         command = module.restore_command('v0.4.1')
         self.assertEqual(command[-2:], ['--private-lan', '10.20.30.40'])
         self.assertIn('--property=ProtectSystem=strict', command)
@@ -49,7 +49,7 @@ class PrivateLANTests(unittest.TestCase):
     def test_installer_network_plan_and_pre_mutation_rejection(self):
         m = installer()
         self.assertTrue(hasattr(m, 'deployment_network'), 'Missing explicit installer LAN plan')
-        self.assertEqual(m.deployment_network(None), dict(networkMode='loopback', hostname='localhost', bind='127.0.0.1', relayOrigin='http://localhost:4190', uiOrigin='http://localhost:4191'))
+        self.assertEqual(m.deployment_network(None), dict(networkMode='loopback', hostname='localhost', bind='127.0.0.1', relayOrigin='http://localhost:4180', uiOrigin='http://localhost:4191'))
         cfg = m.deployment_network('10.20.30.40')
         self.assertEqual(cfg['bind'], '10.20.30.40')
         self.assertEqual(cfg['uiOrigin'], 'http://10.20.30.40:4191')
