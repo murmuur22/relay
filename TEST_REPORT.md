@@ -1,5 +1,11 @@
 # Relay prototype verification
 
+## Updater payload transfer budget repair — Unreleased source
+
+An operator attempt stopped during download at 63.1%, after 120.087 seconds in the download phase; the installed transport enforced a 120-second absolute budget. The running runtime was not changed. Payload transfers now allow 600 seconds while metadata retains 120 seconds, explicit shorter deadlines remain authoritative and the five-second socket timeout/byte/signature/cancellation checks remain unchanged.
+
+The new regression failed with `Transfer interrupted` before the fix. All **64 Python updater tests** then passed, and an independent scoped review reran the four new tests and found no blocker. The tests use real local HTTP plus an isolated module-local clock; they do not claim a ten-minute throughput soak. An explicitly approved one-module control-plane maintenance repair was backed up, installed by expected-hash atomic replacement, and read back; only the broker restarted. Relay/updater-web and the neighboring service retained their startup state, and runtime readiness remained 0.5.0 with maintenance false. No update was initiated on the operator's behalf. Published 0.6.0 tags/assets are unchanged; a successful user retry is a separate result.
+
 ## 0.6.0 published signed-release qualification
 
 Published source tag: `7becfd95b8d750e1204702569d7e03a2e873ea13`. [Linux preflight](https://github.com/murmuur22/relay/actions/runs/35745906310), [signed release build](https://github.com/murmuur22/relay/actions/runs/35746384498), and [signed installation/upgrade qualification](https://github.com/murmuur22/relay/actions/runs/35746829432) passed. The preflight ran the configured gateway tests under an unprivileged systemd unit with ProtectSystem=strict, ProtectHome, PrivateTmp, empty capabilities and resource limits, including actual configured startup and restart/session rejection.

@@ -5,6 +5,9 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
+### Fixed
+- Allow verified release payload transfers up to ten minutes instead of two on slower connections. Metadata budgets, shorter caller deadlines, five-second socket timeouts, cancellation, byte limits and signature checks are preserved. This is an independent updater control-plane repair, not a runtime self-update or modification of the published 0.6.0 artifacts.
+
 ## [0.6.0] — 2026-09-22
 
 Published with signed Linux artifacts and hosted initial-install/old-updater upgrade/rollback qualification; exact evidence is in `TEST_REPORT.md`. The gateway remains opt-in and experimental, and runtime installation does not provision DNS/TLS or public exposure.

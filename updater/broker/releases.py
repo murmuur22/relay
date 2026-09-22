@@ -43,7 +43,10 @@ def transfer(url, destination=None, limit=1024 * 1024, progress=None, cancelled=
             raise Denied('Fixture redirect rejected')
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect() if fixture else Redirects())
     start = time.monotonic()
-    deadline = min(deadline, start + 120) if deadline is not None else start + 120
+    # Large runtime archives need a longer total budget on slower links.
+    # Metadata/discovery deadlines and the five-second socket timeout stay bounded.
+    budget = 600 if destination is not None else 120
+    deadline = min(deadline, start + budget) if deadline is not None else start + budget
     if deadline <= start:
         raise Denied('Release check deadline exceeded')
     data, total = bytearray(), 0
