@@ -14,6 +14,8 @@ These are separate projects by the repository owner. The MIT grant covers the fi
 
 Node and Python dependency versions are recorded in lockfiles. Installed packages retain their respective license notices. The desktop and independent updater both use Three.js 0.186.0; its MIT notice is included in each built bundle under `licenses/three.txt`. Parcels also includes redistributable library notices under `integrations/parcels/public/licenses/` for Three.js and fflate. Chromium is installed by Playwright for source checkouts; Linux release payloads include the matching Chromium runtime and its bundled notices under `browsers/`. The standalone server release excludes the development-only first-party integrations and private reference fonts.
 
+Gateway hostname validation uses the pinned MIT-licensed `tldts` and `tldts-core` packages and their bundled Public Suffix List data. Their upstream license notices remain in the runtime's packaged `node_modules`; the dependency lockfile records exact versions. This distinguishes private hosting-provider suffixes from an administrator's own delegated namespace without maintaining a Relay-specific suffix blacklist.
+
 ## Fonts and local artifacts
 
 Reference font binaries are excluded until redistribution rights are verified. Fresh checkouts render with system fallback fonts. Private planning PDFs, agent working notes, runtime credentials, personal libraries, generated screenshots and local environments are also excluded from Git.

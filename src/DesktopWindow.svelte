@@ -2,6 +2,8 @@
  import { onMount } from 'svelte';
  import StreamSurface from './StreamSurface.svelte';
  import UpdaterBrowser from './UpdaterBrowser.svelte';
+ import GatewaySurface from './GatewaySurface.svelte';
+ let gatewaySurface=$state();
  import {windowMotion} from './motion.js';
  import {safeExternal} from './webapps.js';
  import { clampBounds,TITLE_HEIGHT } from './geometry.js';
@@ -22,12 +24,14 @@
 <section class="desktop-window" use:windowMotion={{enabled:motion,visible:win.visible&&(!narrow||win.focused)}} inert={!win.visible||(narrow&&!win.focused)} class:focused={win.focused} class:gesturing={!!gesture} data-app={win.appId} data-window-id={win.id} aria-label={win.title+' window'} style:left={bounds.x+'px'} style:top={bounds.y+'px'} style:width={bounds.width+4+'px'} style:height={bounds.height+TITLE_HEIGHT+'px'} style:z-index={10+index}>
  <!-- svelte-ignore a11y_no_static_element_interactions -->
  <div class="titlebar" onpointerdown={e=>begin(e,'drag')} onpointermove={move} onpointerup={()=>gesture=null} onpointercancel={()=>gesture=null} ondblclick={maximize}>
-  <span class="window-title">{win.title}</span><span class="mode-label">{win.mode==='stream'?'streamed':'native'}</span>
-  <div class="window-controls">{#if win.mode==='stream'}<button aria-label={'Back in '+win.title} title="Back in remote page" disabled={!navigation.canGoBack||navigation.busy||navigationPending} onclick={()=>travel('back')}>←</button><button aria-label={'Forward in '+win.title} title="Forward in remote page" disabled={!navigation.canGoForward||navigation.busy||navigationPending} onclick={()=>travel('forward')}>→</button>{/if}<button aria-label={'Reload '+win.title} title="Reload app" onclick={onreload}>↻</button><button aria-label={'Minimize '+win.title} title="Minimize" onclick={onminimize}>−</button><button aria-label={(restore?'Restore size ':'Maximize ')+win.title} title={restore?'Restore':'Maximize'} onclick={maximize}>{restore?'❐':'□'}</button><button aria-label={'Close '+win.title} title="Close app" onclick={onclose}>×</button></div>
+  <span class="window-title">{win.title}</span><span class="mode-label">{win.mode==='gateway'?'gateway · experimental':win.mode==='stream'?'streamed':'native'}</span>
+  <div class="window-controls">{#if win.mode==='stream'}<button aria-label={'Back in '+win.title} title="Back in remote page" disabled={!navigation.canGoBack||navigation.busy||navigationPending} onclick={()=>travel('back')}>←</button><button aria-label={'Forward in '+win.title} title="Forward in remote page" disabled={!navigation.canGoForward||navigation.busy||navigationPending} onclick={()=>travel('forward')}>→</button>{/if}<button aria-label={'Reload '+win.title} title={win.mode==='gateway'?'Restart app session (fresh login)':'Reload app'} onclick={()=>win.mode==='gateway'?gatewaySurface?.restart():onreload()}>↻</button><button aria-label={'Minimize '+win.title} title="Minimize" onclick={onminimize}>−</button><button aria-label={(restore?'Restore size ':'Maximize ')+win.title} title={restore?'Restore':'Maximize'} onclick={maximize}>{restore?'❐':'□'}</button><button aria-label={'Close '+win.title} title={win.mode==='gateway'?'Close and end app session':'Close app'} onclick={()=>{if(win.mode==='gateway')void gatewaySurface?.end();onclose();}}>×</button></div>
  </div>
  <div class="window-content">
   {#if win.mode==='system'&&win.appId==='system-updater'}
    {#key win.reload}<UpdaterBrowser {api} {motion} visible={win.visible} onactivate={onfocus} />{/key}
+  {:else if win.mode==='gateway'}
+   <GatewaySurface bind:this={gatewaySurface} appId={win.appId} title={win.title} {api} onactivate={onfocus}/>
   {:else if win.mode==='native'}
    {#if safeUrl&&win.external}<div class="external-native"><p class="embedding-note">Blank or blocked? The site may refuse embedding or require features restricted by the sandbox. Relay cannot control this iframe's Back/Forward history. <a href={safeUrl} target="_blank" rel="noopener noreferrer">Open in new tab</a> for normal browser navigation; admins can make New tab the default in Apps.</p><iframe bind:this={frame} src={safeUrl} title={win.title} sandbox="allow-scripts allow-forms" referrerpolicy="no-referrer"></iframe></div>
    {:else if safeUrl}<iframe bind:this={frame} src={safeUrl} title={win.title} onload={nativeLoaded}></iframe>{#if nativeState!=='ready'}<div class="native-notice" role="status">{nativeState==='loading'?'Loading native app…':'Native app unavailable — use reload to retry.'}</div>{/if}{:else}<div class="surface-message">Unregistered native app URL. Content was not loaded.</div>{/if}

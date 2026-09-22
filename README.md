@@ -18,6 +18,16 @@ Only trusted first-party integrations are served on Relay's own origin. Admins c
 
 The current source version is defined in `package.json` and shared through `version.js`. It appears quietly in the desktop/login footer, in every user's Profile settings (including narrow screens), and in administrator System diagnostics. See [CHANGELOG.md](CHANGELOG.md) for the full versioned history and update policy. Version numbers do not imply production deployment; new changes are recorded under Unreleased until grouped into a version.
 
+## Optional application gateway — 0.6.0 candidate
+
+Gateway mode delivers configured apps' HTTP/media/WebSocket traffic through Relay while the visitor's browser renders them in isolated desktop windows. It is different from direct Native embedding and screenshot Streaming. Visitors still use their own upstream app accounts; Relay grants are not single sign-on.
+
+The installed startup path can read an explicit protected `RELAY_GATEWAY_CONFIG` JSON file. The administrator supplies HTTPS certificates, same-site isolated desktop/app names, listener settings and fixed upstream destinations. With Internet-reachable browser-trusted HTTPS, visitors do not need direct access or a VPN to those upstream services. LAN/VPN-only configurations remain an administrator choice; purchased domains are not mandatory. **Updating the runtime does not provision DNS, certificates, firewall rules, or public exposure.** Gateway is disabled when configuration is absent.
+
+Read [gateway deployment](docs/gateway-deployment.md) for exact prerequisites, supported target configuration, security boundaries and rollback. Keep the existing private management URL for the independent updater; its handoff through the new HTTPS edge is not supported. The feature remains experimental and app/browser compatibility is limited to recorded tests—not every website, Safari, transcoding, large libraries or Internet load.
+
+For the prepared development Mac's synthetic Jellyfin presentation, see [local demo](docs/jellyfin-demo.md). That fixture uses process-local test certificate acceptance, not production trust.
+
 ## Public source checkout
 
 Repository: https://github.com/murmuur22/relay

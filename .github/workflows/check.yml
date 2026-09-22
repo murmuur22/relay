@@ -48,10 +48,15 @@ jobs:
           node deploy/verify-standalone.mjs
           node --test --test-timeout=130000 tests/backend/private-lan*.test.mjs tests/frontend/updater-real.test.mjs
           node --test --test-timeout=90000 tests/backend/web-request-body.test.mjs tests/backend/web-redirects.test.mjs tests/backend/stream-navigation.test.mjs tests/frontend/stream-navigation.test.mjs
+          node --test --test-timeout=130000 tests/backend/desktop-gateway*.test.mjs tests/backend/gateway-*.test.mjs tests/frontend/desktop-gateway.test.mjs tests/frontend/gateway-handoff.test.mjs tests/frontend/gateway-deployment.test.mjs
       - name: Actual systemd mount-boundary install and rollback fixture
         run: |
           sudo install -m 0755 "$(command -v node)" /usr/bin/node
           sudo useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin relay
+          sudo mkdir /opt/relay-gateway-qualification
+          sudo cp -a server dist node_modules tests version.js package.json updater tools /opt/relay-gateway-qualification/
+          sudo chmod 0755 /opt/relay-gateway-qualification
+          sudo systemd-run --quiet --wait --pipe --collect --property=User=relay --property=Group=relay --property=WorkingDirectory=/opt/relay-gateway-qualification --property=NoNewPrivileges=true --property=ProtectHome=true --property=ProtectSystem=strict --property=PrivateTmp=true --property=CapabilityBoundingSet= --property=MemoryMax=2G --property=CPUQuota=100% --property=TasksMax=512 --property=LimitNOFILE=8192 /usr/bin/node --test --test-timeout=130000 /opt/relay-gateway-qualification/tests/backend/gateway-deployment.test.mjs
           sudo env -i PATH=/usr/bin:/bin CI=true GITHUB_ACTIONS=true PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m updater.tests.test_mount_sandbox --disposable-github-systemd
           FAMILIES="$(python3 -c 'from pathlib import Path; print(next(x.split("=",1)[1] for x in Path("updater/web/relay-updater-web.service").read_text().splitlines() if x.startswith("RestrictAddressFamilies=")))')"
           sudo systemd-run --quiet --wait --pipe --collect --property=User=relay --property=NoNewPrivileges=true --property=CapabilityBoundingSet= --property="RestrictAddressFamilies=$FAMILIES" /usr/bin/node -e 'const os=require("os"),fs=require("fs"),assert=require("assert");assert(Object.values(os.networkInterfaces()).flat().some(n=>n.family==="IPv4"&&!n.internal));assert.match(fs.readFileSync("/proc/self/status","utf8"),/^CapEff:\s+0+$/m);console.log("PASS interface enumeration with empty capabilities")'

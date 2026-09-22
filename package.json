@@ -1,6 +1,6 @@
 {
   "name": "we-relay",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,9 +14,11 @@
     "start:updater-web": "node updater/web/index.mjs",
     "start:updater-broker": "python3 -m updater.broker.server",
     "start": "node server/index.mjs",
+    "demo:jellyfin": "node tools/demo-jellyfin.mjs",
+    "demo:jellyfin:verify": "node --test tests/demo-jellyfin.test.mjs",
     "open": "node tools/open-local.mjs",
     "test:backend": "node --test tests/backend/*.test.mjs",
-    "test": "npm run test:backend && node --test tests/frontend/*.test.mjs && node tests/integration/experience.mjs",
+    "test": "npm run test:backend && node --test --test-concurrency=1 --test-timeout=90000 tests/frontend/*.test.mjs && node tests/integration/experience.mjs",
     "benchmark": "node tools/benchmark.mjs"
   },
   "dependencies": {
@@ -24,6 +26,7 @@
     "playwright": "1.63.0",
     "svelte": "5.57.0",
     "three": "0.186.0",
+    "tldts": "7.4.14",
     "ws": "8.21.3"
   },
   "devDependencies": {

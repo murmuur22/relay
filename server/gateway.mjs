@@ -1,4 +1,5 @@
 import {VERSION} from '../version.js';
+import {experimentalConfig,startExperimentalGateway} from './experimental-gateway.mjs';
 import {networkHost} from '../updater/web/broker-client.mjs';
 import {networkInterfaces} from 'node:os';
 import {UPDATER,systemApps} from './system-apps.mjs';
@@ -26,8 +27,11 @@ export const APPS=[
  {id:'notes-lab',label:'Notes Lab',mode:'stream',description:'Synthetic editable notes'},
  {id:'signal-lab',label:'Signal Lab',mode:'stream',description:'Synthetic live signals'},
 ];
-export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=false,keepsakesPort=4181,data=ROOT+'.data/keepsakes',sessionMs=8*60*60*1000,profile='development',hostname='127.0.0.1',networkMode='loopback',maintenanceFile=process.env.RELAY_MAINTENANCE_FILE,updater}={}){
+export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=false,keepsakesPort=4181,data=ROOT+'.data/keepsakes',sessionMs=8*60*60*1000,profile='development',hostname='127.0.0.1',networkMode='loopback',maintenanceFile=process.env.RELAY_MAINTENANCE_FILE,updater,experimentalGateway}={}){
+ const gatewaySettings=experimentalConfig(experimentalGateway);let experimental;
+ if(gatewaySettings&&!gatewaySettings.deployment&&(hostname!=='127.0.0.1'||networkMode!=='loopback'))throw Error('Experimental gateway is local loopback only');
  const bind=networkHost(hostname,networkMode);
+ if(gatewaySettings?.deployment&&port!==0&&gatewaySettings.port===port)throw Error('Invalid gateway deployment configuration');
  if(!Number.isInteger(port)||port<0||port>65535)throw Error('Invalid configured port');
  if(networkMode==='private-lan'&&!Object.values(networkInterfaces()).flat().some(n=>n.family==='IPv4'&&!n.internal&&n.address===bind))throw Error('Private LAN IPv4 must be assigned to this host');
  if(networkMode==='private-lan'&&profile!=='standalone')throw Error('Private LAN requires standalone profile');
@@ -42,6 +46,11 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  if(profile==='standalone'&&native)throw Error('Standalone profile cannot start native integrations');
  await mkdir(runtime,{recursive:true,mode:0o700});await chmod(runtime,0o700);
  const accounts=new Accounts(runtime,profile==='standalone'?[]:APPS);await accounts.init();
+ // Persisted definitions must remain safe when authentication hostnames change.
+ // Refuse before listeners, session publication or native startup; never rewrite accounts.
+ const authHostnames=new Set([hostname]);
+ if(gatewaySettings)authHostnames.add(gatewaySettings.deployment?.desktopHostname??'desktop.relay.test');
+ for(const service of accounts.state.services)if(service.kind==='web'&&service.mode==='native'&&authHostnames.has(new URL(service.address).hostname))throw Error('Native apps must use a different hostname from Relay; cookies are not port isolated. Startup refused; existing account data is unchanged.');
  const app=express(),server=http.createServer(app),sessions=new Map();
  let setup=accounts.state.users.length?null:token();const authCsrf=token();
  const wss=new WebSocketServer({noServer:true,maxPayload:8192,perMessageDeflate:false});
@@ -50,7 +59,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  const transport=new Transport({gatewayOrigin:origin});
  // Registration is not a reachability test: client-only DNS and offline apps are valid.
  // Every actual Relay connection still resolves, vets and pins its destination.
- const validateDraft=async body=>{const config=webConfig(body);if(config.mode==='native'&&new URL(config.address).hostname===new URL(origin).hostname)throw fail(400,'Native apps must use a different hostname from Relay; cookies are not port isolated.');transport.registration(config.address,config);for(const extra of config.allowedOrigins)transport.registration(extra,config);return config;};
+ const validateDraft=async body=>{const config=webConfig(body);if(config.mode==='gateway'){if(!experimental)throw fail(503,'Experimental gateway is not configured');experimental.validateDefinition(config);return config;}if(config.mode==='native'&&(new URL(config.address).hostname===new URL(origin).hostname||(experimental&&new URL(config.address).hostname===new URL(experimental.desktopOrigin).hostname)))throw fail(400,'Native apps must use a different hostname from Relay; cookies are not port isolated.');transport.registration(config.address,config);for(const extra of config.allowedOrigins)transport.registration(extra,config);return config;};
  // Serialize application writes, including login, and recheck authority when dequeued.
  let writeQueue=Promise.resolve(),queuedWrites=0;
  const wrap=(fn,{queued=true}={})=>async(req,res,next)=>{
@@ -64,7 +73,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   };
   try{if(mutation){queuedWrites++;const job=writeQueue.catch(()=>{}).then(run);writeQueue=job;await job;}else await run();}catch(e){next(e);}finally{if(mutation)queuedWrites--;}
  };
- const revoke=async s=>{if(!s||s.revoked)return;s.revoked=true;sessions.delete(s.id);clearTimeout(s.timer);for(const op of s.operations)op.controller.abort();for(const ws of s.sockets)ws.terminate();for(const res of s.responses)res.destroy();await Promise.allSettled([s.manager.close(),...[...s.operations].map(op=>op.done)]);};
+ const revoke=async s=>{if(!s||s.revoked)return;s.revoked=true;sessions.delete(s.id);experimental?.endSession(s);clearTimeout(s.timer);for(const op of s.operations)op.controller.abort();for(const ws of s.sockets)ws.terminate();for(const res of s.responses)res.destroy();await Promise.allSettled([s.manager.close(),...[...s.operations].map(op=>op.done)]);};
  const getSession=req=>{const id=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('relay_session='))?.slice(14);const s=sessions.get(id);if(!s)return null;const user=accounts.state.users.find(u=>u.id===s.userId);if(s.expires<=Date.now()||!user||user.disabled){void revoke(s);return null;}s.user=user;return s;};
  const layouts=new Map();
  const login=async(req,res,user)=>{
@@ -105,6 +114,8 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  app.use('/api',(req,res,next)=>{if(!['GET','HEAD'].includes(req.method)&&(req.headers.origin!==origin||req.headers['x-csrf-token']!==req.session.csrf))return res.status(403).json({error:'Origin and CSRF required'});next();});
  app.get('/api/session',(req,res)=>{const s=req.session;res.json({csrf:s.csrf,user:publicUser(s.user),apps:[...accounts.apps(s.user).map(publicApp),...systemApps(s.user)],windows:[...s.manager.windows.values()],limits:{maxStreams:2}});});
  updaterRoutes(app,{config:updaterSettings,wrap,getSession,admit});
+ app.get('/api/gateway/config',(req,res)=>res.json(experimental?.available()??{enabled:false,targets:[]}));
+ for(const action of ['launch','end'])app.post('/api/gateway/'+action,wrap(async(req,res)=>{if(!experimental)throw fail(503,'Experimental gateway is not configured');res.json(experimental[action](req.session,req.body));},{queued:false}));
  const desktop=new Desktop(runtime,()=>[...accounts.state.services,UPDATER]);
  const desktopAuthority=req=>()=>{admit();const s=getSession(req);if(!s||s!==req.session)throw fail(401,'Authentication required');return [...accounts.apps(s.user),...systemApps(s.user)];};
  app.get('/api/desktop',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req)))));
@@ -148,6 +159,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   const abort=()=>controller.abort();res.once('close',abort);
   try{
    const config=await validateDraft(req.body);controller.signal.throwIfAborted();
+   if(config.mode==='gateway')throw fail(400,'Experimental gateway connections are tested by opening the registered app');
    if(kind==='preview'&&config.mode!=='stream')throw fail(400,'Only streamed apps support Relay preview');
    const result=kind==='preview'?await previewWeb(config,transport,controller.signal):await transport.probe(config,{signal:controller.signal});
    if(getSession(req)!==s)throw fail(401,'Authentication required');
@@ -164,6 +176,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   if(method==='patch'&&service?.kind==='web')await validateDraft({...service,...req.body});
   const affected=[...sessions.values()].filter(s=>s.user.role!=='admin'&&accounts.allowed(accounts.state.users.find(u=>u.id===s.userId),service));
   const result=await accounts.service(req.params.id,req.body||{},method==='delete');
+  experimental?.endApp(req.params.id);
   await Promise.all(affected.map(revoke));
   for(const s of sessions.values()){for(const response of s.responses)if(response.serviceId===req.params.id)response.destroy();s.manager.apps=accounts.apps(accounts.state.users.find(u=>u.id===s.userId));await s.manager.remove(req.params.id);}
   res.json(result);
@@ -172,7 +185,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  app.post('/api/logout',wrap(async(req,res)=>{await revoke(req.session);res.clearCookie('relay_session',{path:'/',httpOnly:true,sameSite:'strict'});res.json({ok:true});}));
  const operation=fn=>wrap(async(req,res)=>{try{res.json(await fn(req,req.session.manager));}catch(e){throw fail(e.status||400,e.status?e.message:'Invalid window operation');}});
  const permit=(req,id)=>{if(!accounts.allowed(req.session.user,accounts.state.services.find(a=>a.id===id)))throw fail(403,'Service access denied');};
- app.post('/api/windows',operation((req,m)=>{permit(req,req.body?.appId);return m.open(req.body.appId);}));
+ app.post('/api/windows',operation((req,m)=>{permit(req,req.body?.appId);if(accounts.state.services.find(a=>a.id===req.body.appId)?.mode==='gateway'&&!experimental)throw fail(503,'Experimental gateway is not configured');return m.open(req.body.appId);}));
  for(const action of ['navigate','reload'])app.post('/api/windows/:id/'+action,wrap(async(req,res)=>{
   permit(req,req.params.id);
   if(action==='navigate'&&(!req.body||Object.keys(req.body).length!==1||!['back','forward'].includes(req.body.direction)))throw fail(400,'Expected a back or forward direction only');
@@ -181,13 +194,14 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   if(getSession(req)!==req.session)throw fail(401,'Authentication required');
   permit(req,req.params.id);res.json(result);
  },{queued:false}));
- for(const method of ['patch','delete'])app[method]('/api/windows/:id',operation(async(req,m)=>{permit(req,req.params.id);if(method==='patch')return m.patch(req.params.id,req.body||{});if(!m.windows.has(req.params.id))throw Error();await m.remove(req.params.id);return {closed:true};}));
+ for(const method of ['patch','delete'])app[method]('/api/windows/:id',operation(async(req,m)=>{permit(req,req.params.id);if(method==='patch')return m.patch(req.params.id,req.body||{});if(!m.windows.has(req.params.id))throw Error();experimental?.closeWindow(req.session,req.params.id);await m.remove(req.params.id);return {closed:true};}));
  let health={checkedAt:0,keepsakes:false,parcels:false},probing;
  const webHealth=new HealthProbes({gatewayOrigin:origin});
  const appHealth=a=>webHealth.probe(a);
  app.get('/api/status',wrap(async(req,res)=>{
   if(Date.now()-health.checkedAt>5000){probing??=(async()=>{let parcels=false;try{await access(ROOT+'integrations/parcels/dist/index.html');parcels=!!nativeService;}catch{}health={checkedAt:Date.now(),parcels,keepsakes:await nativeService?.probe()||false};})().finally(()=>probing=null);await probing;}
   const status={};await Promise.all(accounts.apps(req.session.user).map(async a=>{
+   if(a.mode==='gateway'){status[a.id]={state:'Unknown',source:'relay',checkedAt:Date.now(),detail:experimental?'Experimental gateway; upstream health not measured':'Experimental gateway unavailable'};return;}
    if(a.kind==='web'){status[a.id]=await appHealth(a);return;}
    const r=req.session.manager.resources.get(a.id);
    status[a.id]=a.mode==='native'?{state:health[a.template]?'Online':'Offline',source:'relay',checkedAt:health.checkedAt,detail:'Native runtime readiness'}:{state:r?(r.page.isClosed()||r.failed?'Offline':'Online'):'Unknown',source:'relay',checkedAt:Date.now(),detail:r?'Synthetic browser readiness':'Synthetic template; no running page. Upstream health not measured.'};
@@ -208,5 +222,6 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  await rm(runtime+'/bootstrap-url.txt',{force:true});
  if(setup){await writeFile(runtime+'/setup-url.txt',origin+'/#'+setup,{mode:0o600});await chmod(runtime+'/setup-url.txt',0o600);}
  await writeFile(runtime+'/open-url.txt',origin+'/',{mode:0o600});await chmod(runtime+'/open-url.txt',0o600);
- return {origin,app,server,accounts,sessions,get manager(){return [...sessions.values()][0]?.manager;},nativeService,authorized:req=>!!getSession(req),close:async()=>{await webHealth.close();await transport.close();for(const s of [...sessions.values()])await revoke(s);await nativeService?.close();await new Promise(r=>server.close(r));}};
+ if(gatewaySettings)try{experimental=await startExperimentalGateway({config:gatewaySettings,relayOrigin:origin,accounts,sessions,admit});}catch(e){await nativeService?.close();await webHealth.close();await transport.close();await new Promise(r=>server.close(r));throw e;}
+ return {origin,app,server,accounts,sessions,experimentalGateway:experimental,get manager(){return [...sessions.values()][0]?.manager;},nativeService,authorized:req=>!!getSession(req),close:async()=>{await experimental?.close();await webHealth.close();await transport.close();for(const s of [...sessions.values()])await revoke(s);await nativeService?.close();await new Promise(r=>server.close(r));}};
 }

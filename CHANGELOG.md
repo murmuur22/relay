@@ -5,7 +5,22 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-22
+
+Gateway release candidate; publication and hosted qualification are recorded separately in `TEST_REPORT.md`.
+
+### Added
+- Opt-in installed gateway configuration through `RELAY_GATEWAY_CONFIG`: administrator-supplied HTTPS names/certificates, an explicit listener address, and fixed validated LAN/VPN HTTP(S) upstreams. Browser clients use the normal desktop; paid domains are not required, but DNS/TLS provisioning remains an administrator responsibility.
+- Configured-origin browser handoff validation, private-suffix-aware hostname checks, protected bounded configuration reads, upstream TLS verification, and startup/refusal/restart regressions. Existing installations remain unchanged when gateway configuration is absent.
+- Repeatable local Jellyfin desktop demo (`npm run demo:jellyfin`) with disposable Relay state, ordinary nonadmin logins, actual embedded playback and a separate verification/recording command. Uses only the existing synthetic fixture and a dedicated Chromium process; not a portable installer, trusted Safari qualification or production deployment. See `docs/jellyfin-demo.md`.
+- Disabled-by-default experimental Gateway mode in the normal Add app/editor/desktop flow, using administrator-configured targets and secret-free registry references. The original programmatic fixture remains loopback-only; the installed opt-in path is documented in `docs/gateway-deployment.md`. No DNS or trust installation is performed.
+- Normal gateway desktop windows with explicit End app session, fresh-login Reopen, session-preserving minimize, and secure Close cleanup. Credentials and active HTTP/WebSocket connections are retired; app-only Logout is explicitly distinguished from gateway cleanup.
+
 ### Fixed
+- Refuse persisted native app definitions that share either authentication hostname before publishing sessions or starting listeners; enabling or renaming the HTTPS edge cannot introduce cross-port login-cookie exposure.
+- Serialize the default frontend test run with an explicit timeout after reproducing concurrent updater-browser stalls; no test assertions were removed.
+- Gateway Close removes local content without waiting for layout saves; pending launch/restart responses and old-account queued work cannot reopen or delete the wrong window. Cross-tab session changes invalidate the old UI's authorization epoch.
+- Isolate gateway cancellation bookkeeping per actual session so another user's saturation cannot block owned-route cleanup; overflow temporarily denies that session's new launches rather than failing End cleanup.
 - Updater discovery retains candidates genuinely verified during the current check if a later release times out or fails verification. Failed candidates are never offered; a failure before any verified result still fails closed. The existing eight-second budget and install-time re-verification remain unchanged. This requires a separately approved updater maintenance repair, not a replacement of the published 0.5.0 artifacts or control-plane self-update.
 
 ## [0.5.0] — 2026-09-21

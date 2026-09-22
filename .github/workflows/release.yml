@@ -70,6 +70,7 @@ jobs:
           node deploy/verify-standalone.mjs
           node --test --test-timeout=130000 tests/backend/private-lan*.test.mjs tests/backend/updater-real.test.mjs tests/frontend/updater-real.test.mjs
           node --test --test-timeout=90000 tests/backend/web-request-body.test.mjs tests/backend/web-redirects.test.mjs tests/backend/stream-navigation.test.mjs tests/frontend/stream-navigation.test.mjs
+          node --test --test-timeout=130000 tests/backend/desktop-gateway*.test.mjs tests/backend/gateway-*.test.mjs tests/frontend/desktop-gateway.test.mjs tests/frontend/gateway-handoff.test.mjs tests/frontend/gateway-deployment.test.mjs
       - name: Package standalone runtime and independent control plane
         env:
           RELEASE_TAG: ${{ github.ref_name }}

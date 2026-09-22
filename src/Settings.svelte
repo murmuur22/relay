@@ -5,6 +5,7 @@
  import {webAddress,origins} from './webapps.js';
  let {kind,user,api,onclose,onrefresh,onpassword}= $props();
  let error=$state(''),message=$state(''),busy=$state(false),users=$state([]),apps=$state([]),diagnostics=$state(null);
+ let gateway=$state({enabled:false,targets:[]});
  let displayName=$state(''),currentPassword=$state(''),password=$state('');
  let page=$state('Users'),queryUsers=$state(''),queryApps=$state(''),editor=$state(null),confirmRemove=$state(false);
  let dialog,editorElement=$state(),confirmation=$state(),returnId='';
@@ -13,7 +14,7 @@
  const userStatus=u=>u.disabled?'Disabled':u.mustChange?'Password reset':'Active';
  const shownUsers=$derived(users.filter(u=>`${u.username} ${u.displayName} ${u.role} ${userStatus(u)}`.toLowerCase().includes(queryUsers.trim().toLowerCase())));
  const shownApps=$derived(apps.filter(s=>`${s.label} ${s.template} ${s.mode} ${s.enabled?'enabled':'disabled'}`.toLowerCase().includes(queryApps.trim().toLowerCase())));
- async function load(){if(kind==='admin')[users,apps,diagnostics]=await Promise.all([api('/admin/users'),api('/admin/apps'),api('/admin/diagnostics')]);}
+ async function load(){if(kind==='admin')[users,apps,diagnostics,gateway]=await Promise.all([api('/admin/users'),api('/admin/apps'),api('/admin/diagnostics'),api('/gateway/config')]);}
  async function run(fn){if(busy)return false;busy=true;error='';message='';try{await fn();return true;}catch(e){error=e.message;return false;}finally{busy=false;}}
  onMount(()=>{
   const previous=document.activeElement;
@@ -52,7 +53,7 @@
  }
  async function saveApp(e,remove=false){
   e?.preventDefault();const s=editor;
-  const ok=await run(async()=>{await api('/admin/apps/'+s.id,remove?'DELETE':'PATCH',remove?{}:{label:s.label,enabled:s.enabled,...(s.kind==='web'?{address:webAddress(s.address),icon:s.icon,openMode:s.openMode,allowedOrigins:origins(s.originText)}:{})});await load();await onrefresh();message=remove?'App removed.':'App saved.';});if(ok)await back();
+  const ok=await run(async()=>{await api('/admin/apps/'+s.id,remove?'DELETE':'PATCH',remove?{}:{label:s.label,enabled:s.enabled,...(s.kind==='web'?(s.mode==='gateway'?{gateway:{target:s.gateway.target},icon:s.icon}:{address:webAddress(s.address),icon:s.icon,openMode:s.openMode,allowedOrigins:origins(s.originText)}):{})});await load();await onrefresh();message=remove?'App removed.':'App saved.';});if(ok)await back();
  }
  async function createApp(data){await api('/admin/apps','POST',data);await load();await onrefresh();busy=false;await back();message='App registered.';}
  async function preference(event,key='showAppStatus'){const target=event.currentTarget,value=target.checked;const ok=await run(async()=>{await api('/preferences','PATCH',{[key]:value});await onrefresh();message=key==='showAppStatus'?'Status preference saved.':'Motion preference saved.';});if(!ok)target.checked=user.preferences?.[key]!==false;}
@@ -106,8 +107,8 @@
         <legend class="sr-only">App details</legend>
         <label>App label<input bind:value={editor.label} required maxlength="64"/></label>
         <label class="check"><input type="checkbox" bind:checked={editor.enabled}/>Enabled</label>
-        {#if editor.kind==='web'}<label>Address<input bind:value={editor.address} required/></label><label>Icon<select bind:value={editor.icon}>{#each ['globe','folder','notes','media','terminal'] as icon}<option>{icon}</option>{/each}</select></label>
-         {#if editor.mode==='native'}<label>Open in<select bind:value={editor.openMode}><option value="window">Desktop window</option><option value="tab">New tab</option></select></label>{:else}<label class="full-width">Additional approved origins<textarea bind:value={editor.originText} rows="3"></textarea></label>{/if}
+        {#if editor.kind==='web'}{#if editor.mode==='gateway'}<label>Gateway target<select bind:value={editor.gateway.target} disabled={!gateway.enabled} required>{#if !gateway.targets.some(t=>t.id===editor.gateway.target)}<option value={editor.gateway.target}>Unavailable configured target</option>{/if}{#each gateway.targets as target}<option value={target.id}>{target.label}</option>{/each}</select></label><p class="full-width muted">Experimental gateway. End app session or Close clears private credentials. App Logout may not. {gateway.enabled?'':'Gateway is not configured; this definition is preserved.'}</p>{:else}<label>Address<input bind:value={editor.address} required/></label>{/if}<label>Icon<select bind:value={editor.icon}>{#each ['globe','folder','notes','media','terminal'] as icon}<option>{icon}</option>{/each}</select></label>
+         {#if editor.mode==='native'}<label>Open in<select bind:value={editor.openMode}><option value="window">Desktop window</option><option value="tab">New tab</option></select></label>{:else if editor.mode==='stream'}<label class="full-width">Additional approved origins<textarea bind:value={editor.originText} rows="3"></textarea></label>{/if}
          <p class="full-width muted">Saving closes this entry's active connections and may sign out affected users. Native embedding may be blocked. Streamed WebSockets and file transfer are unsupported.</p>
         {:else}<p class="full-width muted">Template: {editor.template} (builtin)</p>{/if}
         <div class="full-width"><button>{editor.id?'Save app':'Add app'}</button><button type="button" onclick={back}>Cancel</button>{#if editor.id}<button id="remove-app" type="button" onclick={askRemove}>Remove app</button>{/if}</div>

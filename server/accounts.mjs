@@ -9,7 +9,7 @@ export function strong(password){if(typeof password!=='string'||password.length<
 export async function hash(password){strong(password);const salt=token();return {salt,key:(await derive(password,salt,64)).toString('hex')};}
 export async function verify(password,record){const safe=typeof password==='string'&&password.length<=128?password:'';const actual=await derive(safe,record.salt,64);return timingSafeEqual(actual,Buffer.from(record.key,'hex'));}
 const defaultPreferences={showAppStatus:true,introAnimation:true,interfaceAnimations:true};
-const validateAppFields=body=>{if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(k=>!['kind','mode','label','address','icon','openMode','allowedOrigins','userIds','enabled'].includes(k)))throw fail(400,'Invalid app fields');};
+const validateAppFields=body=>{if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(k=>!['kind','mode','label','address','icon','openMode','allowedOrigins','userIds','enabled','gateway'].includes(k)))throw fail(400,'Invalid app fields');};
 const validPreferences=value=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length>0&&Object.entries(value).every(([key,value])=>Object.hasOwn(defaultPreferences,key)&&typeof value==='boolean');
 export const publicUser=({id,username,displayName,role,grants,disabled,mustChange,onboardingComplete,onboardingAppId=null,preferences})=>({id,username,displayName,role,grants,disabled,mustChange,onboardingComplete,onboardingAppId,preferences:preferences??{...defaultPreferences}});
 export class Accounts{
