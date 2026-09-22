@@ -2,11 +2,11 @@
 
 The current desktop URLs are private, account-scoped navigation. A readable path or maximized app link does **not** grant access and must not become public by removing the gateway's authentication check.
 
-## Latest local implementation status
+## Current authenticated gateway status — 0.6.0
 
-The authenticated gateway has progressed beyond the separate proof launcher: unreleased, disabled-by-default source now includes normal Gateway Add app/editor/desktop windows and explicit End/Reopen/Close behavior. Actual local nonadmin File Browser upload/download and Jellyfin video/audio/seek worked through that normal desktop, with End cleanup and fresh-login reopening. Full Relay/updater suites and independent final review passed; see `TEST_REPORT.md` and `docs/experimental-desktop-gateway.md` for evidence and limits. The older spike sections below remain historical feasibility evidence, not the current integration status.
+The published, disabled-by-default gateway includes normal Gateway Add app/editor/desktop windows and explicit End/Reopen/Close behavior, plus installed configuration for HTTPS names, certificates and fixed LAN/VPN upstreams. Actual local nonadmin File Browser upload/download and Jellyfin video/audio/seek passed through the normal desktop. Linux/systemd, signed installation and old-updater upgrade/rollback checks passed; see `TEST_REPORT.md` and `docs/gateway-deployment.md` for exact evidence and limits. The older spike/proposal sections below remain historical context, not the current implementation status.
 
-This is still a loopback-only programmatic local experiment, not a published or production-enabled feature. Domain/DNS/valid TLS setup, trusted Safari, Linux/load/media-size qualification and the experimental desktop's updater handoff remain deployment gates. Nothing here authorizes production or network changes.
+Operator DNS/trusted TLS, ordinary Safari, long media/load qualification and the HTTPS desktop's independent updater handoff remain separate requirements or limitations. Nothing here authorizes production or network changes. Authenticated gateway delivery is implemented; anonymous public sharing remains a proposal.
 
 ## Deployment and client experience requirements
 
@@ -22,7 +22,7 @@ The immediate user-selected goal is secure access to administrator-selected self
 
 Prioritize reliable service navigation, correct stream geometry/input and measured responsiveness. Do not treat wildcard domains or bitrate controls as substitutes for fixing these defects. An administrator Control Panel desktop launcher is also requested for the next batch, not implemented here.
 
-Selected reference service: **Jellyfin**. Proposed acceptance test: a non-admin visitor signs into Relay, opens the granted Jellyfin desktop window, signs into their own Jellyfin account, browses and plays media with working audio, seeking and controls without needing direct access to Jellyfin's private address; an ungranted visitor is denied by the server. This is a target, not implemented compatibility. Relay's current JPEG screencasting has no audio/media transport and cannot establish successful Jellyfin playback. Evaluate a dedicated authenticated, cookie-isolated application/media gateway with bounded HTTP range and WebSocket support rather than treating increased screenshot quality as video support. Any production integration/network changes require separate approval.
+Selected reference service: **Jellyfin**. Proposed acceptance test: a non-admin visitor signs into Relay, opens the granted Jellyfin desktop window, signs into their own Jellyfin account, browses and plays media with working audio, seeking and controls without needing direct access to Jellyfin's private address; an ungranted visitor is denied by the server. This path now has local synthetic Jellyfin verification, not a real operator-library or public deployment qualification. Relay's JPEG screencasting still has no audio/media transport; the selected authenticated, cookie-isolated application/media gateway carries bounded HTTP range and WebSocket traffic instead. Any production integration/network changes require separate approval.
 
 Recommended first proof: a non-admin visitor signs into Relay, opens one explicitly granted self-hosted service and completes a useful task without reaching its private address directly; an ungranted visitor is denied by the server. Relay login is not automatically upstream single sign-on, and visitors must not inherit the host owner's upstream administrator session. Whether access is LAN/VPN-only or Internet-facing remains a separately approved deployment choice; one address must actually be reachable by the intended visitors.
 

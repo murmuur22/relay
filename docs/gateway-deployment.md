@@ -1,4 +1,6 @@
-# Opt-in gateway deployment configuration (release candidate)
+# Opt-in gateway deployment configuration
+
+Published in 0.6.0. See `TEST_REPORT.md` for executed Linux/systemd, signed-install and upgrade/rollback evidence. Gateway remains experimental; those checks do not provision an operator's DNS/certificates or certify public exposure and every browser/service.
 
 This is an explicit runtime capability, not an installer, exposure switch, certificate authority, or production qualification. With `RELAY_GATEWAY_CONFIG` absent, the existing loopback/private-LAN startup behavior is unchanged. The original programmatic loopback gateway interface remains supported. Historical local-only limitations in `experimental-desktop-gateway.md` describe the earlier experiment; this document describes the new opt-in startup configuration.
 

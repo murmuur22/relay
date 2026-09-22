@@ -1,5 +1,13 @@
 # Relay prototype verification
 
+## 0.6.0 published signed-release qualification
+
+Published source tag: `7becfd95b8d750e1204702569d7e03a2e873ea13`. [Linux preflight](https://github.com/murmuur22/relay/actions/runs/35745906310), [signed release build](https://github.com/murmuur22/relay/actions/runs/35746384498), and [signed installation/upgrade qualification](https://github.com/murmuur22/relay/actions/runs/35746829432) passed. The preflight ran the configured gateway tests under an unprivileged systemd unit with ProtectSystem=strict, ProtectHome, PrivateTmp, empty capabilities and resource limits, including actual configured startup and restart/session rejection.
+
+Signed qualification passed fresh installs and genuine signed 0.4.2 → 0.6.0 upgrade/matching-state rollback in both loopback and private-LAN modes using the unchanged installed 0.4.2 control plane. It verified account/desktop preservation, unchanged control-plane/config/unit files, readiness and session revocation. This is not a separate executed 0.5.0-baseline upgrade, power-loss test or public HTTPS deployment. Gateway-specific configuration was qualified in the disposable systemd source harness; the signed install harness used the default gateway-disabled configuration.
+
+Both public payloads were anonymously verified against the exact-source GitHub-attested manifest, hashes, sizes, package versions, MIT license and packaged tldts dependency/notices. The release was promoted to latest stable and read back. Ordinary credential-free production release discovery returned `v0.6.0` with `verified:true`. No production VM update or DNS/TLS/network change was performed. Gateway remains opt-in and experimental; administrator setup and the browser/media limits below still apply.
+
 ## 0.6.0 gateway release candidate — local verification
 
 Parent executed both builds and the complete final `npm test`: **148 backend tests, 68 frontend tests and real hybrid integration passed**. The independent updater suites passed **60 Python tests, 6 unit tests and 35 browser tests**. The repeatable real Jellyfin fixture demo passed again on the candidate. The larger synthetic transfer regression passed exact count/hash equality for 65 MiB + 123 bytes under a configured 128 MiB cap. This is not a long-running media, memory benchmark or arbitrary-size file qualification.

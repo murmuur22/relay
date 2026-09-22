@@ -7,7 +7,7 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [0.6.0] — 2026-09-22
 
-Gateway release candidate; publication and hosted qualification are recorded separately in `TEST_REPORT.md`.
+Published with signed Linux artifacts and hosted initial-install/old-updater upgrade/rollback qualification; exact evidence is in `TEST_REPORT.md`. The gateway remains opt-in and experimental, and runtime installation does not provision DNS/TLS or public exposure.
 
 ### Added
 - Opt-in installed gateway configuration through `RELAY_GATEWAY_CONFIG`: administrator-supplied HTTPS names/certificates, an explicit listener address, and fixed validated LAN/VPN HTTP(S) upstreams. Browser clients use the normal desktop; paid domains are not required, but DNS/TLS provisioning remains an administrator responsibility.

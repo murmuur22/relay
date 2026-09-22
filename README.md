@@ -18,7 +18,7 @@ Only trusted first-party integrations are served on Relay's own origin. Admins c
 
 The current source version is defined in `package.json` and shared through `version.js`. It appears quietly in the desktop/login footer, in every user's Profile settings (including narrow screens), and in administrator System diagnostics. See [CHANGELOG.md](CHANGELOG.md) for the full versioned history and update policy. Version numbers do not imply production deployment; new changes are recorded under Unreleased until grouped into a version.
 
-## Optional application gateway — 0.6.0 candidate
+## Optional application gateway — 0.6.0
 
 Gateway mode delivers configured apps' HTTP/media/WebSocket traffic through Relay while the visitor's browser renders them in isolated desktop windows. It is different from direct Native embedding and screenshot Streaming. Visitors still use their own upstream app accounts; Relay grants are not single sign-on.
 
