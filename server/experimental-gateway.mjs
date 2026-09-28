@@ -30,10 +30,11 @@ export function experimentalConfig(value){
  if(new Set(targets.map(t=>t.id)).size!==targets.length)throw Error('Duplicate experimental gateway target');
  return {key:value.key,cert:value.cert,port:value.port??0,targets,...(deployment?{deployment}:{})};
 }
-export async function startExperimentalGateway({config,relayOrigin,accounts,sessions,admit}){
+export async function startExperimentalGateway({config,relayOrigin,accounts,sessions,admit,ended=new WeakMap()}){
  const relay=new URL(relayOrigin);if(relay.protocol!=='http:'||(!config.deployment&&relay.hostname!=='127.0.0.1'))throw Error('Experimental gateway requires private management HTTP');
- const routes=new Map(),tickets=new Map(),caps=new Map(),active=new Set(),ended=new WeakMap(),bridgeSockets=new Set();
- let desktopOrigin,transport;
+ const routes=new Map(),tickets=new Map(),caps=new Map(),active=new Set(),bridgeSockets=new Set();
+ let desktopOrigin,transport,closed=false;
+ const managementSockets=new Set();
  const available=()=>({enabled:true,desktopOrigin,appBaseDomain:config.deployment?.appBaseDomain??'relay.test',targets:config.targets.map(({id,label})=>({id,label}))});
  function validateDefinition(app){if(!config.targets.some(t=>t.id===app.gateway?.target))throw fail(400,'Unknown configured gateway target');}
  function authority(session,appId){
@@ -86,6 +87,12 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
  }
  function bridge(req,res){
   const path=req.url.split('?')[0];
+  if(path==='/api/admin/gateway'&&['PUT','DELETE'].includes(req.method)){
+   const socketId=req.socket.remoteAddress+':'+req.socket.remotePort;
+   managementSockets.add(socketId);
+   res.once('finish',()=>{managementSockets.delete(socketId);if(closed)req.socket.end();});
+   res.once('close',()=>managementSockets.delete(socketId));
+  }
   if(!(path==='/'||/^\/(?:desktop(?:\/|$)|assets\/|fonts\/|api\/|native\/)/.test(path))||!['GET','HEAD','POST','PATCH','PUT','DELETE'].includes(req.method))throw denied();
   const up=http.request(relayOrigin+req.url,{method:req.method,headers:bridgeHeaders(req)},remote=>{
    const headers={...remote.headers};delete headers.connection;delete headers['transfer-encoding'];
@@ -94,6 +101,7 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
   });up.on('error',()=>res.destroy());up.setTimeout(30000,()=>up.destroy());res.on('close',()=>up.destroy());req.on('error',()=>up.destroy());req.pipe(up);
  }
  async function handle(req,res){
+  if(closed)throw denied();
   res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Content-Type-Options','nosniff');
   const main=req.headers.host===new URL(desktopOrigin).host,route=routes.get(req.headers.host);
   if(!main&&!route)throw denied();const origin=main?desktopOrigin:route.origin;
@@ -134,5 +142,15 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
   for(const [id,t] of tickets)if(t.expires<=Date.now())tickets.delete(id);
   for(const r of [...routes.values()])try{current(r);if(r.expires<=Date.now()||![...tickets.values(),...caps.values()].some(v=>v.route===r))retire(r);}catch{retire(r);}
  },100).unref();
- return {desktopOrigin,available,validateDefinition,launch,end,endSession,endApp,closeWindow,stats:()=>({routes:routes.size,tickets:tickets.size,caps:caps.size,active:active.size}),async close(){clearInterval(timer);for(const r of [...routes.values()])retire(r);transport.close();for(const socket of bridgeSockets)socket.destroy();await new Promise(r=>server.close(r));}};
+ return {desktopOrigin,available,validateDefinition,launch,end,endSession,endApp,closeWindow,stats:()=>({routes:routes.size,tickets:tickets.size,caps:caps.size,active:active.size}),async close({preserveManagement=false}={}){
+  closed=true;clearInterval(timer);for(const r of [...routes.values()]){
+   const state=cancellations(r.session);
+   if(state.ids.size>=512&&!state.ids.has(r.launchId))state.cooldownUntil=Date.now()+60000;
+   else state.ids.set(r.launchId,Date.now()+60000);
+   retire(r);
+  }transport.close();
+  for(const socket of bridgeSockets)if(preserveManagement&&managementSockets.has(socket.remoteAddress+':'+socket.remotePort))setTimeout(()=>socket.destroy(),5000).unref();else socket.destroy();
+  const done=new Promise(r=>server.close(r));
+  if(!preserveManagement||!managementSockets.size)await done;
+ }};
 }

@@ -2,11 +2,18 @@
  import {tick,onDestroy,onMount} from 'svelte';
  import Icon from './Icon.svelte';
  import {webAddress,nativeAddress,origins,checkDevice,statusLabel,statusDetail} from './webapps.js';
- let {draft,users,api,onsave,oncancel,onbusy}= $props();
+ let {draft,users,api,onsave,oncancel,onbusy,onsetupgateway}= $props();
  let error=$state(''),busy=$state(false),relay=$state(null),device=$state(null),image=$state(''),nativePreview=$state(''),heading;
  let cancellable=$state(false),controller,generation=0;
- let gateway=$state({enabled:false,targets:[]});
- onMount(()=>{let live=true;api('/gateway/config').then(value=>{if(live)gateway=value;}).catch(()=>{});return()=>live=false;});
+ let gateway=$state({enabled:false,targets:[]}),gatewayLoading=$state(true),gatewayError=$state('');
+ let gatewayLive=true;
+ async function loadGateway(){
+  gatewayLoading=true;gatewayError='';
+  try{const value=await api('/gateway/config');if(gatewayLive)gateway=value;}
+  catch{if(gatewayLive){gateway={enabled:false,targets:[]};gatewayError='Gateway status could not be read. Try again before choosing a target.';}}
+  finally{if(gatewayLive)gatewayLoading=false;}
+ }
+ onMount(()=>{void loadGateway();return()=>gatewayLive=false;});
  onDestroy(()=>{generation++;controller?.abort();});
  const steps=['Browser location','Name & address','Options & connection','Access','Review app'];
  function payload(){if(draft.mode==='gateway'){if(!gateway.enabled||!gateway.targets.some(t=>t.id===draft.gatewayTarget))throw Error('Choose a configured gateway target.');return {kind:'web',mode:'gateway',label:draft.label.trim(),gateway:{target:draft.gatewayTarget},icon:draft.icon,userIds:[...draft.userIds]};}return {kind:'web',mode:draft.mode,label:draft.label.trim(),address:draft.mode==='native'?nativeAddress(draft.address.trim(),window.location.origin):webAddress(draft.address.trim()),icon:draft.icon,openMode:draft.openMode,allowedOrigins:origins(draft.originText),userIds:[...draft.userIds]};}
@@ -14,20 +21,23 @@
  async function action(fn,canCancel=true){if(busy)return;const run=++generation;controller=new AbortController();busy=true;cancellable=canCancel;onbusy(true);error='';try{await fn(controller.signal);}catch(e){if(run===generation&&e.name!=='AbortError')error=e.message;}finally{if(run===generation){busy=false;cancellable=false;controller=null;onbusy(false);}}}
  function cancel(){if(busy&&!cancellable)return;generation++;controller?.abort();controller=null;busy=false;cancellable=false;onbusy(false);oncancel();}
  async function test(){await action(async(signal)=>{const data=payload();relay=null;device=null;const results=await Promise.allSettled([api('/admin/apps/check','POST',data,{signal}),...(draft.mode==='native'?[checkDevice(data.address,signal)]:[])]);if(signal.aborted)return;if(results[0].status==='fulfilled')relay=results[0].value;else error=results[0].reason.message;if(results[1]?.status==='fulfilled')device=results[1].value;});}
- async function preview(){await action(async(signal)=>{const data=payload();image='';nativePreview='';if(draft.mode==='native')nativePreview=data.address;else{const result=await api('/admin/apps/preview','POST',data,{signal});if(signal.aborted)return;if(!/^data:image\/jpeg;base64,/.test(result.image))throw Error('Preview returned no valid JPEG image.');image=result.image;}});}
+ async function preview(){await action(async(signal)=>{const data=payload();image='';nativePreview='';if(draft.mode==='native'){const result=await api('/admin/apps/validate','POST',data,{signal});if(signal.aborted)return;if(result?.valid!==true)throw Error('Preview validation unavailable. Try again.');nativePreview=data.address;}else{const result=await api('/admin/apps/preview','POST',data,{signal});if(signal.aborted)return;if(!/^data:image\/jpeg;base64,/.test(result.image))throw Error('Preview returned no valid JPEG image.');image=result.image;}});}
 </script>
 <section class="app-wizard" aria-label="Add app wizard">
  <p class="muted">Step {draft.step} of 5</p><h2 tabindex="-1" bind:this={heading}>{steps[draft.step-1]}</h2>
  {#if error}<p role="alert">{error}</p>{/if}
+ {#if draft.mode==='gateway'&&gatewayError}<p role="alert">{gatewayError}</p><button type="button" onclick={loadGateway} disabled={gatewayLoading}>Refresh Gateway options</button>{/if}
  <form onsubmit={e=>{e.preventDefault();draft.step===5?action(()=>onsave(payload()),false):go(draft.step+1);}}>
  <fieldset disabled={busy} class="form-grid"><legend class="sr-only">{steps[draft.step-1]}</legend>
  {#if draft.step===1}
   <label class="check"><input type="radio" bind:group={draft.mode} value="native"/>Native</label><label class="check"><input type="radio" bind:group={draft.mode} value="stream"/>Streamed</label>
-  {#if gateway.enabled}<label class="check"><input type="radio" bind:group={draft.mode} value="gateway"/>Gateway (experimental)</label>{/if}
+  <label class="check"><input type="radio" bind:group={draft.mode} value="gateway"/>Gateway (experimental)</label>
+  <p class="full-width muted">Gateway renders on your device but carries app traffic through Relay. Enable it once in Gateway settings, then choose a configured service for each app. Relay access and the app’s own login remain separate.</p>
+  {#if draft.mode==='gateway'}<div class="full-width gateway-handoff">{#if gatewayLoading}<p role="status">Reading Gateway options…</p>{:else if !gatewayError}<p>{gateway.enabled?'Gateway is configured. Choose a service target next; DNS, browser trust and app compatibility still need checking.':'Gateway needs one-time setup before you can save this app. Your app draft stays here while you configure it.'}</p>{/if}{#if onsetupgateway}<button type="button" onclick={onsetupgateway}>{gateway.enabled?'Manage Gateway':'Set up Gateway'}</button>{:else}<p>Finish initial setup, then open Control Panel → Gateway to configure it.</p>{/if}</div>{/if}
   <p class="full-width muted">Native runs in your device's browser and connects directly to the app. Streamed runs in an isolated, ephemeral browser on Relay. Each login has its own cookies; login storage is not shared or permanent.</p>
  {:else if draft.step===2}
   <label>App name<input bind:value={draft.label} required maxlength="64"/></label>
-  {#if draft.mode==='gateway'}<label>Gateway target<select bind:value={draft.gatewayTarget} required><option value="">Choose configured target</option>{#each gateway.targets as target}<option value={target.id}>{target.label}</option>{/each}</select></label><p class="full-width muted">Only operator-configured local targets are available. No upstream address or credential is stored in this app definition.</p>{:else}<label>Address<input bind:value={draft.address} required placeholder="https://app.example" autocomplete="off"/></label>
+  {#if draft.mode==='gateway'}<label>Gateway target<select bind:value={draft.gatewayTarget} required><option value="">Choose configured target</option>{#each gateway.targets as target}<option value={target.id}>{target.label}</option>{/each}</select></label><p class="full-width muted">Only administrator-configured targets are available. No upstream address or credential is stored in this app definition.</p>{:else}<label>Address<input bind:value={draft.address} required placeholder="https://app.example" autocomplete="off"/></label>
   <p class="full-width muted">Enter an explicit http:// or https:// address. For a bare IP, choose the protocol yourself. No URL credentials or fragments.</p>{/if}
   <label>Icon<select bind:value={draft.icon}>{#each ['globe','folder','notes','media','terminal'] as icon}<option value={icon}>{icon}</option>{/each}</select></label><div class="icon-preview"><Icon name={draft.icon}/></div>
  {:else if draft.step===3}
@@ -53,6 +63,6 @@
   <dl class="wizard-review full-width"><dt>Name</dt><dd>{draft.label}</dd><dt>{draft.mode==='gateway'?'Gateway target':'Address'}</dt><dd>{draft.mode==='gateway'?draft.gatewayTarget:draft.address}</dd><dt>Browser</dt><dd>{draft.mode==='gateway'?'Gateway · experimental desktop window':draft.mode==='stream'?'Streamed · isolated ephemeral browser':'Native · '+(draft.openMode==='tab'?'new tab':'desktop window')}</dd><dt>Icon</dt><dd>{draft.icon}</dd><dt>Additional origins</dt><dd>{draft.originText||'None'}</dd><dt>Access</dt><dd>Admins{#each users.filter(u=>draft.userIds.includes(u.id)) as u}, {u.username}{/each}</dd></dl>
   <p class="full-width muted">Saving registers the app; it does not install or change the upstream site. Connection checks describe only the place and time checked.</p>
  {/if}
- <div class="full-width wizard-actions">{#if draft.step>1}<button type="button" onclick={()=>go(draft.step-1)}>Back</button>{/if}<button>{draft.step===5?'Save app':'Next'}</button>{#if busy}<span role="status">Working…</span>{/if}</div>
+ <div class="full-width wizard-actions">{#if draft.step>1}<button type="button" onclick={()=>go(draft.step-1)}>Back</button>{/if}<button disabled={draft.mode==='gateway'&&!gateway.enabled}>{draft.step===5?'Save app':'Next'}</button>{#if busy}<span role="status">Working…</span>{/if}</div>
  </fieldset><button type="button" disabled={busy&&!cancellable} onclick={cancel}>Cancel</button></form>
 </section>

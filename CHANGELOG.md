@@ -5,7 +5,24 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-09-28
+
+Two-stage Gateway setup and lifecycle hardening. Release publication and signed Linux qualification are recorded separately in `TEST_REPORT.md`; updating remains an operator action.
+
+### Added
+- Two-stage Gateway setup: Gateway remains discoverable beside Native and Streamed in Add app. An explicit setup handoff keeps the unsaved app draft in the Control Panel, and returns with refreshed configured targets. Saving a target is separate from registering an app and granting access.
+- Administrator Gateway settings for checking protected certificate references, configuring the listener and fixed service targets, and enabling/changing/disabling with fresh password consent. Operator-owned configuration stays read-only; no DNS, certificate issuance, device trust, firewall or public-exposure automation.
+- Control Panel as an administrator-only trusted desktop system window, preserving navigation, local window controls, in-memory drafts and authorization teardown alongside the independent Updater.
+
+### Security and limits
+- Retired HTTPS authentication hostnames remain excluded from Native destinations until runtime restart. Native previews and their new-tab links require authenticated policy validation before browser traffic, without making offline/client-only Native addresses depend on server DNS or reachability.
+- Gateway changes retire every live gateway window across sessions even when one layout write fails. Applied-state cleanup failures are reported explicitly rather than leaving stale window authority on a replacement gateway.
+- Managed references persist in protected runtime state; TLS key bytes never pass through the UI. Changes retire gateway routes, private credentials and active transfers while preserving account/app definitions and private management access. Invalid configuration, bind failure and session expiry are covered with disposable lifecycle/race fixtures.
+- A running listener is not proof of DNS, browser trust, upstream availability or app compatibility. Gateway apps still require the HTTPS desktop and separate upstream login; existing private management access remains required for Updater.
+
 ### Fixed
+- Keep previously used HTTPS authentication hostnames denied to Native apps until sessions are invalidated by restart, and retire gateway windows across all sessions even when one layout write fails.
+- Focus gateway password consent for keyboard users and distinguish unavailable Gateway metadata from a disabled gateway, with an explicit retry.
 - Allow verified release payload transfers up to ten minutes instead of two on slower connections. Metadata budgets, shorter caller deadlines, five-second socket timeouts, cancellation, byte limits and signature checks are preserved. This is an independent updater control-plane repair, not a runtime self-update or modification of the published 0.6.0 artifacts.
 
 ## [0.6.0] — 2026-09-22

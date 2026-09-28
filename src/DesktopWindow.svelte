@@ -2,12 +2,13 @@
  import { onMount } from 'svelte';
  import StreamSurface from './StreamSurface.svelte';
  import UpdaterBrowser from './UpdaterBrowser.svelte';
+ import Settings from './Settings.svelte';
  import GatewaySurface from './GatewaySurface.svelte';
  let gatewaySurface=$state();
  import {windowMotion} from './motion.js';
  import {safeExternal} from './webapps.js';
  import { clampBounds,TITLE_HEIGHT } from './geometry.js';
- let {win,index,areaWidth,areaHeight,onchange,onfocus,onminimize,onclose,onreload,onmaximize,motion=false,api}=$props();
+ let {win,index,areaWidth,areaHeight,onchange,onfocus,onminimize,onclose,onreload,onmaximize,motion=false,api,user,onrefresh}=$props();
  let restore=$derived(win.maximized),gesture=$state(null),frame=$state(),bridgeCleanup=()=>{},nativeState=$state('loading');
  let navigation=$state({canGoBack:false,canGoForward:false,busy:true}),navigationPending=$state(false),navigationError=$state('');
  async function travel(direction){if(navigationPending)return;navigationPending=true;navigationError='';try{await api('/windows/'+encodeURIComponent(win.id)+'/navigate','POST',{direction});}catch(e){navigationError=e.message;}finally{navigationPending=false;}}
@@ -30,6 +31,12 @@
  <div class="window-content">
   {#if win.mode==='system'&&win.appId==='system-updater'}
    {#key win.reload}<UpdaterBrowser {api} {motion} visible={win.visible} onactivate={onfocus} />{/key}
+  {:else if win.mode==='system'&&win.appId==='system-control-panel'&&user?.role==='admin'&&!user.disabled&&!user.mustChange}
+   <div class="control-panel-surface" onpointerdown={onfocus} onfocusin={onfocus} role="presentation">
+    {#key win.reload}<Settings kind="admin" embedded {user} {api} {onrefresh} {onclose}/>{/key}
+   </div>
+  {:else if win.mode==='system'}
+   <div class="surface-message">System app unavailable.</div>
   {:else if win.mode==='gateway'}
    <GatewaySurface bind:this={gatewaySurface} appId={win.appId} title={win.title} {api} onactivate={onfocus}/>
   {:else if win.mode==='native'}
@@ -39,3 +46,6 @@
  </div>
  {#if !narrow&&!restore}<button class="resize-handle" aria-label={'Resize '+win.title} onpointerdown={e=>begin(e,'resize')} onpointermove={move} onpointerup={()=>gesture=null} onpointercancel={()=>gesture=null}></button>{/if}
 </section>
+<style>
+ .control-panel-surface{width:100%;height:100%;min-width:0;overflow:hidden;container-type:inline-size}
+</style>

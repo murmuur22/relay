@@ -54,7 +54,7 @@ try{
  gateway=await createGateway({port:0,runtime,profile:'standalone',hostname,networkMode});
  assert.equal(gateway.server.address().address,networkMode==='loopback'?'127.0.0.1':hostname);assert.equal(gateway.nativeService,undefined);assert.deepEqual(gateway.accounts.templates,[]);
  console.log(`PASS ${networkMode} exact interface binding and origin`);
- const initial=await login();assert.deepEqual(initial.apps.filter(a=>a.kind!=='system'),[]);assert.deepEqual(initial.apps.map(a=>a.id),['system-updater']);assert.deepEqual(gateway.accounts.state.services,[]);
+ const initial=await login();assert.deepEqual(initial.apps.filter(a=>a.kind!=='system'),[]);assert.deepEqual(initial.apps.map(a=>a.id),['system-updater','system-control-panel']);assert.deepEqual(gateway.accounts.state.services,[]);
  for(const id of ['parcels','keepsakes','notes-lab','signal-lab']){
   assert.equal((await fetch(gateway.origin+'/native/'+id+'/',{headers:{cookie:auth.cookie}})).status,404);
   assert.equal((await fetch(gateway.origin+'/api/admin/services',{method:'POST',headers:{cookie:auth.cookie,Origin:gateway.origin,'X-CSRF-Token':auth.session.csrf,'Content-Type':'application/json'},body:JSON.stringify({template:id})})).status,400);

@@ -16,9 +16,7 @@ const hostname = process.env.RELAY_HOSTNAME ?? '127.0.0.1';
 const runtime = process.env.RELAY_STATE_DIR;
 if(runtime !== undefined && !isAbsolute(runtime)) throw Error('RELAY_STATE_DIR must be an absolute path');
 const networkMode = process.env.RELAY_NETWORK_MODE ?? 'loopback';
-const {loadGatewayConfig} = await import('./experimental-gateway-config.mjs');
-const experimentalGateway = await loadGatewayConfig(process.env.RELAY_GATEWAY_CONFIG);
-const gateway = await createGateway({ port, keepsakesPort, profile, hostname, networkMode, runtime, native: profile === 'development', experimentalGateway });
+const gateway = await createGateway({ port, keepsakesPort, profile, hostname, networkMode, runtime, native: profile === 'development' });
 console.log(
   `Relay listening on ${gateway.origin}; enrollment/login location saved in the configured state directory.${gateway.nativeService ? ` Native Keepsakes PID ${gateway.nativeService.pid}.` : ''}`,
 );

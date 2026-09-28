@@ -2,14 +2,16 @@
  import {VERSION} from '../version.js';
  import {onMount,tick} from 'svelte';
  import AppWizard from './AppWizard.svelte';
+ import GatewaySettings from './GatewaySettings.svelte';
  import {webAddress,origins} from './webapps.js';
- let {kind,user,api,onclose,onrefresh,onpassword}= $props();
+ let {kind,user,api,onclose,onrefresh,onpassword,embedded=false}= $props();
  let error=$state(''),message=$state(''),busy=$state(false),users=$state([]),apps=$state([]),diagnostics=$state(null);
  let gateway=$state({enabled:false,targets:[]});
  let displayName=$state(''),currentPassword=$state(''),password=$state('');
  let page=$state('Users'),queryUsers=$state(''),queryApps=$state(''),editor=$state(null),confirmRemove=$state(false);
  let dialog,editorElement=$state(),confirmation=$state(),returnId='';
- const pages=['Users','Apps','System'];
+ const pages=['Users','Apps','Gateway','System'];
+ let gatewayVisited=$state(false);
  const drafts=new Map();
  const userStatus=u=>u.disabled?'Disabled':u.mustChange?'Password reset':'Active';
  const shownUsers=$derived(users.filter(u=>`${u.username} ${u.displayName} ${u.role} ${userStatus(u)}`.toLowerCase().includes(queryUsers.trim().toLowerCase())));
@@ -18,11 +20,11 @@
  async function run(fn){if(busy)return false;busy=true;error='';message='';try{await fn();return true;}catch(e){error=e.message;return false;}finally{busy=false;}}
  onMount(()=>{
   const previous=document.activeElement;
-  const siblings=[...dialog.parentElement.children].filter(el=>el!==dialog&&!el.inert);siblings.forEach(el=>el.inert=true);
+  const siblings=embedded?[]:[...dialog.parentElement.children].filter(el=>el!==dialog&&!el.inert);siblings.forEach(el=>el.inert=true);
   displayName=user.displayName;
   dialog.focus();
   run(load).then(async()=>{await tick();if(dialog?.isConnected)dialog.querySelector(kind==='profile'?'input':'[role=tab]')?.focus();});
-  return ()=>{siblings.forEach(el=>el.inert=false);const target=previous?.isConnected&&previous!==document.body?previous:document.querySelector('button[aria-label="Navigation"]');target?.focus();};
+  return ()=>{siblings.forEach(el=>el.inert=false);if(embedded)return;const target=previous?.isConnected&&previous!==document.body?previous:document.querySelector('button[aria-label="Navigation"]');target?.focus();};
  });
  async function openEditor(type,record,event){
   returnId=event.currentTarget.id;error='';message='';
@@ -30,7 +32,16 @@
   await tick();editorElement?.querySelector('input,select')?.focus();
  }
  async function back(){if(busy)return;drafts.delete(page);editor=null;confirmRemove=false;error='';await tick();(document.getElementById(returnId)||document.getElementById('new-'+page.toLowerCase()))?.focus();}
- function switchPage(next){if(busy||next===page)return;if(editor)drafts.set(page,{editor,returnId});page=next;const saved=drafts.get(next);editor=saved?.editor||null;returnId=saved?.returnId||'';confirmRemove=false;error='';message='';}
+ function switchPage(next){if(busy||next===page)return;if(editor)drafts.set(page,{editor,returnId});page=next;if(next==='Gateway')gatewayVisited=true;const saved=drafts.get(next);editor=saved?.editor||null;returnId=saved?.returnId||'';confirmRemove=false;error='';message='';}
+ async function setupGateway(){switchPage('Gateway');await tick();document.getElementById('tab-Gateway')?.focus();}
+ async function addGatewayApp(){
+  if(!await run(load))return;
+  switchPage('Apps');
+  if(!editor||editor.type!=='app'||editor.id)editor={type:'app',step:1,mode:'gateway',label:'',address:'',icon:'globe',openMode:'window',originText:'',userIds:[]};
+  editor.mode='gateway';
+  await tick();dialog?.querySelector('.app-wizard h2')?.focus();
+ }
+ async function returnToApp(){switchPage('Apps');await tick();dialog?.querySelector('.app-wizard h2')?.focus();}
  function tabKey(event,index){
   let next;if(event.key==='ArrowRight')next=(index+1)%pages.length;else if(event.key==='ArrowLeft')next=(index+pages.length-1)%pages.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=pages.length-1;else return;
   event.preventDefault();switchPage(pages[next]);document.getElementById('tab-'+pages[next])?.focus();
@@ -39,7 +50,7 @@
  async function cancelRemove(){if(busy)return;confirmRemove=false;await tick();document.getElementById('remove-app')?.focus();}
  function keydown(event){
   if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(busy)return;if(confirmRemove)cancelRemove();else if(editor)back();else onclose();}
-  if(event.key==='Tab'){
+  if(event.key==='Tab'&&(!embedded||confirmRemove)){
    const scope=confirmRemove?confirmation:dialog;
    const controls=[...scope.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')].filter(el=>el.getClientRects().length);
    const first=controls[0],last=controls.at(-1);
@@ -59,8 +70,8 @@
  async function preference(event,key='showAppStatus'){const target=event.currentTarget,value=target.checked;const ok=await run(async()=>{await api('/preferences','PATCH',{[key]:value});await onrefresh();message=key==='showAppStatus'?'Status preference saved.':'Motion preference saved.';});if(!ok)target.checked=user.preferences?.[key]!==false;}
  const mib=value=>`${(value/1024/1024).toFixed(1)} MiB`;
 </script>
-<div class="settings-window" bind:this={dialog} role="dialog" tabindex="-1" aria-modal="true" aria-label={kind==='admin'?'Control Panel':'Profile settings'} onkeydown={keydown}>
- <div class="panel-heading"><h1>{kind==='admin'?'Control Panel':'Profile settings'}</h1><button aria-label="Close settings" disabled={busy||confirmRemove} onclick={onclose}>×</button></div>
+<div class={embedded?'settings-embedded':'settings-window'} bind:this={dialog} role={embedded?'region':'dialog'} tabindex="-1" aria-modal={embedded?undefined:'true'} aria-label={kind==='admin'?'Control Panel':'Profile settings'} onkeydown={keydown}>
+ {#if !embedded}<div class="panel-heading"><h1>{kind==='admin'?'Control Panel':'Profile settings'}</h1><button aria-label="Close settings" disabled={busy||confirmRemove} onclick={onclose}>×</button></div>{/if}
  <div class="settings-body" aria-busy={busy}>
   {#if error}<p role="alert">{error}</p>{/if}{#if message}<p role="status">{message}</p>{/if}
   {#if kind==='profile'}
@@ -83,9 +94,10 @@
    <div class="settings-tabs" role="tablist" aria-label="Control Panel pages">
     {#each pages as name,i}<button id={'tab-'+name} role="tab" aria-selected={page===name} aria-controls={'page-'+name} tabindex={page===name?0:-1} disabled={busy||confirmRemove} onclick={()=>switchPage(name)} onkeydown={e=>tabKey(e,i)}>{name}</button>{/each}
    </div>
-   <div id={'page-'+page} role="tabpanel" aria-labelledby={'tab-'+page}>
+   {#if gatewayVisited}<div id="page-Gateway" role="tabpanel" aria-labelledby="tab-Gateway" hidden={page!=='Gateway'}>{#if drafts.get('Apps')?.editor?.type==='app'&&!drafts.get('Apps')?.editor?.id}<p class="settings-note">Your unsaved app draft is kept in this Control Panel. <button disabled={busy} onclick={returnToApp}>Return to app draft</button></p>{/if}<GatewaySettings {api} onrefresh={async()=>{await load();await onrefresh();}} onaddapp={addGatewayApp}/></div>{/if}
+   <div id={page==='Gateway'?undefined:'page-'+page} role={page==='Gateway'?undefined:'tabpanel'} aria-labelledby={page==='Gateway'?undefined:'tab-'+page} hidden={page==='Gateway'}>
     {#if editor?.type==='app'&&!editor.id}
-     <AppWizard draft={editor} {users} {api} onsave={createApp} oncancel={back} onbusy={value=>busy=value}/>
+     <AppWizard draft={editor} {users} {api} onsave={createApp} oncancel={back} onsetupgateway={setupGateway} onbusy={value=>busy=value}/>
     {:else if editor}
      <div class="section-heading"><h2>{editor.id?'Edit':'New'} {editor.type}{editor.type==='user'&&editor.id?': '+editor.username:''}</h2><button disabled={busy||confirmRemove} onclick={back}>Back to {page.toLowerCase()}</button></div>
      <div bind:this={editorElement} inert={confirmRemove}>
@@ -159,3 +171,16 @@
   {/if}
  </div>
 </div>
+<style>
+ .settings-embedded{height:100%;width:100%;min-width:0;overflow:hidden;background:#0c0a09;color:#fafaf9;accent-color:#d6d3d1;display:flex;flex-direction:column}
+ .settings-embedded .settings-body{min-width:0;min-height:0;max-height:none;flex:1;overflow:auto;padding:20px}
+ .settings-embedded .settings-tabs{overflow-x:auto;flex-wrap:nowrap}
+ .settings-embedded .settings-tabs button{flex:none}
+ .settings-embedded [hidden]{display:none}
+ @container(max-width:600px){
+  .settings-embedded .settings-body{padding:12px}
+  .settings-embedded .form-grid,.settings-embedded .diagnostic-grid{grid-template-columns:minmax(0,1fr)}
+  .settings-embedded .section-heading{align-items:flex-start;flex-wrap:wrap;gap:12px}
+  .settings-embedded .settings-tabs{gap:4px}
+ }
+</style>

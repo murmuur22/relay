@@ -44,7 +44,7 @@ test('CLI standalone uses isolated absolute state and localhost without native s
   for(let n=0;n<80&&!output().includes('Relay listening');n++){if(child.exitCode!==null)break;await delay(50);}
   assert.match(output(),/Relay listening on http:\/\/localhost:/);assert.doesNotMatch(output(),/Keepsakes PID/);
   assert.equal(await readFile(runtime+'/open-url.txt','utf8'),`http://localhost:${port}/`);
-  const auth=await authenticate(`http://localhost:${port}`,runtime);assert.deepEqual(auth.s.apps.filter(a=>a.kind!=='system'),[]);assert.deepEqual(auth.s.apps.map(a=>a.id),['system-updater']);
+  const auth=await authenticate(`http://localhost:${port}`,runtime);assert.deepEqual(auth.s.apps.filter(a=>a.kind!=='system'),[]);assert.deepEqual(auth.s.apps.map(a=>a.id),['system-updater','system-control-panel']);
  });}finally{await rm(runtime,{recursive:true,force:true});}
 });
 
@@ -89,7 +89,7 @@ test('standalone has no templates, native routes or subprocess and preserves web
  try{
   g=await createGateway({port:0,runtime,profile:'standalone'});
   let auth=await authenticate(g.origin,runtime),api=client(g.origin,auth);
-  assert.deepEqual(auth.s.apps.filter(a=>a.kind!=='system'),[]);assert.deepEqual(auth.s.apps.map(a=>a.id),['system-updater']);assert.deepEqual(g.accounts.templates,[]);assert.deepEqual(g.accounts.state.services,[]);assert.equal(g.nativeService,undefined);
+  assert.deepEqual(auth.s.apps.filter(a=>a.kind!=='system'),[]);assert.deepEqual(auth.s.apps.map(a=>a.id),['system-updater','system-control-panel']);assert.deepEqual(g.accounts.templates,[]);assert.deepEqual(g.accounts.state.services,[]);assert.equal(g.nativeService,undefined);
   for(const template of APPS){assert.equal((await api('/admin/services','POST',{template:template.id})).status,400);assert.equal((await fetch(g.origin+'/native/'+template.id+'/',{headers:{cookie:auth.cookie}})).status,404);}
   const r=await api('/onboarding/app','POST',{kind:'web',mode:'stream',label:'Fixture',address:'http://127.0.0.1:9999',icon:'globe'});assert.equal(r.status,200);const app=await r.json();
   await g.close();g=null;g=await createGateway({port:0,runtime,profile:'standalone'});

@@ -11,7 +11,7 @@ import {sameSiteDomains} from './experimental-gateway-domains.mjs';
 import {experimentalConfig} from './experimental-gateway.mjs';
 const invalid=()=>Error('Invalid gateway deployment configuration');
 const keys=(v,allowed)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).every(k=>allowed.includes(k));
-async function protectedRead(path,limit){
+export async function protectedRead(path,limit){
  if(typeof path!=='string'||!isAbsolute(path)||normalize(path)!==path)throw invalid();
  // Trusted, non-symlink ancestry; root-owned sticky temporary roots are allowed
  // for disposable tests. A writable ancestor owned by another principal is not.
@@ -36,8 +36,10 @@ export function validateDeployment(value){
 }
 export async function loadGatewayConfig(path){
  if(path===undefined)return undefined;
+ try{return await validateGatewayReference(JSON.parse(await protectedRead(path,65536)));}catch{throw invalid();}
+}
+export async function validateGatewayReference(v){
  try{
-  const v=JSON.parse(await protectedRead(path,65536));
   if(!keys(v,['version','bind','port','desktopHostname','appBaseDomain','keyPath','certPath','targets'])||v.version!==1||!Number.isInteger(v.port)||v.port<1024||v.port>65535)throw invalid();
   const deployment=validateDeployment({bind:v.bind,desktopHostname:v.desktopHostname,appBaseDomain:v.appBaseDomain});
   const key=await protectedRead(v.keyPath,65536),cert=await protectedRead(v.certPath,262144);

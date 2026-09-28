@@ -10,7 +10,7 @@ test('package, visible site version, diagnostics and changelog stay in sync',asy
  const pkg=JSON.parse(await readFile(ROOT+'package.json','utf8'));
  const lock=JSON.parse(await readFile(ROOT+'package-lock.json','utf8'));
  assert.match(pkg.version,/^\d+\.\d+\.\d+$/);assert.equal(lock.version,pkg.version);assert.equal(lock.packages[''].version,pkg.version);
- const changelog=await readFile(ROOT+'CHANGELOG.md','utf8');assert.ok(changelog.includes(`## [${pkg.version}]`));assert.ok(changelog.includes('## [Unreleased]'));assert.ok(changelog.includes('## [0.1.0]'));
+ const changelog=await readFile(ROOT+'CHANGELOG.md','utf8');const unreleased=changelog.split('## [Unreleased]\n')[1]?.split('\n## [')[0]||'';assert.ok(changelog.includes(`## [${pkg.version}]`)||unreleased.includes(`Target source version: **${pkg.version}**.`),'Current version must have a release heading or an explicit Unreleased source target');assert.ok(changelog.includes('## [Unreleased]'));assert.ok(changelog.includes('## [0.1.0]'));
  const runtime=await mkdtemp(tmpdir()+'/relay-version-');const g=await createGateway({port:0,runtime});const browser=await chromium.launch({headless:true,chromiumSandbox:true});
  try{
   const page=await browser.newPage({viewport:{width:1280,height:900}});await page.goto(g.origin);

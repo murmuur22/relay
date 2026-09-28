@@ -6,7 +6,7 @@ import {createGateway,ROOT} from '../../server/gateway.mjs';
 import {password} from '../auth-helper.mjs';
 
 async function neutral(page){
- const tinted=await page.locator('.settings-window').evaluate(root=>[root,...root.querySelectorAll('*')].flatMap(el=>{
+ const tinted=await page.locator('.settings-window, .settings-embedded').evaluate(root=>[root,...root.querySelectorAll('*')].flatMap(el=>{
   const s=getComputedStyle(el);return ['color','backgroundColor','borderTopColor','outlineColor','accentColor'].filter(key=>{
    const c=s[key].match(/[\d.]+/g)?.map(Number);return c?.length>=3&&(c.length<4||c[3]>0)&&c[1]>c[0]&&c[1]>c[2];
   }).map(key=>`${el.tagName}.${el.className} ${key}: ${s[key]}`);
@@ -14,7 +14,7 @@ async function neutral(page){
 }
 async function narrow(page){
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
- assert.equal(await page.locator('.settings-window').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+ assert.equal(await page.locator('.settings-window, .settings-embedded').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
 }
 test('real accounts pages, searchable tables, focused editors, app confirmation and neutral responsive profile',{timeout:90000},async()=>{
  const runtime=await mkdtemp(ROOT+'.test-accounts-ui-');const g=await createGateway({port:0,runtime});const browser=await chromium.launch({headless:true,chromiumSandbox:true});const page=await browser.newPage({viewport:{width:1280,height:900}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -68,7 +68,7 @@ test('real accounts pages, searchable tables, focused editors, app confirmation 
   await page.setViewportSize({width:390,height:844});
   for(const name of ['Users','Apps','System']){await tab(name).click();await narrow(page);await page.screenshot({path:ROOT+`screenshots/control-panel-${name.toLowerCase()}-narrow.png`});}
   await page.setViewportSize({width:320,height:700});await tab('Apps').click();await narrow(page);const scroller=page.getByRole('region',{name:'Apps table'});assert.equal(await scroller.evaluate(el=>el.scrollWidth>el.clientWidth),true);await button('Edit app Notes Lab').click();await expect(page.getByLabel('App label')).toBeFocused();await narrow(page);await button('Remove app').click();await narrow(page);await page.keyboard.press('Escape');await page.keyboard.press('Escape');await expect(button('Edit app Notes Lab')).toBeFocused();
-  await tab('Users').click();await button('New user').click();await narrow(page);await page.keyboard.press('Escape');await button('Close settings').click();await expect(button('Navigation')).toBeFocused();await page.setViewportSize({width:390,height:844});
+  await tab('Users').click();await button('New user').click();await narrow(page);await page.keyboard.press('Escape');await button('Close Control Panel').click();await expect(button('Navigation')).toBeFocused();await page.setViewportSize({width:390,height:844});
   await button('Navigation').click();await button('Sign out').click();
   await page.getByLabel('username',{exact:true}).fill('alice');await page.getByLabel('password',{exact:true}).fill(password);await button('Enter →').click();
   await expect(button('Open Parcels')).toBeVisible();await expect(button('Open Notes Lab')).toBeVisible();await expect(button('Open Keepsakes')).toHaveCount(0);
