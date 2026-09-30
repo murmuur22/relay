@@ -40,15 +40,26 @@ export async function loadGatewayConfig(path){
 }
 export async function validateGatewayReference(v){
  try{
+  if(v?.version===2){
+   if(!keys(v,['version','mode','bind','port','desktopOrigin','appBaseDomain','trustedProxy','targets','sourceRanges'])||v.mode!=='reverse-proxy'||v.bind!=='127.0.0.1'||v.trustedProxy!=='127.0.0.1'||!Number.isInteger(v.port)||v.port<1024||v.port>65535)throw invalid();
+   const u=new URL(v.desktopOrigin);
+   if(u.protocol!=='https:'||u.origin!==v.desktopOrigin)throw invalid();
+   const deployment=validateDeployment({bind:v.bind,desktopHostname:u.hostname,appBaseDomain:v.appBaseDomain});
+   return experimentalConfig({port:v.port,targets:await referenceTargets(v.targets),deployment,proxy:{desktopOrigin:v.desktopOrigin,trustedProxy:v.trustedProxy,sourceRanges:v.sourceRanges===undefined?[]:v.sourceRanges}});
+  }
   if(!keys(v,['version','bind','port','desktopHostname','appBaseDomain','keyPath','certPath','targets'])||v.version!==1||!Number.isInteger(v.port)||v.port<1024||v.port>65535)throw invalid();
   const deployment=validateDeployment({bind:v.bind,desktopHostname:v.desktopHostname,appBaseDomain:v.appBaseDomain});
   const key=await protectedRead(v.keyPath,65536),cert=await protectedRead(v.certPath,262144);
   const x=new X509Certificate(cert),now=Date.now();
   if(Date.parse(x.validFrom)>now||Date.parse(x.validTo)<=now||!x.checkPrivateKey(createPrivateKey(key))||!x.checkHost(v.desktopHostname,{subject:'never'})||!x.subjectAltName?.split(', ').includes('DNS:*.'+v.appBaseDomain))throw invalid();
   createSecureContext({key,cert});
-  if(!Array.isArray(v.targets))throw invalid();
+  return experimentalConfig({key,cert,port:v.port,targets:await referenceTargets(v.targets),deployment});
+ }catch{throw invalid();}
+}
+async function referenceTargets(values){
+  if(!Array.isArray(values))throw invalid();
   const targets=[];
-  for(const raw of v.targets){
+  for(const raw of values){
    const target={...raw};
    if(Object.hasOwn(target,'tls'))throw invalid();
    if(target.upstreamTLS!==undefined){
@@ -61,6 +72,5 @@ export async function validateGatewayReference(v){
    }
    targets.push(target);
   }
-  return experimentalConfig({key,cert,port:v.port,targets,deployment});
- }catch{throw invalid();}
+  return targets;
 }

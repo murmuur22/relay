@@ -5,6 +5,18 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-09-30
+
+Optional same-host reverse proxy. Publication and signed hosted qualification are separate gates recorded in `TEST_REPORT.md`; no production deployment is implied.
+
+### Added and hardened
+- Preserve Direct HTTPS and add explicit version-2 same-host Caddy → loopback HTTP mode. Canonical external desktop/app HTTPS origins are independent of the internal listener; default 443 is omitted and nondefault external ports retained.
+- Require an exact trusted loopback peer and one matching Host/X-Forwarded-Host plus HTTPS protocol field for both HTTP and WebSockets. Duplicate, conflicting, missing or additional forwarding metadata fails closed; no blanket trust-proxy. Secure host-only cookies, exact Origin/CSRF and per-launch/session/grant authority remain enforced.
+- Add compiled Control Panel mode selection, separate listener settings, read-only operator configuration, password/acknowledgement consent and reviewable Caddy snippets. Snippets preserve unrelated sites, overwrite forwarding metadata and default to deny-all until operator-selected source networks are supplied. Local DNS is not access control; SNAT and upstream proxy limitations are explicit.
+- Retire gateway windows even when a stopped same-port listener replacement is reverted. Keep accounts, targets, grants and the private management/updater recovery path. Version-2 references require matching-state restoration when rolling back to older code.
+- Qualify genuine accounts, app launch, file/Range/download bytes, WebSockets and active logout/grant revocation through a real isolated Caddy binary; keep process-local TLS test acceptance distinct from public/OS/Safari trust. Exact totals and hosted results are recorded only after execution in TEST_REPORT.md.
+- Runtime updates do not edit Caddy, DNS, firewall, VPN, trust stores or certificate-provider credentials. Caddy owns certificate renewal. Remote proxy transport and production deployment remain unsupported/unperformed by this change.
+
 ## [0.6.1] — 2026-09-28
 
 Two-stage Gateway setup and lifecycle hardening. Release publication and signed Linux qualification are recorded separately in `TEST_REPORT.md`; updating remains an operator action.

@@ -17,6 +17,29 @@ def qualifier():
 
 
 class UpgradeQualificationTests(unittest.TestCase):
+    def test_v061_enabled_gateway_baseline_is_explicit_and_target_must_be_newer(self):
+        q = qualifier()
+        q.validate_versions('v0.6.1', 'v0.6.2')
+        for old, target in [('v0.6.1', 'v0.6.1'), ('v0.6.1', 'v0.5.0'), ('v0.6.0', 'v0.6.2')]:
+            with self.assertRaises(q.install.InstallError):
+                q.validate_versions(old, target)
+        config = q.gateway_reference(Path('/var/lib/relay/qualification-tls'), reverse=False)
+        self.assertEqual(config['version'], 1)
+        self.assertEqual(config['bind'], '127.0.0.1')
+        proxy = q.gateway_reference(Path('/var/lib/relay/qualification-tls'), reverse=True)
+        self.assertEqual(proxy['version'], 2)
+        self.assertEqual(proxy['desktopOrigin'], 'https://desktop.example.test')
+        self.assertNotIn('keyPath', proxy)
+
+    def test_gateway_qualification_requires_real_api_success_and_probe(self):
+        q = qualifier()
+        with patch.object(q.base, 'http', return_value=(403, {}, '')):
+            with self.assertRaises(q.install.InstallError):
+                q.apply_gateway({}, 'cookie', 'csrf', 'password')
+        with patch.object(q.base, 'http', side_effect=[(200, {}, ''), (200, {'enabled': False}, '')]):
+            with self.assertRaises(q.install.InstallError):
+                q.apply_gateway({}, 'cookie', 'csrf', 'password')
+
     def test_explicit_target_is_admitted_only_after_production_verification(self):
         import tempfile
         from types import SimpleNamespace

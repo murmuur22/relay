@@ -28,10 +28,47 @@ UPGRADE_ENV = {**base.DISPOSABLE_ENV,
 
 
 def validate_versions(old, target):
-    base.require(old == 'v0.4.2', 'Only the v0.4.2 old control plane is qualified')
+    base.require(old in ('v0.4.2', 'v0.6.1'), 'Only explicit v0.4.2 or v0.6.1 baselines are admitted')
     base.require(isinstance(target, str) and re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', target),
                  'Exact stable-form target tag required')
-    base.require(tuple(map(int, target[1:].split('.'))) > (0, 4, 2), 'Target must be newer than baseline')
+    base.require(tuple(map(int, target[1:].split('.'))) > tuple(map(int, old[1:].split('.'))), 'Target must be newer than baseline')
+
+
+def gateway_reference(directory, reverse=False):
+    common = dict(bind='127.0.0.1', port=18444, appBaseDomain='apps.example.test',
+                  targets=[dict(id='synthetic', label='Synthetic qualification', upstream='http://127.0.0.1:18445')])
+    if reverse:
+        return dict(common, version=2, mode='reverse-proxy', desktopOrigin='https://desktop.example.test', trustedProxy='127.0.0.1')
+    return dict(common, version=1, desktopHostname='desktop.example.test',
+                keyPath=str(directory / 'key.pem'), certPath=str(directory / 'cert.pem'))
+
+
+def apply_gateway(config, cookie, csrf, password):
+    status, _, _ = base.http(4180, '/api/admin/gateway', 'PUT', dict(config=config, password=password), cookie, csrf)
+    base.require(status == 200, 'Gateway mode apply failed')
+    status, result, _ = base.http(4180, '/api/admin/gateway', cookie=cookie)
+    base.require(status == 200 and result.get('enabled') is True and result.get('config') == config, 'Gateway mode readback failed')
+
+
+def probe_gateway(reverse=False):
+    import http.client
+    import ssl
+    import socket
+    if reverse:
+        connection = http.client.HTTPConnection('127.0.0.1', 18444, timeout=5)
+        headers = {'Host': 'desktop.example.test', 'X-Forwarded-Host': 'desktop.example.test', 'X-Forwarded-Proto': 'https'}
+    else:
+        context = ssl.create_default_context(cafile='/var/lib/relay/qualification-tls/cert.pem')
+        connection = http.client.HTTPSConnection('desktop.example.test', 18444, context=context, timeout=5)
+        connection.sock = context.wrap_socket(socket.create_connection(('127.0.0.1', 18444), timeout=5), server_hostname='desktop.example.test')
+        headers = {'Host': 'desktop.example.test:18444'}
+    try:
+        connection.request('GET', '/api/auth', headers=headers)
+        response = connection.getresponse()
+        base.require(response.status == 200, 'Gateway actual listener probe failed')
+        response.read(16384)
+    finally:
+        connection.close()
 
 
 def guard_environment(apply, old, target):
@@ -126,12 +163,12 @@ def fingerprint(root):
     return result
 
 
-def load_installed():
-    """Resolve every updater import from the authenticated v0.4.2 installation."""
+def load_installed(old='v0.4.2'):
+    """Resolve updater imports from the authenticated baseline, never the checkout."""
     root = Path('/opt/relay-updater')
     install.trusted_path(root)
-    base.require(json.loads((root / 'package.json').read_text())['version'] == '0.4.2',
-                 'Not the old v0.4.2 control plane')
+    base.require(old in ('v0.4.2', 'v0.6.1') and json.loads((root / 'package.json').read_text())['version'] == old[1:],
+                 'Not the exact old control plane')
     for name in tuple(sys.modules):
         if name == 'updater' or name.startswith('updater.'):
             del sys.modules[name]
@@ -159,7 +196,7 @@ def installed_worker(apply, old, target, private_lan):
     protected = [Path('/opt/relay-updater'), Path('/etc/relay-updater'),
                  *(Path('/etc/systemd/system') / u for u in install.UNITS)]
     before = {str(p): fingerprint(p) for p in protected}
-    Engine, Broker = load_installed()
+    Engine, Broker = load_installed(old)
     engine = Engine(json.loads(Path('/etc/relay-updater/broker.json').read_text()))
     broker = thread = None
     try:
@@ -180,6 +217,21 @@ def installed_worker(apply, old, target, private_lan):
                                     dict(label='Signed upgrade baseline', parentId=None), cookie, csrf)
         base.require(status == 200 and folder.get('itemId'), 'Synthetic personal desktop state failed')
         state_paths = [Path('/var/lib/relay/accounts.json'), Path('/var/lib/relay/users')]
+        tls_dir = Path('/var/lib/relay/qualification-tls')
+        if old == 'v0.6.1':
+            import pwd
+            tls_dir.mkdir(mode=0o700)
+            identity = pwd.getpwnam('relay')
+            install.run(['/usr/bin/openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+                         '-keyout', str(tls_dir / 'key.pem'), '-out', str(tls_dir / 'cert.pem'),
+                         '-subj', '/CN=desktop.example.test', '-addext', 'subjectAltName=DNS:desktop.example.test,DNS:*.apps.example.test',
+                         '-addext', 'basicConstraints=critical,CA:TRUE'])
+            for path in (tls_dir, tls_dir / 'key.pem', tls_dir / 'cert.pem'):
+                os.chown(path, identity.pw_uid, identity.pw_gid)
+                path.chmod(0o700 if path.is_dir() else 0o600)
+            apply_gateway(gateway_reference(tls_dir), cookie, csrf, password)
+            probe_gateway()
+            state_paths += [Path('/var/lib/relay/gateway-managed.json'), tls_dir]
         state_before = {str(p): fingerprint(p) for p in state_paths}
         root_inode = Path('/var/lib/relay').stat().st_ino
         baseline_release = engine.current_release()
@@ -198,6 +250,10 @@ def installed_worker(apply, old, target, private_lan):
         # Sessions must expire after the real restart. Reauthenticate normally.
         base.require(base.http(4180, '/api/session', cookie=cookie)[0] == 401, 'Old Relay session survived restart')
         cookie, csrf = base.authenticate(password)
+        if old == 'v0.6.1':
+            probe_gateway()
+            apply_gateway(gateway_reference(tls_dir, reverse=True), cookie, csrf, password)
+            probe_gateway(reverse=True)
         status, _, _ = base.http(4180, '/api/desktop/folders', 'POST',
                                  dict(label='After upgrade; must disappear on rollback', parentId=None), cookie, csrf)
         base.require(status == 200, 'Post-upgrade synthetic state mutation failed')
@@ -210,9 +266,11 @@ def installed_worker(apply, old, target, private_lan):
         base.require(engine.current_release() == baseline_release, 'Rollback selected wrong signed baseline')
         base.require({str(p): fingerprint(p) for p in state_paths} == state_before, 'Rollback did not restore matching state')
         base.require(Path('/var/lib/relay').stat().st_ino == root_inode, 'Mounted state root replaced')
+        if old == 'v0.6.1':
+            probe_gateway()
         base.authenticate(password)
         base.require({str(p): fingerprint(p) for p in protected} == before, 'Rollback changed independent control plane/config/units')
-        return dict(passed=True, upgradeFrom=old, target=target, controlPlane='v0.4.2',
+        return dict(passed=True, upgradeFrom=old, target=target, controlPlane=old, gatewayEnabled=(old == 'v0.6.1'),
                     relayOrigin=base.NETWORK['relayOrigin'], updaterOrigin=base.NETWORK['uiOrigin'],
                     evidence=['official-signed-baseline', 'old-installed-engine-and-web',
                               'explicit-target-genuine-attestation-and-payload-verification',

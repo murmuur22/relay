@@ -1,6 +1,6 @@
 {
   "name": "we-relay",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,7 +17,7 @@
     "demo:jellyfin": "node tools/demo-jellyfin.mjs",
     "demo:jellyfin:verify": "node --test tests/demo-jellyfin.test.mjs",
     "open": "node tools/open-local.mjs",
-    "test:backend": "node --test tests/backend/*.test.mjs",
+    "test:backend": "node --test --test-concurrency=1 --test-timeout=100000 tests/backend/*.test.mjs",
     "test": "npm run test:backend && node --test --test-concurrency=1 --test-timeout=90000 tests/frontend/*.test.mjs && node tests/integration/experience.mjs",
     "benchmark": "node tools/benchmark.mjs"
   },

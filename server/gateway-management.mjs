@@ -1,3 +1,5 @@
+import {gatewayHTTPSOrigin} from './experimental-gateway-domains.mjs';
+import {caddySnippet} from './gateway-caddy.mjs';
 import {open,rm,lstat} from 'node:fs/promises';
 import {renameSync} from 'node:fs';
 import {randomUUID} from 'node:crypto';
@@ -40,11 +42,11 @@ export function gatewayManagementRoutes(app,{runtime,startup,getEdge,setEdge,sta
  app.get('/api/admin/gateway',wrap(async(req,res)=>{authority(req);res.json(status());}));
  app.post('/api/admin/gateway/validate',wrap(async(req,res)=>{
   authority(req);writable();if(busy)throw fail(429,'Gateway management busy.');busy=true;
-  try{const config=await validate(req.body?.config);authority(req);res.json({valid:true,desktopOrigin:`https://${config.deployment.desktopHostname}:${config.port}`,notes});}finally{busy=false;}
+  try{const config=await validate(req.body?.config);authority(req);res.json({valid:true,desktopOrigin:config.proxy?.desktopOrigin??gatewayHTTPSOrigin(config.deployment.desktopHostname,config.port),caddySnippet:caddySnippet(config),notes});}finally{busy=false;}
  },{queued:false}));
  for(const method of ['put','delete'])app[method]('/api/admin/gateway',wrap(async(req,res)=>{
   authority(req);writable();if(busy)throw fail(429,'Gateway management busy.');busy=true;
-  let temp,next,old,stopped=false,committed=false;
+  let temp,next,old,stopped=false,committed=false,earlyCleanup=[];
   try{
    await confirmed(req);
    const nextReference=method==='put'?structuredClone(req.body?.config):null;
@@ -55,7 +57,13 @@ export function gatewayManagementRoutes(app,{runtime,startup,getEdge,setEdge,sta
    const f=await open(temp,'wx',0o600);try{await f.writeFile(JSON.stringify(nextReference??{version:1,enabled:false})+'\n');await f.sync();}finally{await f.close();}
    authority(req);old=getEdge();
    const samePort=old&&config&&settings.port===config.port;
-   if(samePort){setEdge(undefined);await old.close({preserveManagement:true});stopped=true;authority(req);}
+   if(samePort){
+    setEdge(undefined);stopped=true;
+    const cleanup=[old.close({preserveManagement:true})];
+    for(const s of sessions.values())for(const w of [...s.manager.windows.values()])if(w.mode==='gateway')cleanup.push(s.manager.remove(w.id));
+    earlyCleanup=await Promise.allSettled(cleanup);
+    authority(req);
+   }
    if(config){next=await startEdge(config);authority(req);}
    // No await between final authority check, atomic commit and published state.
    authority(req);renameSync(temp,resolve(runtime,'gateway-managed.json'));temp=null;
@@ -70,7 +78,7 @@ export function gatewayManagementRoutes(app,{runtime,startup,getEdge,setEdge,sta
    for(const s of sessions.values())for(const w of [...s.manager.windows.values()])if(w.mode==='gateway')cleanup.push(s.manager.remove(w.id));
    if(old&&!stopped)cleanup.push(old.close({preserveManagement:true}));
    const results=await Promise.allSettled(cleanup);
-   if(results.some(result=>result.status==='rejected'))throw Error('Gateway retirement cleanup failed');
+   if([...earlyCleanup,...results].some(result=>result.status==='rejected'))throw Error('Gateway retirement cleanup failed');
    setEdge(next);
    authority(req);res.json(status());
   }catch(e){

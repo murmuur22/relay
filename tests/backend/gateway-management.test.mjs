@@ -20,6 +20,27 @@ async function fixture(){
  const config={version:1,bind:'127.0.0.1',port,desktopHostname:'desktop.example.test',appBaseDomain:'apps.example.test',keyPath:dir+'/key.pem',certPath:dir+'/cert.pem',targets:[{id:'files',label:'Files',upstream:`http://127.0.0.1:${upstream.address().port}`}]};
  return {dir,config,cert:await readFile(dir+'/cert.pem'),close:async()=>{upstream.closeAllConnections();await new Promise(r=>upstream.close(r));await rm(dir,{recursive:true,force:true});}};
 }
+test('managed Direct HTTPS to proxy mode preserves apps, retires windows, persists and restores Direct HTTPS',async()=>{
+ const f=await fixture();let relay;
+ try{
+  relay=await createGateway({port:0,runtime:f.dir+'/state',profile:'standalone'});
+  let api=client(relay.origin,await authenticate(relay.origin,f.dir+'/state'));
+  assert.equal((await api('/admin/gateway','PUT',{config:f.config,password})).status,200);
+  const l={relay,api,cert:f.cert},app=await addGateway(l),launch=await launchGateway(l,app);await redeemGateway(l,launch);const old=relay.experimentalGateway;
+  const config={version:2,mode:'reverse-proxy',bind:'127.0.0.1',port:f.config.port,desktopOrigin:'https://proxy.example.test',appBaseDomain:'apps.example.test',trustedProxy:'127.0.0.1',targets:f.config.targets};
+  const check=await api('/admin/gateway/validate','POST',{config});assert.equal(check.status,200);assert.equal((await check.json()).desktopOrigin,config.desktopOrigin);
+  assert.equal((await api('/admin/gateway','PUT',{config,password})).status,200);
+  assert.deepEqual(old.stats(),{routes:0,tickets:0,caps:0,active:0});assert.equal((await (await api('/session')).json()).windows.length,0);
+  for(const hostname of ['desktop.example.test','proxy.example.test'])assert.equal((await api('/admin/apps','POST',{kind:'web',mode:'native',label:'Denied',address:`https://${hostname}:9443`,openMode:'window',userIds:[]})).status,400);
+  assert.deepEqual(JSON.parse(await readFile(f.dir+'/state/gateway-managed.json','utf8')),config);
+  await relay.close();relay=await createGateway({port:0,runtime:f.dir+'/state',profile:'standalone'});api=client(relay.origin,await authenticate(relay.origin,f.dir+'/state'));
+  assert.equal(relay.experimentalGateway.desktopOrigin,config.desktopOrigin);
+  assert.ok((await (await api('/admin/services')).json()).some(a=>a.id===app.id));
+  assert.equal((await api('/admin/gateway','PUT',{config:f.config,password})).status,200);
+  assert.equal((await edgeRequest({cert:f.cert},relay.experimentalGateway.desktopOrigin,'/api/auth')).status,200);
+  assert.equal((await api('/admin/gateway','DELETE',{password})).status,200);
+ }finally{await relay?.close();await f.close();}
+});
 test('managed configuration validates without activation, applies real TLS, persists, retires routes and disables durably',async()=>{
  const f=await fixture();let relay;
  try{
@@ -123,12 +144,13 @@ test('same-port real bind failure restores prior listener/configuration and repo
  try{
   relay=await createGateway({port:0,runtime:f.dir+'/state',profile:'standalone'});const api=client(relay.origin,await authenticate(relay.origin,f.dir+'/state'));
   await api('/admin/gateway','PUT',{config:f.config,password});const bytes=await readFile(f.dir+'/state/gateway-managed.json'),old=relay.experimentalGateway;
+  const l={relay,api,cert:f.cert},app=await addGateway(l);await launchGateway(l,app);
   const close=old.close.bind(old);let occupied=false;
   t.mock.method(old,'close',async options=>{await close(options);await new Promise(r=>blocker.listen(f.config.port,f.config.bind,r));occupied=true;});
   const listen=https.Server.prototype.listen;
   t.mock.method(https.Server.prototype,'listen',function(...args){if(occupied){occupied=false;this.once('error',()=>blocker.close());}return listen.apply(this,args);});
   const response=await api('/admin/gateway','PUT',{config:{...f.config,targets:[{...f.config.targets[0],label:'Changed'}]},password});
-  assert.equal(response.status,503);assert.deepEqual(await readFile(f.dir+'/state/gateway-managed.json'),bytes);
+  assert.equal(response.status,503);assert.equal((await (await api('/session')).json()).windows.length,0,'reverted listener replacement retires gateway windows');assert.deepEqual(await readFile(f.dir+'/state/gateway-managed.json'),bytes);
   assert.deepEqual((await (await api('/admin/gateway')).json()).config,f.config);
   assert.equal((await edgeRequest({cert:f.cert},relay.experimentalGateway.desktopOrigin,'/api/auth')).status,200);
  }finally{t.mock.restoreAll();await relay?.close();await new Promise(r=>blocker.close(r));await f.close();}

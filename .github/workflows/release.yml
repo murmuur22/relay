@@ -9,7 +9,7 @@ on:
         required: true
         type: string
       upgrade-from:
-        description: 'OPTIONAL: v0.4.2 adds fresh disposable signed upgrade/rollback qualification; blank keeps fresh-install only'
+        description: 'OPTIONAL: v0.4.2 (default gateway off) or v0.6.1 (enabled Gateway, mode migration and matching-state rollback)'
         required: false
         default: ''
         type: string
@@ -58,6 +58,14 @@ jobs:
           # Hosted Ubuntu AppArmor blocks user namespaces by default. Permit
           # namespaces on this disposable runner; Chromium's sandbox stays ON.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Provision checksummed isolated Caddy test binary (no service installation)
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/relay-caddy"
+          cd "$RUNNER_TEMP/relay-caddy"
+          curl --fail --location --proto '=https' --proto-redir '=https' --max-time 180 https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_linux_amd64.tar.gz -o caddy.tar.gz
+          printf '%s  caddy.tar.gz\n' '8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9' | sha512sum --check -
+          tar -xzf caddy.tar.gz caddy
+          printf 'RELAY_TEST_CADDY=%s/relay-caddy/caddy\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Linux standalone and independent maintenance qualification
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-browsers
@@ -174,10 +182,10 @@ jobs:
       RELEASE_TAG: ${{ inputs.version }}
       UPGRADE_FROM: ${{ inputs['upgrade-from'] }}
     steps:
-      - name: Require explicit v0.4.2 baseline and stable-form published target
+      - name: Require explicit old baseline and stable-form published target
         shell: bash
         run: |
-          [[ "$UPGRADE_FROM" = v0.4.2 ]]
+          [[ "$UPGRADE_FROM" = v0.4.2 || "$UPGRADE_FROM" = v0.6.1 ]]
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

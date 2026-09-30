@@ -18,13 +18,17 @@ Only trusted first-party integrations are served on Relay's own origin. Admins c
 
 The current source version is defined in `package.json` and shared through `version.js`. It appears quietly in the desktop/login footer, in every user's Profile settings (including narrow screens), and in administrator System diagnostics. See [CHANGELOG.md](CHANGELOG.md) for the full versioned history and update policy. Version numbers do not imply production deployment; new changes are recorded under Unreleased until grouped into a version.
 
-## Optional application gateway — 0.6.1 source (Unreleased)
+## Optional reverse-proxy integration
+
+Relay helps people share network services and foster community without replacing their network administration. The optional [Caddy Gateway integration](docs/caddy-gateway.md) separates browser-facing HTTPS origins from an unprivileged loopback HTTP edge and preserves Direct HTTPS. It generates a reviewable, narrowly scoped snippet—not global Caddy reconfiguration. External HTTPS and source-policy status stay Not verified until the operator independently checks them. See `TEST_REPORT.md` for qualification; no production deployment is authorized or implied. The [design plan](docs/reverse-proxy-gateway-plan.md) records the acceptance boundaries.
+
+## Optional application gateway
 
 Gateway mode delivers configured apps' HTTP/media/WebSocket traffic through Relay while the visitor's browser renders them in isolated desktop windows. It is different from direct Native embedding and screenshot Streaming. Visitors still use their own upstream app accounts; Relay grants are not single sign-on.
 
 The installed startup path can read an explicit protected `RELAY_GATEWAY_CONFIG` JSON file. In the 0.6.1 source, administrators can alternatively configure it once through **Control Panel → Gateway**, check the server configuration, and confirm with their current password. **Add app → Gateway → Set up Gateway** provides the same setup page without losing the in-memory app draft; return to Add app to select a configured target and grant access. An existing operator-owned configuration is read-only in the UI. Without either configuration, Gateway stays off but remains discoverable in Add app.
 
-The administrator supplies HTTPS certificates, same-site isolated desktop/app names, listener settings and fixed upstream destinations. With Internet-reachable browser-trusted HTTPS, visitors do not need direct access or a VPN to those upstream services. LAN/VPN-only configurations remain an administrator choice; purchased domains are not mandatory. **Updating the runtime does not provision DNS, certificates, firewall rules, or public exposure.**
+The administrator supplies same-site isolated desktop/app names, listener settings and fixed upstream destinations. Direct HTTPS uses protected certificate files; reverse-proxy mode delegates browser TLS and renewal to same-host Caddy. With Internet-reachable browser-trusted HTTPS, visitors do not need direct access or a VPN to those upstream services. LAN/VPN-only configurations remain an administrator choice; purchased domains are not mandatory. **Updating the runtime does not provision DNS, certificates, firewall rules, or public exposure.**
 
 Read [gateway deployment](docs/gateway-deployment.md) for exact prerequisites, supported target configuration, security boundaries and rollback. Keep the existing private management URL for the independent updater; its handoff through the new HTTPS edge is not supported. The feature remains experimental and app/browser compatibility is limited to recorded tests—not every website, Safari, transcoding, large libraries or Internet load.
 
@@ -133,7 +137,7 @@ This project is on a Desktop that may sync through iCloud. Runtime files and the
 
 ## Tests
 
-After setup/build:
+After setup/build, provision a checksummed temporary Caddy binary and set `RELAY_TEST_CADDY` to its absolute path as described in [Caddy qualification](docs/caddy-gateway.md), then run:
 
 ```sh
 npm test
