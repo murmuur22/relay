@@ -1,11 +1,12 @@
 // Opt-in experimental normal-desktop gateway; explicit deployment config only.
 // Real authority is the owning Relay's Accounts and live sessions, never an auth callback.
+import {privatePeer,validateRemoteTLS,remoteSocketAuthorized} from './gateway-remote-tls.mjs';
 import {validateSourceRanges} from './gateway-caddy.mjs';
 import {validateProxyRequest} from './gateway-proxy-boundary.mjs';
 import https from 'node:https';
 import http from 'node:http';
 import {createSecureContext} from 'node:tls';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,constants as cryptoConstants} from 'node:crypto';
 import {createTransport,validateApp} from './experimental-gateway-transport.mjs';
 import {forgetCredential} from './experimental-gateway-profile.mjs';
 import {fail} from './accounts.mjs';
@@ -25,7 +26,9 @@ export function experimentalConfig(value){
  if(value.proxy){
   const p=value.proxy,u=new URL(p.desktopOrigin);
   validateSourceRanges(p.sourceRanges===undefined?[]:p.sourceRanges);
-  if(Object.keys(p).some(k=>!['desktopOrigin','trustedProxy','sourceRanges'].includes(k))||p.trustedProxy!=='127.0.0.1'||deployment?.bind!=='127.0.0.1'||u.protocol!=='https:'||u.origin!==p.desktopOrigin||gatewayHTTPSOrigin(u.hostname,Number(u.port||443))!==p.desktopOrigin||u.hostname!==deployment.desktopHostname||value.key!==undefined||value.cert!==undefined)throw Error('Invalid reverse proxy configuration');
+  if(Object.keys(p).some(k=>!['desktopOrigin','trustedProxy','sourceRanges','mtls'].includes(k))||u.protocol!=='https:'||u.origin!==p.desktopOrigin||gatewayHTTPSOrigin(u.hostname,Number(u.port||443))!==p.desktopOrigin||u.hostname!==deployment?.desktopHostname||value.key!==undefined||value.cert!==undefined)throw Error('Invalid reverse proxy configuration');
+  if(p.mtls){if(!privatePeer(p.trustedProxy)||!privatePeer(deployment.bind))throw Error('Backend requires private IPv4 endpoints');validateRemoteTLS(p.mtls);}
+  else if(p.trustedProxy!=='127.0.0.1'||deployment.bind!=='127.0.0.1')throw Error('Invalid same-host proxy configuration');
  }else createSecureContext({key:value.key,cert:value.cert});
  const targets=value.targets.map(raw=>{
   const allowed=['id','label','upstream','entryPath','cookieNames','requestHeaders','responseHeaders','webSocketPaths','allowDownloads','allowPopups','authProfile','maxResponseBytes',...(deployment?['tls']:[])];
@@ -131,7 +134,15 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
   return transport.proxy(req,res,getCap(req,route));
  }
  const handler=(req,res)=>void handle(req,res).catch(e=>res.headersSent?res.destroy():send(res,e.status||400,{error:'Gateway request denied'}));
- const server=config.proxy?http.createServer(handler):https.createServer({key:config.key,cert:config.cert},handler);
+ const mtls=config.proxy?.mtls;
+ const server=config.proxy&&!mtls?http.createServer(handler):https.createServer(mtls?{key:mtls.key,cert:mtls.cert,ca:mtls.ca,requestCert:true,rejectUnauthorized:true,minVersion:'TLSv1.2',secureOptions:cryptoConstants.SSL_OP_NO_TICKET,sessionTimeout:1}:{key:config.key,cert:config.cert},handler);
+ const tlsSockets=new Set();
+ if(mtls){
+  // No cached authorization lacking a complete peer chain on a resumed session.
+  server.on('newSession',(_id,_data,done)=>done());
+  server.on('resumeSession',(_id,done)=>done(null,null));
+  server.on('secureConnection',socket=>{tlsSockets.add(socket);socket.once('close',()=>tlsSockets.delete(socket));});
+ }
  server.on('connection',socket=>{bridgeSockets.add(socket);socket.on('close',()=>bridgeSockets.delete(socket));});
  server.on('upgrade',(req,socket,head)=>{
   socket.on('error',()=>{});
@@ -150,6 +161,7 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
  desktopOrigin=config.proxy?.desktopOrigin??gatewayHTTPSOrigin(config.deployment?.desktopHostname??'desktop.relay.test',server.address().port);
  transport=createTransport({active,desktopOrigin,stillAuthorized:async c=>{current(c.route);if(![...caps.values()].includes(c)||c.expires<=Date.now())throw denied();}});
  const timer=setInterval(()=>{
+  if(mtls)for(const socket of tlsSockets)if(!remoteSocketAuthorized(socket,mtls))socket.destroy();
   for(const [id,t] of tickets)if(t.expires<=Date.now())tickets.delete(id);
   for(const r of [...routes.values()])try{current(r);if(r.expires<=Date.now()||![...tickets.values(),...caps.values()].some(v=>v.route===r))retire(r);}catch{retire(r);}
  },100).unref();

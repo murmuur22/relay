@@ -17,6 +17,25 @@ def qualifier():
 
 
 class UpgradeQualificationTests(unittest.TestCase):
+    def test_v062_to_remote_mtls_reference_and_real_offline_certificates(self):
+        import tempfile
+        import ssl
+        q = qualifier()
+        q.validate_versions('v0.6.2', 'v0.6.3')
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / 'backend'
+            q.make_remote_tls(directory)
+            ref = q.gateway_reference(directory, remote=True)
+            self.assertEqual(ref['version'], 3)
+            self.assertEqual(ref['backendTLS']['serverName'], 'backend.example.test')
+            context = ssl.create_default_context(cafile=ref['caddyTLS']['serverCAPath'])
+            context.load_cert_chain(ref['caddyTLS']['clientCertPath'], ref['caddyTLS']['clientKeyPath'])
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+            for file in directory.iterdir():
+                self.assertEqual(file.stat().st_mode & 0o777, 0o600)
+            with self.assertRaises(FileExistsError):
+                q.make_remote_tls(directory)
+
     def test_v061_enabled_gateway_baseline_is_explicit_and_target_must_be_newer(self):
         q = qualifier()
         q.validate_versions('v0.6.1', 'v0.6.2')

@@ -40,6 +40,14 @@ export async function loadGatewayConfig(path){
 }
 export async function validateGatewayReference(v){
  try{
+  if(v?.version===3){
+   if(!keys(v,['version','mode','bind','port','desktopOrigin','appBaseDomain','trustedProxy','targets','sourceRanges','backendTLS','caddyTLS'])||v.mode!=='reverse-proxy'||!Number.isInteger(v.port)||v.port<1024||v.port>65535)throw invalid();
+   const t=v.backendTLS;
+   if(!keys(t,['keyPath','certPath','clientCAPath','serverName','clientName']))throw invalid();
+   const u=new URL(v.desktopOrigin),deployment=validateDeployment({bind:v.bind,desktopHostname:u.hostname,appBaseDomain:v.appBaseDomain});
+   const mtls={key:await protectedRead(t.keyPath,65536),cert:await protectedRead(t.certPath,262144),ca:await protectedRead(t.clientCAPath,262144),serverName:t.serverName,clientName:t.clientName,caddyTLS:v.caddyTLS};
+   return experimentalConfig({port:v.port,targets:await referenceTargets(v.targets),deployment,proxy:{desktopOrigin:v.desktopOrigin,trustedProxy:v.trustedProxy,sourceRanges:v.sourceRanges===undefined?[]:v.sourceRanges,mtls}});
+  }
   if(v?.version===2){
    if(!keys(v,['version','mode','bind','port','desktopOrigin','appBaseDomain','trustedProxy','targets','sourceRanges'])||v.mode!=='reverse-proxy'||v.bind!=='127.0.0.1'||v.trustedProxy!=='127.0.0.1'||!Number.isInteger(v.port)||v.port<1024||v.port>65535)throw invalid();
    const u=new URL(v.desktopOrigin);

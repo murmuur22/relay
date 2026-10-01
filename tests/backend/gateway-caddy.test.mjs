@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import https from 'node:https';
-import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,rm,realpath} from 'node:fs/promises';
+import {remotePKI,remoteReference} from '../remote-tls-helper.mjs';
 import {tmpdir} from 'node:os';
 import {spawn,execFileSync} from 'node:child_process';
 import {chromium,expect} from '@playwright/test';
@@ -14,9 +15,9 @@ import {createGateway} from '../../server/gateway.mjs';
 import {validateGatewayReference} from '../../server/experimental-gateway-config.mjs';
 const caddy=process.env.RELAY_TEST_CADDY;
 async function freePort(){const s=http.createServer();s.listen(0,'127.0.0.1');await once(s,'listening');const p=s.address().port;await new Promise(r=>s.close(r));return p;}
-for(const defaultPort of [true,false])test(`real Caddy ${defaultPort?'port-free':'nondefault-port'} login, bytes, Range, WebSockets, retirement and browser download`, {timeout:90000},async()=>{
+for(const remote of [false,true])for(const defaultPort of [true,false])test(`real Caddy ${remote?'mTLS':'loopback HTTP'} ${defaultPort?'port-free':'nondefault-port'} login, bytes, Range, WebSockets, retirement and browser download`, {timeout:90000},async()=>{
  assert.ok(caddy,'Set RELAY_TEST_CADDY to a checksummed real Caddy binary');
- const dir=await mkdtemp(tmpdir()+'/relay-caddy-'),bytes=Buffer.from('synthetic-file-contents-0123456789'),password=randomBytes(24).toString('hex');let relay,proxy,browser;const sockets=new Set();
+ const dir=await realpath(await mkdtemp(tmpdir()+'/relay-caddy-')),bytes=Buffer.from('synthetic-file-contents-0123456789'),password=randomBytes(24).toString('hex');let relay,proxy,browser;const sockets=new Set();
  const upstream=http.createServer((req,res)=>{
   if(req.url==='/slow'){res.writeHead(200);res.write('active');const timer=setInterval(()=>res.write('data'),20);res.on('close',()=>clearInterval(timer));return;}
   if(req.url==='/redirect'){res.writeHead(302,{location:'/file'});res.end();return;}
@@ -30,6 +31,8 @@ for(const defaultPort of [true,false])test(`real Caddy ${defaultPort?'port-free'
   execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-keyout',dir+'/key.pem','-out',dir+'/cert.pem','-config',dir+'/cert.cnf'],{stdio:'ignore'});
   const cert=await readFile(dir+'/cert.pem');
   const ref={version:2,mode:'reverse-proxy',bind:'127.0.0.1',port:internal,desktopOrigin:origin,appBaseDomain:'apps.example.test',trustedProxy:'127.0.0.1',targets:[{id:'files',label:'Synthetic Files',upstream:`http://127.0.0.1:${upstream.address().port}`,webSocketPaths:['/socket'],allowDownloads:true}]};
+  const pki=remote?await remotePKI(dir):null;
+  if(remote)Object.assign(ref,{...remoteReference(dir,internal),desktopOrigin:origin,targets:ref.targets});
   relay=await createGateway({port:0,runtime:dir+'/state',profile:'standalone',experimentalGateway:await validateGatewayReference(ref)});
   const settings=await validateGatewayReference(ref);
   const fixtureConfig=ranges=>`{\n admin off\n auto_https off\n https_port ${external}\n}\n`+caddySnippet(settings,ranges).replace(' {\n',` {\n bind 127.0.0.1\n tls ${dir}/cert.pem ${dir}/key.pem\n`)+`\nhttps://sibling.example.test:${external} {\n bind 127.0.0.1\n tls ${dir}/cert.pem ${dir}/key.pem\n respond "unrelated sibling"\n}\n`;
@@ -64,7 +67,7 @@ for(const defaultPort of [true,false])test(`real Caddy ${defaultPort?'port-free'
   assert.equal((await request(origin,'/api/session','GET',undefined,{cookie,'x-forwarded-host':'evil.test',forwarded:'proto=http','x-forwarded-for':'192.0.2.1'})).status,200,'Caddy overwrites spoofed metadata');
   const u=new URL(launch.origin),ws=new WebSocket(`wss://127.0.0.1:${external}/socket`,{servername:u.hostname,ca:cert,headers:{host:u.host,origin:launch.origin,cookie:cap}});await once(ws,'open');const msg=once(ws,'message');ws.send('synthetic');assert.equal((await msg)[0].toString(),'synthetic');
   // Raw backend upgrades with valid app authority must still require proxy metadata.
-  const raw=new WebSocket(`ws://127.0.0.1:${internal}/socket`,{headers:{host:u.host,origin:launch.origin,cookie:cap}});
+  const raw=new WebSocket(`${remote?'wss':'ws'}://127.0.0.1:${internal}/socket`,{...(remote?{...pki.client,ca:pki['server-ca'].cert,servername:'backend.example.test'}:{}),headers:{host:u.host,origin:launch.origin,cookie:cap}});
   const rawDenied=await new Promise(resolve=>{raw.on('open',()=>{raw.terminate();resolve(false);});raw.on('unexpected-response',(q,r)=>{r.resume();resolve(r.statusCode===403);});raw.on('error',()=>resolve(true));});assert.ok(rawDenied,'missing proxy metadata must reject websocket');
   const transfer=await new Promise((resolve,reject)=>{const q=https.get({hostname:'127.0.0.1',port:external,servername:u.hostname,ca:cert,path:'/slow',headers:{host:u.host,cookie:cap,'sec-fetch-site':'same-origin'}},r=>r.once('data',()=>resolve(r)));q.on('error',reject);});assert.equal(transfer.statusCode,200);assert.equal(transfer.complete,false);const closed=new Promise(resolve=>transfer.once('close',resolve));transfer.on('error',()=>{});const wsClosed=once(ws,'close');
   assert.equal((await api('/logout','POST',{})).status,200);await closed;await wsClosed;assert.equal(transfer.complete,false);
@@ -80,6 +83,25 @@ for(const defaultPort of [true,false])test(`real Caddy ${defaultPort?'port-free'
   const downloading=page.waitForEvent('download');await frame.getByRole('link',{name:'Download',exact:true}).click();const download=await downloading;assert.deepEqual(await readFile(await download.path()),bytes);
   await page.getByRole('button',{name:'End app session',exact:true}).click();await expect(page.locator('iframe[title="Files"]')).toHaveCount(0);
   await browser.close();browser=undefined;
+  if(remote&&defaultPort){
+   async function restartWith(text){
+    proxy.kill('SIGTERM');await once(proxy,'exit');await writeFile(dir+'/Caddyfile',text);
+    proxy=spawn(caddy,['run','--config',dir+'/Caddyfile','--adapter','caddyfile'],{env:{...process.env,HOME:dir,XDG_DATA_HOME:dir+'/data',XDG_CONFIG_HOME:dir+'/config'},stdio:'ignore'});
+   }
+   async function backendDenied(expected){
+    for(let i=0;i<100;i++){try{const status=(await request(origin,'/api/auth')).status;if(expected.includes(status))return;}catch{}await new Promise(r=>setTimeout(r,30));}assert.fail('Caddy must reject invalid backend identity');
+   }
+   const good=fixtureConfig(['127.0.0.1/32']),authLine=`tls_client_auth ${dir}/client.pem ${dir}/client.key`;
+   for(const credential of ['wrong-ca','wrong-name','wrong-usage','expired-client']){
+    await restartWith(good.replace(authLine,`tls_client_auth ${dir}/${credential}.pem ${dir}/${credential}.key`));await backendDenied(credential==='wrong-name'?[400,502]:[502]);
+   }
+   await restartWith(good.replace(authLine,''));await backendDenied([502]);
+   await restartWith(good.replace(`tls_trust_pool file ${dir}/server-ca.pem`,`tls_trust_pool file ${dir}/other-ca.pem`));await backendDenied([502]);
+   await restartWith(good.replace('tls_server_name backend.example.test','tls_server_name wrong.example.test'));await backendDenied([502]);
+   let expiredRequests=0;const expiredBackend=https.createServer(pki['expired-server'],(q,r)=>{expiredRequests++;r.end('must not reach an expired server');});await new Promise(r=>expiredBackend.listen(0,'127.0.0.1',r));
+   try{await restartWith(good.replace(`reverse_proxy 127.0.0.1:${internal}`,`reverse_proxy 127.0.0.1:${expiredBackend.address().port}`));await backendDenied([502]);assert.equal(expiredRequests,0,'Caddy never sends HTTP credentials to an expired backend');}finally{expiredBackend.closeAllConnections();await new Promise(r=>expiredBackend.close(r));}
+   await restartWith(good);let restored=false;for(let i=0;i<100;i++){try{if((await request(origin,'/api/auth')).status===200){restored=true;break;}}catch{}await new Promise(r=>setTimeout(r,30));}assert.ok(restored,'valid backend restored after negative cases');
+  }
   proxy.kill('SIGTERM');await once(proxy,'exit');
   await writeFile(dir+'/Caddyfile',fixtureConfig(['192.0.2.0/24']));
   proxy=spawn(caddy,['run','--config',dir+'/Caddyfile','--adapter','caddyfile'],{env:{...process.env,HOME:dir,XDG_DATA_HOME:dir+'/data',XDG_CONFIG_HOME:dir+'/config'},stdio:'ignore'});

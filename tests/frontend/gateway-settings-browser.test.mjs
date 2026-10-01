@@ -1,7 +1,8 @@
 // UI contract fixture only: deployment operations are mocked here; separate integration uses real APIs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,realpath} from 'node:fs/promises';
+import {remotePKI} from '../remote-tls-helper.mjs';
 import {tmpdir} from 'node:os';
 import {chromium,expect} from '@playwright/test';
 import {createGateway} from '../../server/gateway.mjs';
@@ -30,11 +31,12 @@ test('proxy mode uses canonical browser origin, hides TLS files and invalidates 
   await expect(l.page.getByRole('button',{name:'Enable gateway',exact:true})).toBeDisabled();
  }finally{await l.close();}
 });
-test('compiled proxy settings apply and disable through real password consent, with a narrow layout',{timeout:30000},async()=>{
+for(const remote of [false,true])test(`compiled ${remote?'remote mTLS':'proxy'} settings apply and disable through real password consent, with a narrow layout`,{timeout:30000},async()=>{
  const l=await lab();const reserve=http.createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const port=reserve.address().port;await new Promise(r=>reserve.close(r));
  try{
-  await open(l.page,l);await l.page.getByLabel('Gateway connection mode',{exact:true}).selectOption('reverse-proxy');
-  await l.page.getByLabel('Internal HTTP port',{exact:true}).fill(String(port));await l.page.getByLabel('Service address',{exact:true}).fill('http://127.0.0.1:8096');
+  await open(l.page,l);await l.page.getByLabel('Gateway connection mode',{exact:true}).selectOption(remote?'remote-proxy':'reverse-proxy');
+  if(remote){const dir=await realpath(l.runtime);await remotePKI(dir);for(const [label,value] of Object.entries({'Trusted proxy peer':'127.0.0.1','Backend server DNS identity':'backend.example.test','Allowed client DNS identity':'caddy.example.test','Backend certificate on Relay':dir+'/server.pem','Backend private key on Relay':dir+'/server.key','Client CA on Relay':dir+'/client-ca.pem','Server CA on Caddy':dir+'/server-ca.pem','Client certificate on Caddy':dir+'/client.pem','Client private key on Caddy':dir+'/client.key'}))await l.page.getByLabel(label,{exact:true}).fill(value);}
+  await l.page.getByLabel(remote?'Backend mTLS port':'Internal HTTP port',{exact:true}).fill(String(port));await l.page.getByLabel('Service address',{exact:true}).fill('http://127.0.0.1:8096');
   await l.page.getByRole('button',{name:'Check configuration',exact:true}).click();await l.page.getByRole('button',{name:'Enable gateway',exact:true}).click();
   await l.page.getByLabel('Current password for gateway changes',{exact:true}).fill(password);await l.page.getByLabel('I have configured DNS and HTTPS trust for the intended clients.',{exact:true}).check();await l.page.getByRole('button',{name:'Confirm gateway settings',exact:true}).click();
   await expect(l.page.getByText('Gateway listener is running',{exact:true})).toBeVisible();assert.equal(l.gateway.experimentalGateway.desktopOrigin,'https://desktop.relay.home.arpa');

@@ -359,6 +359,25 @@ python3 -m unittest updater.tests.test_deployment updater.tests.test_private_lan
 python3 deploy/qualify-upgrade.py --help
 ```
 
+## Signed Gateway migration qualification (v0.6.2 to v0.6.3)
+
+For the separate-VM candidate, dispatch the candidate's `release.yml` with
+`version=v0.6.3` and `upgrade-from=v0.6.2` only after its public signed prerelease
+exists. Both loopback and private-LAN matrices must pass. The fresh-host guards,
+anonymous attestation verification and genuine HTTP password/CSRF consent above
+remain mandatory. The installed signed v0.6.2 control plane is not replaced.
+
+The harness enables version-2 loopback proxy state on v0.6.2, installs the signed
+candidate, switches managed state to version-3 backend mTLS using disposable
+credentials on a loopback backend fixture, and probes the authenticated TLS
+listener. Management/updater traffic follows the selected network mode.
+Matching-state rollback must restore v0.6.2 plus version-2 state and its
+loopback HTTP listener, accounts and personal desktop. Control-plane/config/unit
+bytes and metadata must remain unchanged. This is signed runtime migration and
+listener evidence, not an installed Caddy/browser test: actual Caddy/browser and
+three-network-namespace coverage are separate source-preflight gates. No live
+server, external trust, DNS, public exposure or production deployment is tested.
+
 ## Recovery, limits and local verification
 
 For an interrupted apply: stop only the newly created Relay units, preserve the

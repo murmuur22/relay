@@ -4,7 +4,11 @@ Published in 0.6.0. See `TEST_REPORT.md` for executed Linux/systemd, signed-inst
 
 This is an explicit runtime capability, not an installer, exposure switch, certificate authority, or production qualification. With neither operator configuration nor a saved managed configuration, the existing loopback/private-LAN startup behavior is unchanged. The original programmatic loopback gateway interface remains supported. Historical local-only limitations in `experimental-desktop-gateway.md` describe the earlier experiment; this document describes the opt-in startup configuration and 0.6.1 managed setup.
 
-## Two-stage administrator setup — 0.6.1 Unreleased
+## Reverse proxy topology
+
+For same-host Caddy (version 2) and separate-VM Caddy with mutual TLS (version 3), use [Caddy Gateway](caddy-gateway.md). It documents external port-free HTTPS origins, exact backend peer/client identity, protected backend credentials, a tested offline provisioning recipe and renewal/rollback. The Direct HTTPS version-1 interface below is preserved. Neither source updates nor managed Gateway settings administer live Caddy, DNS, OS trust or network policy.
+
+## Two-stage administrator setup — 0.6.1
 
 1. Open **Control Panel → Apps → Add app**. Native connects directly from the device, Streamed renders in Relay's remote browser, and Gateway carries app traffic through Relay while rendering on the device. Gateway is visible even when off. **Set up Gateway** opens the Gateway tab and keeps the app draft in this window's memory. **Return to app draft** works even if setup is not finished. Closing/reloading the Control Panel or signing out clears unsaved drafts; drafts are not transferred into another browser tab.
 2. In **Gateway**, enter the desktop/app names, assigned listener address and unprivileged port, existing protected certificate/key paths on the server, and fixed service targets. The Jellyfin preset is a starting configuration, not an installed service or a login. Advanced target options are collapsed JSON controls. **Check configuration** checks syntax, protected files, certificate names/lifetime, port conflicts with management/updater, and Native cookie-host conflicts. It does not reserve a free port, contact the upstream, provision DNS or establish browser trust.

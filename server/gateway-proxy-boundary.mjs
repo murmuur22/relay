@@ -1,8 +1,10 @@
-// Same-host proxy contract. Local host processes are explicitly trusted.
-// Inspect rawHeaders: Node's merged header view cannot establish uniqueness.
+import {remoteSocketAuthorized} from './gateway-remote-tls.mjs';
+// Inspect rawHeaders before admitting HTTP or WebSocket forwarding metadata.
 export function validateProxyRequest(req,config){
  const deny=()=>{throw Error('Invalid proxy boundary');};
- if(config.trustedProxy!=='127.0.0.1'||req.socket.remoteAddress!==config.trustedProxy)deny();
+ if(req.socket.remoteAddress!==config.trustedProxy)deny();
+ if(config.mtls){if(!remoteSocketAuthorized(req.socket,config.mtls))deny();}
+ else if(config.trustedProxy!=='127.0.0.1')deny();
  const fields=new Map();
  for(let i=0;i<req.rawHeaders.length;i+=2){
   const name=req.rawHeaders[i].toLowerCase(),value=req.rawHeaders[i+1];

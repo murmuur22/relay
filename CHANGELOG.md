@@ -5,6 +5,16 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-09-30
+
+Separate-VM Caddy mTLS integration. Signed publication/qualification gates are recorded in `TEST_REPORT.md`; no production deployment is implied.
+
+- Add explicit version-3 separate-VM Caddy transport with TLS 1.2+, verified server identity/chain, client CA plus exact DNS SAN/clientAuth identity policy, and one private IPv4 socket peer. Version-2 remains loopback HTTP only; Direct HTTPS is unchanged.
+- Preserve canonical browser HTTPS origins (default 443), Secure cookies, raw forwarding-header checks on HTTP/WebSockets, fixed targets, per-launch isolation and active retirement. Backend certificates are separate from Caddy's browser certificate and require deliberate renewal/reload before expiry.
+- Add managed separate-VM settings, protected server file references and remote Caddy path inputs, password consent, read-only operator mode and reviewable scoped mTLS snippets. Validation does not establish external trust, remote file availability or private source policy.
+- Enforce directly root-issued client leaves, complete ordered server chains including root, earliest-chain expiry retirement for active HTTP/WebSockets and fresh TLS handshakes rather than session resumption. Include a tested unprivileged offline OpenSSL provisioning recipe and explicit per-host credential distribution/rotation guidance.
+- Extend real disposable Caddy/account/browser and TLS negative fixtures plus managed mode migration/restart tests. See TEST_REPORT.md for executed results and unexecuted publication gates.
+
 ## [0.6.2] — 2026-09-30
 
 Optional same-host reverse proxy. Publication and signed hosted qualification are separate gates recorded in `TEST_REPORT.md`; no production deployment is implied.

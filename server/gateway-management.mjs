@@ -25,7 +25,7 @@ export function gatewayManagementRoutes(app,{runtime,startup,getEdge,setEdge,sta
  const writable=()=>{if(source==='operator')throw fail(409,'Gateway is operator-owned and read-only.');};
  const validate=async value=>{
   if(Buffer.byteLength(JSON.stringify(value)??'')>16384)throw fail(413,'Gateway configuration exceeds 16 KiB');
-  let config;try{config=await validateGatewayReference(value);}catch{throw fail(400,'Invalid gateway configuration. Check protected certificate/key files, certificate names and validity, listener and target settings.');}
+  let config;try{config=await validateGatewayReference(value);}catch{throw fail(400,'Invalid gateway configuration. Check protected certificate/key files, certificate names, complete backend chain and validity, listener and target settings.');}
   if(config.port===managementPort||config.port===updaterPort)throw fail(409,'Gateway port conflicts with management or updater.');
   const hosts=new Set([hostname,config.deployment.desktopHostname]);
   if(accounts.state.services.some(a=>a.kind==='web'&&a.mode==='native'&&hosts.has(new URL(a.address).hostname)))throw fail(409,'A Native app shares a Relay cookie hostname. Change or remove that app first.');

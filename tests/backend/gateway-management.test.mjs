@@ -9,6 +9,7 @@ import https from 'node:https';
 import {edgeRequest,addGateway,launchGateway,redeemGateway} from '../gateway-helper.mjs';
 import {tmpdir} from 'node:os';
 import {createGateway} from '../../server/gateway.mjs';
+import {remotePKI,remoteReference} from '../remote-tls-helper.mjs';
 import {authenticate,client,password} from '../auth-helper.mjs';
 async function fixture(){
  const dir=await realpath(await mkdtemp(tmpdir()+'/relay-managed-'));
@@ -20,7 +21,7 @@ async function fixture(){
  const config={version:1,bind:'127.0.0.1',port,desktopHostname:'desktop.example.test',appBaseDomain:'apps.example.test',keyPath:dir+'/key.pem',certPath:dir+'/cert.pem',targets:[{id:'files',label:'Files',upstream:`http://127.0.0.1:${upstream.address().port}`}]};
  return {dir,config,cert:await readFile(dir+'/cert.pem'),close:async()=>{upstream.closeAllConnections();await new Promise(r=>upstream.close(r));await rm(dir,{recursive:true,force:true});}};
 }
-test('managed Direct HTTPS to proxy mode preserves apps, retires windows, persists and restores Direct HTTPS',async()=>{
+for(const remote of [false,true])test(`managed Direct HTTPS to ${remote?'remote mTLS':'proxy'} mode preserves apps, retires windows, persists and restores Direct HTTPS`,async()=>{
  const f=await fixture();let relay;
  try{
   relay=await createGateway({port:0,runtime:f.dir+'/state',profile:'standalone'});
@@ -28,6 +29,9 @@ test('managed Direct HTTPS to proxy mode preserves apps, retires windows, persis
   assert.equal((await api('/admin/gateway','PUT',{config:f.config,password})).status,200);
   const l={relay,api,cert:f.cert},app=await addGateway(l),launch=await launchGateway(l,app);await redeemGateway(l,launch);const old=relay.experimentalGateway;
   const config={version:2,mode:'reverse-proxy',bind:'127.0.0.1',port:f.config.port,desktopOrigin:'https://proxy.example.test',appBaseDomain:'apps.example.test',trustedProxy:'127.0.0.1',targets:f.config.targets};
+  const pki=remote?await remotePKI(f.dir):null;
+  if(remote)Object.assign(config,{...remoteReference(f.dir,f.config.port),desktopOrigin:config.desktopOrigin,targets:f.config.targets});
+  const probe=()=>new Promise((resolve,reject)=>{const q=https.get({host:'127.0.0.1',port:config.port,servername:config.backendTLS.serverName,ca:pki['server-ca'].cert,...pki.client,agent:false,path:'/api/auth',headers:{host:'proxy.example.test','x-forwarded-host':'proxy.example.test','x-forwarded-proto':'https'}},r=>{r.resume();r.on('end',()=>resolve(r.statusCode));});q.on('error',reject);});
   const check=await api('/admin/gateway/validate','POST',{config});assert.equal(check.status,200);assert.equal((await check.json()).desktopOrigin,config.desktopOrigin);
   assert.equal((await api('/admin/gateway','PUT',{config,password})).status,200);
   assert.deepEqual(old.stats(),{routes:0,tickets:0,caps:0,active:0});assert.equal((await (await api('/session')).json()).windows.length,0);
@@ -35,6 +39,15 @@ test('managed Direct HTTPS to proxy mode preserves apps, retires windows, persis
   assert.deepEqual(JSON.parse(await readFile(f.dir+'/state/gateway-managed.json','utf8')),config);
   await relay.close();relay=await createGateway({port:0,runtime:f.dir+'/state',profile:'standalone'});api=client(relay.origin,await authenticate(relay.origin,f.dir+'/state'));
   assert.equal(relay.experimentalGateway.desktopOrigin,config.desktopOrigin);
+  if(remote){
+   assert.equal(await probe(),200);
+   const bytes=await readFile(f.dir+'/state/gateway-managed.json');
+   assert.equal((await api('/admin/gateway','PUT',{config:{...config,backendTLS:{...config.backendTLS,clientCAPath:f.dir+'/missing'}},password})).status,400);
+   assert.deepEqual(await readFile(f.dir+'/state/gateway-managed.json'),bytes);assert.equal(await probe(),200);
+   const v2={version:2,mode:'reverse-proxy',bind:'127.0.0.1',port:config.port,desktopOrigin:config.desktopOrigin,appBaseDomain:config.appBaseDomain,trustedProxy:'127.0.0.1',targets:config.targets};
+   assert.equal((await api('/admin/gateway','PUT',{config:v2,password})).status,200);
+   assert.equal((await api('/admin/gateway','PUT',{config,password})).status,200);assert.equal(await probe(),200);
+  }
   assert.ok((await (await api('/admin/services')).json()).some(a=>a.id===app.id));
   assert.equal((await api('/admin/gateway','PUT',{config:f.config,password})).status,200);
   assert.equal((await edgeRequest({cert:f.cert},relay.experimentalGateway.desktopOrigin,'/api/auth')).status,200);

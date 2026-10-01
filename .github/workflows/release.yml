@@ -9,7 +9,7 @@ on:
         required: true
         type: string
       upgrade-from:
-        description: 'OPTIONAL: v0.4.2 (default gateway off) or v0.6.1 (enabled Gateway, mode migration and matching-state rollback)'
+        description: 'OPTIONAL: v0.4.2 (gateway off), v0.6.1 (Direct to v2) or v0.6.2 (v2 to v3 mTLS and matching-state rollback)'
         required: false
         default: ''
         type: string
@@ -66,6 +66,13 @@ jobs:
           printf '%s  caddy.tar.gz\n' '8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9' | sha512sum --check -
           tar -xzf caddy.tar.gz caddy
           printf 'RELAY_TEST_CADDY=%s/relay-caddy/caddy\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Isolated separate-VM topology (three local Linux network namespaces)
+        env:
+          RELAY_TEST_NODE_IMAGE: node@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e
+        run: |
+          docker context inspect --format '{{.Endpoints.docker.Host}}'
+          docker pull "$RELAY_TEST_NODE_IMAGE"
+          RELAY_TEST_CADDY_LINUX="$RELAY_TEST_CADDY" node tools/qualify-remote-containers.mjs
       - name: Linux standalone and independent maintenance qualification
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-browsers
@@ -185,7 +192,7 @@ jobs:
       - name: Require explicit old baseline and stable-form published target
         shell: bash
         run: |
-          [[ "$UPGRADE_FROM" = v0.4.2 || "$UPGRADE_FROM" = v0.6.1 ]]
+          [[ "$UPGRADE_FROM" = v0.4.2 || "$UPGRADE_FROM" = v0.6.1 || "$UPGRADE_FROM" = v0.6.2 ]]
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
