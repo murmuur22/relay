@@ -1,5 +1,24 @@
 # Relay prototype verification
 
+## 0.6.3 published signed-release qualification
+
+Release [v0.6.3](https://github.com/murmuur22/relay/releases/tag/v0.6.3) binds source/tag `220553aa557d0d6b4a442a11f2f1ee7ed88625ab`. [Linux x64 source preflight](https://github.com/murmuur22/relay/actions/runs/36802194724), [official signed build](https://github.com/murmuur22/relay/actions/runs/36802804539), and [signed fresh installation/upgrade qualification](https://github.com/murmuur22/relay/actions/runs/36803263387) passed. The source preflight executed actual checksummed Caddy/browser tests, mTLS negatives, active chain-expiry and session-replay checks, managed lifecycle tests, three distinct Linux network namespaces, and the unprivileged hardened systemd source harness. This is Linux x64 evidence, separate from the prior local macOS/arm64 qualification.
+
+Both loopback and private-LAN jobs passed fresh signed v0.6.3 installation and genuine **v0.6.2 version-2 enabled Gateway → v0.6.3 version-3 mTLS → matching v0.6.2 version-2 rollback**. Actual results report `gatewayEnabled: true`, `remoteMTLS: true`, and `controlPlane: v0.6.2`. Installed old engine/web/control-plane/configuration/unit bytes and metadata remained unchanged. Accounts/personal-desktop state and matching gateway state/TLS files were restored, readiness checked and old sessions rejected. The signed upgrade probes backend listeners with disposable credentials on loopback, with management/updater traffic following each selected network mode. It does not separately install Caddy or drive a browser; real Caddy/browser and distinct-network-namespace evidence comes from the source preflight.
+
+All four public assets were anonymously downloaded and verified before promotion. GitHub attestation verification pinned the exact source AND signer commit, `refs/tags/v0.6.3`, official repository/workflow and GitHub-hosted runner. Both payload hashes/sizes, canonical 0.6.3 versions, byte-exact MIT licenses and dependency notices passed; packaged runtime server files matched the tagged source. The exact published assets are:
+
+- `relay-linux-x64.tar.gz`: **302720991 bytes**, SHA-256 `1fcb5136cf64895293560a12c05eab09f951d11d55f74c97d23af3450ba4747a`.
+- `relay-updater-linux-x64.tar.gz`: **190499 bytes**, SHA-256 `025caf18035adc8100e2338dd9b2dc583dfe8900bd10fb68c461c4f53648a2bf`.
+- `relay-release.json`: **440 bytes**, SHA-256 `a2db0d118b7d1edcc7b0d2df6341c13a702f33c20911e1f2e5d41293c936cf03`.
+- `relay-release.attestation.json`: **10920 bytes**, SHA-256 `ac13f47502517bea741c26b735bf9a931b64552a0c0b441b8b89d90ad4afda48`.
+
+The official workflow initially published a public prerelease with latest=false. Only after those gates passed was it promoted to stable/latest. Exact release/latest state, asset identities/digests and unchanged tag were read back. [Ordinary credential-free stable discovery](https://github.com/murmuur22/relay/actions/runs/36803538319) then passed with the unchanged old v0.6.2 source `50d30ba89cc1ec9960475660eeb528b57c6be322`, returning verified v0.6.3. Local unsigned qualification artifacts were never uploaded or substituted for the official build.
+
+Prior qualified tree `1f021e00d8c67eb01b8c2d791213a70353269e52` matched the local candidate exactly before publication documentation edits. Committed tree `5acacd7c916b68d0231c0599f51fa92edbb00f08` differs only in README, CHANGELOG, TEST_REPORT and deploy/README. Scoped staged-tree exclusion/private-path/secret-pattern and license audits passed. The version test and nine upgrade-harness tests were rerun locally; the signed source and all new mTLS/browser/namespace gates were exercised on hosted Linux. Unrelated report/spikes/private data were excluded and preserved.
+
+No production host was accessed or deployed, and no SSH, live Relay/Caddy/Journalmax/Pi-hole/Tailscale, network infrastructure or OS-trust changes were made. The feature remains experimental. Chromium fixture SPKI acceptance and Node CA/name validation do not establish Safari/OS/public trust, DNS/ACME renewal, physical-VM credential isolation, power-loss or long-duration Internet qualification. Backend mTLS does not encrypt independently configured HTTP upstreams or the private management/updater HTTP route. Installation remains an operator action.
+
 ## 0.6.3 separate-VM Caddy — local candidate (Unreleased)
 
 Source/package lock are prepared as 0.6.3. Publication and hosted qualification are now authorized; production deployment remains forbidden. This local checkpoint predates commit, push, tag and signed hosted execution; actual publication results are recorded separately. Version 1 Direct HTTPS, version 2 same-host loopback HTTP and the private independent updater path remain intact.

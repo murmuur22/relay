@@ -27,6 +27,18 @@ After that prerelease exists, manually dispatch `release.yml` with input `versio
 
 This job cannot publish/promote a release. Do not copy the destructive hosted-runner command onto a production host. See the bundled deploy/README.md for prerequisites and the installer inspect/apply contract.
 
+## Executed v0.6.3 publication
+
+[v0.6.3](https://github.com/murmuur22/relay/releases/tag/v0.6.3) was built from
+`220553aa557d0d6b4a442a11f2f1ee7ed88625ab` by the official tag workflow. It was
+initially public prerelease/latest=false, then promoted only after actual Linux
+source, signed fresh-install and v0.6.2 enabled-Gateway upgrade/matching-state
+rollback gates passed in both network modes. All four public assets were downloaded
+without credentials and verified against exact source/tag/workflow provenance,
+payload hashes/sizes, package versions and licenses. Ordinary stable discovery with
+the unchanged v0.6.2 updater then passed. Exact run URLs and asset digests are in
+[TEST_REPORT.md](../../TEST_REPORT.md). This is publication, not production deployment.
+
 ## Local builder
 
 From repository root, after both builds and a production-only dependency tree:
