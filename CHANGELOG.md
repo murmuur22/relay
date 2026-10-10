@@ -17,6 +17,7 @@ Updater redesign release candidate. Publication and signed qualification are sep
 - Document the separate control-plane distribution/migration gate: ordinary runtime releases do not update an installed updater service/UI. The separately attested archive supplies the new control plane for fresh installs; existing-host migration remains separately approved and qualified. No privileged self-update or production/OS/network/trust change is included.
 - Extend signed/preflight gates to every updater backend/frontend regression and ASCII browser case, and admit a guarded genuine v0.6.3 enabled-mTLS runtime upgrade/matching-state rollback fixture with its old control plane unchanged.
 - Serve the fixed public desktop shell relative to its explicit build root so clean qualification checkouts beneath hidden parent directories work without allowing dotfiles or changing private route authentication.
+- Prepare ASCII test artifacts in fresh checkouts and bound desktop qualification browser operations/cleanup with fail-closed TAP reporting; retain all rendering, lifecycle, authentication and sandbox assertions.
 
 ## [0.6.3] — 2026-09-30
 

@@ -17,6 +17,15 @@ def qualifier():
 
 
 class UpgradeQualificationTests(unittest.TestCase):
+    def test_frontend_qualification_keeps_timeouts_and_reports_finished_failures(self):
+        for filename in ('check.yml', 'release.yml'):
+            workflow = (ROOT / '.github/workflows' / filename).read_text()
+            with self.subTest(workflow=filename):
+                self.assertIn('--test-force-exit --test-reporter=tap --test-timeout=130000 tests/backend/private-lan*.test.mjs tests/frontend/updater*.test.mjs', workflow)
+        source = (ROOT / 'tests/frontend/updater-desktop.test.mjs').read_text()
+        self.assertIn('page.setDefaultTimeout(5000)', source)
+        self.assertIn('timeout:10000', source)
+
     def test_signed_fresh_handoff_and_reads_carry_real_relay_owner_cookie(self):
         q = qualifier()
         calls = []

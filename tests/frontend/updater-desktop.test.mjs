@@ -7,14 +7,14 @@ import {createGateway} from '../../server/gateway.mjs';
 import {browserLogin,authenticate,client,password} from '../auth-helper.mjs';
 import {itemToken} from '../../src/desktop.js';
 test('compiled desktop updater opens one native protected window, including private deep links, without a popup or manager',{timeout:30000},async t=>{
- const runtime=await mkdtemp(tmpdir()+'/relay-updater-ui-'),g=await createGateway({port:0,runtime,profile:'development'}),browser=await chromium.launch({headless:true,chromiumSandbox:true});t.after(async()=>{await browser.close();await g.close();await rm(runtime,{recursive:true,force:true});});const context=await browser.newContext(),page=await context.newPage();await browserLogin(page,g.origin,runtime);
+ const runtime=await mkdtemp(tmpdir()+'/relay-updater-ui-'),g=await createGateway({port:0,runtime,profile:'development'}),browser=await chromium.launch({headless:true,chromiumSandbox:true});let stage='initialization';const mark=name=>{stage=name;console.log('Updater desktop qualification:',name);};t.after(async()=>{console.log('Updater desktop cleanup after:',stage);await browser.close();console.log('Updater desktop cleanup: client closed');await g.close();console.log('Updater desktop cleanup: gateway closed');await rm(runtime,{recursive:true,force:true});},{timeout:10000});const context=await browser.newContext(),page=await context.newPage();page.setDefaultTimeout(5000);page.setDefaultNavigationTimeout(10000);mark('login');await browserLogin(page,g.origin,runtime);mark('open unavailable updater');
  await page.getByRole('button',{name:'Open Updater',exact:true}).click();
  const win=page.getByRole('region',{name:'Updater window'}).or(page.locator('[data-window-id="system-updater"]'));
  await expect(win).toBeVisible();assert.equal(context.pages().length,1);
  await expect(win.getByRole('alert')).toContainText('Updater unavailable');
  await expect(win.getByRole('heading',{name:'Status unavailable',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:/Updater/}).last().click();await expect(win).toHaveCount(1);assert.equal(context.pages().length,1);
- const before=await win.boundingBox(),bar=await win.locator('.titlebar').boundingBox();await page.mouse.move(bar.x+70,bar.y+10);await page.mouse.down();await page.mouse.move(bar.x+100,bar.y+35);await page.mouse.up();await expect.poll(async()=>Math.round((await win.boundingBox()).x-before.x)).toBe(30);
+ mark('window geometry');const before=await win.boundingBox(),bar=await win.locator('.titlebar').boundingBox();await page.mouse.move(bar.x+70,bar.y+10);await page.mouse.down();await page.mouse.move(bar.x+100,bar.y+35);await page.mouse.up();await expect.poll(async()=>Math.round((await win.boundingBox()).x-before.x)).toBe(30);
  const handle=await page.getByRole('button',{name:'Resize Updater',exact:true}).boundingBox();await page.mouse.move(handle.x+4,handle.y+4);await page.mouse.down();await page.mouse.move(handle.x-200,handle.y-60);await page.mouse.up();assert.ok((await win.boundingBox()).width<before.width);
  const small=await page.getByRole('button',{name:'Resize Updater',exact:true}).boundingBox();await page.mouse.move(small.x+4,small.y+4);await page.mouse.down();await page.mouse.move(small.x-600,small.y);await page.mouse.up();
  assert.equal(await win.locator('.updater-browser').evaluate(el=>el.scrollWidth<=el.clientWidth),true,'Small desktop window must not overflow horizontally');
@@ -23,9 +23,9 @@ test('compiled desktop updater opens one native protected window, including priv
  const item=await page.evaluate(async()=>{const d=await(await fetch('/api/desktop')).json();return d.items.find(i=>i.appId==='system-updater');});
  await page.goto(g.origin+'/desktop?app='+itemToken(item));await expect(win).toBeVisible();assert.equal(context.pages().length,1);
  assert.equal(await page.evaluate(async()=>{const s=await(await fetch('/api/session')).json();return s.windows.length;}),0);
- await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:/^Notes Lab/}).click();await page.getByRole('button',{name:'Minimize Notes Lab',exact:true}).click();await expect(win).not.toHaveClass(/focused/);
+ mark('stream focus');await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:/^Notes Lab/}).click();await page.getByRole('button',{name:'Minimize Notes Lab',exact:true}).click();await expect(win).not.toHaveClass(/focused/);
  await win.getByRole('button',{name:'Check releases',exact:true}).click();await expect(win).toHaveClass(/focused/);await expect(page.getByRole('button',{name:'Restore Notes Lab',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:'Sign out',exact:true}).click();await expect(win).toHaveCount(0);
+ mark('logout and administrator demotion');await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:'Sign out',exact:true}).click();await expect(win).toHaveCount(0);
  const admin=await authenticate(g.origin,runtime),adminApi=client(g.origin,admin);assert.equal((await adminApi('/admin/users','POST',{username:'operator',role:'admin',password})).status,200);
  const operator=client(g.origin,await authenticate(g.origin,runtime,'operator'));
  await browserLogin(page,g.origin,runtime);await page.getByRole('button',{name:'Open Updater',exact:true}).click();await expect(win).toBeVisible();
