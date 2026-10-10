@@ -7,7 +7,7 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [0.6.4] — 2026-10-10
 
-Updater redesign release candidate. Publication and signed qualification are separate gates recorded in `TEST_REPORT.md`; no production deployment is implied.
+Published as [v0.6.4](https://github.com/murmuur22/relay/releases/tag/v0.6.4) after exact-source Linux preflight, official signed publication, anonymous asset verification, dual-mode signed fresh installs and unchanged-v0.6.3-control-plane enabled-Gateway runtime upgrade/matching-state rollback passed. Ordinary credential-free discovery from v0.6.3 also passed. Exact run URLs and hashes are in `TEST_REPORT.md`; no production deployment was performed.
 
 - Redesign the independent updater as a warm-monochrome transfer terminal: a real shaded Three.js 3D knot rendered through stable ASCII cells, luminous breathing core, orbit marks and sparse inward particles; bounded elapsed-time animation, hidden/reduced-motion pauses and usable no-WebGL status fallback.
 - Keep normal update review, current-password consent, byte progress, errors and recovery inside the Relay page through an independently served trusted embedded surface that survives runtime authentication loss/restart. Reconnect uses the existing Login without automatically retrying mutations. Preserve standalone direct access and an explicitly requested safe standalone recovery tab.
