@@ -26,10 +26,10 @@ for(const outcome of ['held','rejected'])test(`local updater closes independentl
  await expect(win.locator('.chamber canvas')).toBeVisible();
  const launchGate=new Promise(r=>releaseLaunch=r);let launchArrived;const launchArrival=new Promise(r=>launchArrived=r);
  await page.route('**/api/updater/launch',async route=>{launchArrived();await launchGate;await route.fulfill({json:{url:'http://127.0.0.1:1/updater/#'+'a'.repeat(64)}});});
- const popupEvent=page.waitForEvent('popup');await win.getByRole('button',{name:'Start update',exact:true}).click();const popup=await popupEvent;await launchArrival;
+ await win.getByRole('button',{name:'Start update',exact:true}).click();await launchArrival;assert.equal(page.context().pages().length,1);
  await page.getByRole('button',{name:'Close Updater',exact:true}).click();
  await expect(win).toHaveCount(0,{timeout:1500});assert.equal(new URL(page.url()).search,'');
- releaseLaunch();await expect.poll(()=>popup.isClosed()).toBe(true);
+ releaseLaunch();await expect(page.locator('iframe[title="Independent Relay updater"]')).toHaveCount(0);assert.equal(page.context().pages().length,1);
  await expect(page.locator('.updater-browser canvas')).toHaveCount(0);
  release();
 });

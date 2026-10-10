@@ -58,10 +58,11 @@ jobs:
           export RELAY_ICON_PYTHON="$(command -v python3)"
           python3 -m unittest discover -s updater/tests -v
           npm --prefix updater/ui run test:unit
-          node --test --test-timeout=90000 tests/backend/updater*.test.mjs
-          node --test --test-timeout=90000 updater/ui/tests/http-smoke.mjs updater/ui/tests/fixture-smoke.mjs
+          node --test --test-concurrency=1 --test-timeout=130000 tests/backend/updater*.test.mjs
+          npm --prefix updater/ui test
+          node --test --test-concurrency=1 --test-timeout=90000 updater/ui/tests/http-smoke.mjs updater/ui/tests/fixture-smoke.mjs
           node deploy/verify-standalone.mjs
-          node --test --test-timeout=130000 tests/backend/private-lan*.test.mjs tests/frontend/updater-real.test.mjs
+          node --test --test-concurrency=1 --test-timeout=130000 tests/backend/private-lan*.test.mjs tests/frontend/updater*.test.mjs
           node --test --test-timeout=90000 tests/backend/web-request-body.test.mjs tests/backend/web-redirects.test.mjs tests/backend/stream-navigation.test.mjs tests/frontend/stream-navigation.test.mjs
           node --test --test-concurrency=1 --test-timeout=130000 tests/backend/desktop-gateway*.test.mjs tests/backend/gateway-*.test.mjs tests/backend/native-preview-validation.test.mjs tests/backend/system-apps.test.mjs tests/frontend/desktop-gateway.test.mjs tests/frontend/gateway-*.test.mjs tests/frontend/native-preview-retirement.test.mjs tests/frontend/control-panel.test.mjs
       - name: Actual systemd mount-boundary install and rollback fixture

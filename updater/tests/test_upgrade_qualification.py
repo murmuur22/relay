@@ -17,6 +17,54 @@ def qualifier():
 
 
 class UpgradeQualificationTests(unittest.TestCase):
+    def test_signed_fresh_handoff_and_reads_carry_real_relay_owner_cookie(self):
+        q = qualifier()
+        calls = []
+        def http(port, path, method='GET', body=None, cookie='', csrf=''):
+            calls.append((port, path, method, body, cookie, csrf))
+            if path == '/api/updater/state':
+                return 200, {}, ''
+            if path == '/api/updater/launch':
+                return 200, {'url': f"http://{q.base.NETWORK['hostname']}:4191/updater/#one-use"}, ''
+            if path == '/updater/api/exchange':
+                if cookie != 'relay_session=owner':
+                    return 401, {}, ''
+                exchanges = [c for c in calls if c[1] == path and c[4] == cookie]
+                return (200, {}, 'relay_updater_session=monitor') if len(exchanges) == 1 else (403, {}, '')
+            if path == '/updater/api/state':
+                return (200 if cookie == 'relay_session=owner; relay_updater_session=monitor' else 401), {}, ''
+            raise AssertionError(path)
+        with patch.object(q.base, 'http', side_effect=http):
+            monitor = q.base.launch_monitor('relay_session=owner', 'csrf')
+            self.assertEqual(monitor, 'relay_updater_session=monitor')
+            self.assertEqual(q.base.monitor_state('relay_session=owner', monitor)[0], 200)
+        exchange = [c for c in calls if c[1] == '/updater/api/exchange']
+        self.assertEqual([c[4] for c in exchange], ['relay_session=owner', 'relay_session=owner'])
+
+    def test_v063_baseline_preserves_enabled_mtls_and_requires_newer_exact_target(self):
+        q = qualifier()
+        q.validate_versions('v0.6.3', 'v0.6.4')
+        self.assertEqual(q.baseline_gateway_mode('v0.6.3'), 'remote')
+        self.assertEqual(q.baseline_gateway_mode('v0.6.2'), 'reverse')
+        self.assertEqual(q.baseline_gateway_mode('v0.6.1'), 'direct')
+        self.assertIsNone(q.baseline_gateway_mode('v0.4.2'))
+        for old, target in [('v0.6.3', 'v0.6.3'), ('v0.6.3', 'v0.6.2'), ('v0.6.3', 'v0.6.4-rc1'), ('v0.6.3\n', 'v0.6.4'), ('v0.6.4', 'v0.6.5')]:
+            with self.subTest(old=old, target=target), self.assertRaises(q.install.InstallError):
+                q.validate_versions(old, target)
+        workflow = (ROOT / '.github/workflows/release.yml').read_text()
+        self.assertIn('"$UPGRADE_FROM" = v0.6.3', workflow)
+
+    def test_release_and_preflight_execute_embedded_isolation_and_ascii_regressions(self):
+        for filename in ('release.yml', 'check.yml'):
+            workflow = (ROOT / '.github/workflows' / filename).read_text()
+            with self.subTest(workflow=filename):
+                self.assertIn('tests/backend/updater*.test.mjs', workflow)
+                self.assertIn('tests/frontend/updater*.test.mjs', workflow)
+                self.assertIn('npm --prefix updater/ui test', workflow)
+                self.assertIn('--test-concurrency=1', workflow)
+        config = (ROOT / 'updater/ui/playwright.config.js').read_text()
+        self.assertNotIn('testIgnore', config)
+
     def test_v062_to_remote_mtls_reference_and_real_offline_certificates(self):
         import tempfile
         import ssl

@@ -5,6 +5,19 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
+## [0.6.4] — 2026-10-10
+
+Updater redesign release candidate. Publication and signed qualification are separate gates recorded in `TEST_REPORT.md`; no production deployment is implied.
+
+- Redesign the independent updater as a warm-monochrome transfer terminal: a real shaded Three.js 3D knot rendered through stable ASCII cells, luminous breathing core, orbit marks and sparse inward particles; bounded elapsed-time animation, hidden/reduced-motion pauses and usable no-WebGL status fallback.
+- Keep normal update review, current-password consent, byte progress, errors and recovery inside the Relay page through an independently served trusted embedded surface that survives runtime authentication loss/restart. Reconnect uses the existing Login without automatically retrying mutations. Preserve standalone direct access and an explicitly requested safe standalone recovery tab.
+- Permit only the exact configured Relay ancestor for updater HTML, without relaxing API Host/Origin/CSRF or privileged broker boundaries. Validate exact message origin/source/shape; never transmit authority through messaging or retain ticket fragments in the host DOM. Retire prior administrator data on explicit logout/account switch and require matching live user identity for further mutations.
+- Invalidate pending launches at logout intent, distinguish live administrator revocation from a positively observed runtime restart, require a genuine original-owner Relay cookie at monitoring exchange, and retain a concealed teardown recipient until independent logout is read back or reported unconfirmed. Keep fresh mutation authorization independent from restart monitoring.
+- Allow explicit in-page authentication-metadata refresh after a previously successful Login discovery becomes stale during restart. Keep the independent frame mounted; refreshing metadata never resubmits a password or retries an updater mutation.
+- Document the separate control-plane distribution/migration gate: ordinary runtime releases do not update an installed updater service/UI. The separately attested archive supplies the new control plane for fresh installs; existing-host migration remains separately approved and qualified. No privileged self-update or production/OS/network/trust change is included.
+- Extend signed/preflight gates to every updater backend/frontend regression and ASCII browser case, and admit a guarded genuine v0.6.3 enabled-mTLS runtime upgrade/matching-state rollback fixture with its old control plane unchanged.
+- Serve the fixed public desktop shell relative to its explicit build root so clean qualification checkouts beneath hidden parent directories work without allowing dotfiles or changing private route authentication.
+
 ## [0.6.3] — 2026-09-30
 
 Separate-VM Caddy mTLS integration. Published as [v0.6.3](https://github.com/murmuur22/relay/releases/tag/v0.6.3) after Linux x64 source, signed dual-mode installation/upgrade/rollback and anonymous artifact verification passed; old-v0.6.2 stable discovery also passed. Exact evidence is recorded in `TEST_REPORT.md`. No production deployment was performed.

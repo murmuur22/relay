@@ -2,11 +2,30 @@
  import {VERSION} from '../version.js';
 
  import { onMount } from 'svelte';
+ import {launchUpdater} from './updater.js';
  import DesktopWindow from './DesktopWindow.svelte';
  import PersonalDesktop from './PersonalDesktop.svelte';
  import {resolveDesktop,folderPath,itemToken,ancestry} from './desktop.js';
  let personal=$state({items:[],iconChoices:[]}),route=$state({folderId:null,unavailable:false,app:null,maximized:false}),personalView=$state(),tabLanding=$state(null);
- let epoch=0,navigation=0;
+ let epoch=0,navigation=0,relayRuntime='';
+ // Independent maintenance lives outside the authenticated desktop lifecycle.
+ // Only a one-use launch fragment crosses into its fixed origin; messages carry no authority.
+ let maintenance=$state(null),maintenanceOpen=$state(false),maintenanceLogin=$state(false),maintenanceFrame=$state();
+ function mountMaintenance(frame){maintenanceFrame=frame;const target=maintenance.url;maintenance.url=undefined;frame.contentWindow.location.replace(target);}
+ function startMaintenance(url){if(maintenance?.ending)throw Error('The previous monitoring session is still ending. Try again.');if(phase!=='ready'||user?.role!=='admin')throw Error('Updater launch expired.');if(maintenance){maintenanceOpen=true;maintenanceLogin=false;return;}maintenance={url,origin:new URL(url).origin,version:new URL(url).hash.split('~')[1]||'',owner:user.id,runtimeInstance:relayRuntime};maintenanceOpen=true;maintenanceLogin=false;}
+ async function standaloneMaintenance(){const e=epoch;try{await launchUpdater(()=>sessionApi('/updater/launch','POST',{}),()=>e===epoch&&!!maintenance,window,maintenance?.version||'');}catch(err){if(e===epoch)error=err.message;}}
+ function maintenanceVisibility(){if(maintenance&&maintenanceFrame)maintenanceFrame.contentWindow.postMessage({type:maintenanceOpen&&!maintenanceLogin?'relay-updater-visible':'relay-updater-hidden'},maintenance.origin);}
+ $effect(()=>{maintenanceOpen;maintenanceLogin;maintenanceFrame;maintenanceVisibility();});
+ let maintenanceEndTimer;
+ function clearMaintenance(){clearTimeout(maintenanceEndTimer);maintenance=null;maintenanceOpen=false;maintenanceLogin=false;maintenanceFrame=undefined;}
+ function endMaintenanceMessage(){if(maintenance?.ending&&maintenance.ready)maintenanceFrame?.contentWindow?.postMessage({type:'relay-updater-end'},maintenance.origin);}
+ function retireMaintenance(){if(!maintenance||maintenance.ending)return;maintenance.ending=true;maintenanceOpen=false;maintenanceLogin=false;endMaintenanceMessage();const target=maintenance;maintenanceEndTimer=setTimeout(()=>{if(maintenance===target){clearMaintenance();error='Monitoring was hidden, but independent session termination could not be confirmed.';}},10000);}
+ function maintenanceMessage(event){if(!maintenance||event.source!==maintenanceFrame?.contentWindow||event.origin!==maintenance.origin||!event.data||Object.keys(event.data).length!==1)return;
+  if(event.data.type==='relay-updater-ready'){maintenance.ready=true;if(maintenance.ending)endMaintenanceMessage();else maintenanceVisibility();}
+  if(event.data.type==='relay-updater-sign-in'&&!maintenance.ending){lock('Sign in again to authorize further actions. Monitoring is read-only during restart.');maintenanceLogin=true;}
+  if(event.data.type==='relay-updater-ended')clearMaintenance();
+ }
+ onMount(()=>{window.addEventListener('message',maintenanceMessage);return()=>window.removeEventListener('message',maintenanceMessage);});
  let crumbs=$derived(route.unavailable?[]:ancestry(personal.items,route.folderId)||[]);
  function titleFor(win){return personal.items.find(i=>i.appId===win.appId)?.label||win.title;}
  function acceptDesktop(data){if(data.ownerId!==user?.id)throw new Error('Desktop response belongs to an expired session.');if(personal.ownerId===data.ownerId&&data.revision<personal.revision)return;personal=data;}
@@ -55,9 +74,9 @@
  function observation(app){const d=deviceHealth[app.id];return d?.address===app.url&&d?.state==='Online'&&Date.now()-d.checkedAt<30000?d:health[app.id];}
  async function deviceChecks(){if(checking||!showStatus)return;checking=true;try{for(const app of apps.filter(a=>a.kind==='web'&&a.mode==='native'&&a.url)){if(!showStatus||phase!=='ready')break;if(deviceHealth[app.id]?.address===app.url&&Date.now()-deviceHealth[app.id].checkedAt<30000)continue;const result=await checkDevice(app.url);if(showStatus&&phase==='ready')deviceHealth={...deviceHealth,[app.id]:{...result,address:app.url}};}}finally{checking=false;}}
  function lock(message='Session expired. Sign in again.'){epoch++;navigation++;personal={items:[],iconChoices:[]};route={folderId:null,unavailable:false,app:null};tabLanding=null;phase='locked';windows=[];apps=[];user=null;settings='';quick=false;error=message;timers.forEach(clearTimeout);pending.clear();csrf='';}
- async function refresh(){const s=await api('/session');if(s.csrf!==csrf){lock('Account session changed. Sign in again.');throw new Error('Account session changed.');}user=s.user;apps=s.apps;windows=windows.filter(w=>apps.some(a=>a.id===w.appId)&&(systemWindow(w.id)||s.windows.some(saved=>saved.id===w.id)));await loadDesktop();canonicalize();}
+ async function refresh(){const s=await api('/session');if(s.csrf!==csrf){retireMaintenance();lock('Account session changed. Sign in again.');throw new Error('Account session changed.');}user=s.user;apps=s.apps;windows=windows.filter(w=>apps.some(a=>a.id===w.appId)&&(systemWindow(w.id)||s.windows.some(saved=>saved.id===w.id)));await loadDesktop();canonicalize();}
  async function status(){if(phase!=='ready')return;try{await refresh();if(showStatus){health=await api('/status');void deviceChecks();}}catch(e){error=e.message;}}
- async function logout(){try{await api('/logout','POST');lock('Signed out.');}catch(e){error=e.message;}}
+ async function logout(){const token=csrf;retireMaintenance();lock('Signing out…');phase='loading';const e=epoch;try{const response=await fetch('/api/logout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':token},body:'{}',signal:AbortSignal.timeout(10000)});if(e!==epoch)return;const data=await response.json();if(!response.ok)throw Error(data.error||'Sign out could not be confirmed.');error='Signed out.';}catch(err){if(e===epoch)error=err.message;}finally{if(e===epoch)phase='locked';}}
  let areaWidth=$state(1200),areaHeight=$state(700),desktop,topZ=0;
  const pending=new Map(), timers=new Map(),gatewayClosing=new Map(),gatewayOpens=new Map();let writes=Promise.resolve();
  async function closeGateway(id){
@@ -73,11 +92,13 @@
   catch(e) {if(e.name==='AbortError')throw e;throw new Error('Gateway unreachable. Your local desktop is still available.');}
   let data;try{data=await response.json();}catch{throw new Error('Gateway returned an unreadable response.');}
   if(requestEpoch!==epoch)throw new Error('Expired request ignored.');
-  if(response.status===401&&path!=='/profile'){lock(path==='/session'&&phase==='loading'?'':'Session expired. Sign in again.');throw new Error('Session expired. Sign in again.');}
+  const runtime=response.headers.get('X-Relay-Runtime-Instance')||'';
+  if(response.status===401&&path!=='/profile'){if(maintenance&&(!/^[a-f0-9]{64}$/.test(runtime)||!/^[a-f0-9]{64}$/.test(maintenance.runtimeInstance)||runtime===maintenance.runtimeInstance))retireMaintenance();lock(path==='/session'&&phase==='loading'?'':'Session expired. Sign in again.');throw new Error('Session expired. Sign in again.');}
   if(!response.ok)throw new Error(data.error||`Gateway error (${response.status})`);
+  if(path==='/session')relayRuntime=runtime;
   return data;
  }
- async function bootstrap(){const e=++epoch;phase='loading';error='';try{const session=await api('/session');csrf=session.csrf;sessionApi=(...args)=>e===epoch?api(...args):Promise.reject(new Error('Expired app session'));user=session.user;apps=session.apps;windows=session.windows.map(w=>({...w,z:++topZ}));const focused=windows.find(w=>w.focused);if(focused)focused.z=++topZ;await loadDesktop();phase='ready';if(user?.mustChange)settings='profile';fitDesktop();if(!onboarding)await reconcileRoute();await status();}catch(err){if(e===epoch&&phase!=='locked'){phase='error';error=err.message;}}}
+ async function bootstrap(){const e=++epoch;phase='loading';error='';try{const session=await api('/session');csrf=session.csrf;sessionApi=(...args)=>e===epoch?api(...args):Promise.reject(new Error('Expired app session'));user=session.user;if(maintenance){if(maintenance.owner!==user.id||user.role!=='admin'||user.disabled||user.mustChange)retireMaintenance();else{maintenance.runtimeInstance=relayRuntime;maintenanceLogin=false;maintenanceFrame?.contentWindow?.postMessage({type:'relay-updater-reconnected'},maintenance.origin);}}apps=session.apps;windows=session.windows.map(w=>({...w,z:++topZ}));const focused=windows.find(w=>w.focused);if(focused)focused.z=++topZ;await loadDesktop();phase='ready';if(user?.mustChange)settings='profile';fitDesktop();if(!onboarding)await reconcileRoute();await status();}catch(err){if(e===epoch&&phase!=='locked'){phase='error';error=err.message;}}}
  const systemIds=new Set(['system-updater','system-control-panel']);
  function systemWindow(id){const w=windows.find(w=>w.id===id);return w?.mode==='system'&&w.appId===id&&systemIds.has(id);}
  function local(id,patch){windows=windows.map(w=>w.id===id?{...w,...patch}:patch.focused?{...w,focused:false}:w);}
@@ -102,7 +123,7 @@
   {#if tabLanding}<aside class="tab-landing"><p>This app opens in a new tab.</p><button onclick={()=>open(tabLanding)}>Open {personal.items.find(i=>i.appId===tabLanding.id)?.label||tabLanding.label} in new tab ↗</button></aside>{/if}
 
   <div class="window-layer" class:unavailable={route.unavailable} inert={route.unavailable}>
-  {#each windows as win,i (win.id)}<DesktopWindow {motion} {user} onrefresh={refresh} api={sessionApi} win={{...win,title:titleFor(win)}} index={win.z??i} {areaWidth} {areaHeight} onmaximize={()=>setMaximized(win.id,!win.maximized)} onchange={patch=>change(win.id,patch)} onfocus={()=>focus(win.id)} onminimize={()=>change(win.id,{visible:false,focused:false},true)} onclose={()=>close(win.id)} onreload={()=>reload(win.id)}/>{/each}
+  {#each windows as win,i (win.id)}<DesktopWindow onmaintenance={startMaintenance} {motion} {user} onrefresh={refresh} api={sessionApi} win={{...win,title:titleFor(win)}} index={win.z??i} {areaWidth} {areaHeight} onmaximize={()=>setMaximized(win.id,!win.maximized)} onchange={patch=>change(win.id,patch)} onfocus={()=>focus(win.id)} onminimize={()=>change(win.id,{visible:false,focused:false},true)} onclose={()=>close(win.id)} onreload={()=>reload(win.id)}/>{/each}
   </div>
  {:else if phase==='locked'}
   <Login {motion} {takeSetupCredential} onlogin={bootstrap}/>{#if error}<p class="login-message" role="status">{error}</p>{/if}
@@ -114,8 +135,16 @@
 <footer><span class="maker">Made by Wicked Evil Incorporated</span>{#if phase==='ready'&&!onboarding}<nav class="dock" use:reveal={{enabled:motion,delay:90}} aria-label="Open windows"><button class="nav-toggle" aria-label="Navigation" aria-expanded={quick} onclick={()=>quick=!quick}>⠿</button>{#each windows as win}<button class:active={win.focused&&win.visible} class:minimized={!win.visible} aria-label={'Restore '+titleFor(win)} onclick={()=>focus(win.id)}><span class="dock-indicator">{win.visible?'▪':'▫'}</span>{titleFor(win)}</button>{/each}</nav><span class="footer-note"><span class="app-version">v{VERSION}</span> · {route.unavailable?0:windows.filter(w=>w.visible).length} visible / {windows.length} open</span>{:else}<span class="footer-note"><span class="app-version">v{VERSION}</span> · {phase==='ready'&&onboarding?'first-run setup':phase==='loading'?'connecting':'account access required'}</span>{/if}</footer>
 {#if quick}<section class="quick-nav" use:reveal={{enabled:motion,kind:'slide'}} aria-label="Navigation"><div class="panel-heading">Navigation <button aria-label="Close navigation" onclick={()=>quick=false}>×</button></div><p><span>{user?.displayName}</span> <small> / {user?.role}</small></p><button onclick={()=>{quick=false;personalView?.newFolder();}}>New folder</button><p>APPS</p>{#each apps as app}{@const item=personal.items.find(i=>i.appId===app.id)}<button aria-label={item?.label||app.label} onclick={()=>open(app)}>{#if item?.icon?.type==='upload'}<img src={item.icon.url} alt="" width="24" height="24"/>{:else}<Icon name={item?.icon?.name||app.icon||app.template||app.id}/>{/if}<span>{item?.label||app.label}<small>{app.kind==='web'?(app.mode==='gateway'?'gateway · experimental':app.mode==='stream'?'streamed · isolated browser':'native · '+(app.openMode==='tab'?'new tab':'desktop window')):(app.mode==='stream'?'streamed · synthetic lab':'native · built in')}</small></span><span>↗</span></button>{/each}<hr/><button onclick={()=>{settings='profile';quick=false;}}>Profile settings</button><button onclick={logout}>Sign out</button></section>{/if}
 {#if phase==='ready'&&settings}<Settings kind={settings} {user} {api} onclose={()=>settings=''} onrefresh={refresh} onpassword={()=>lock('Password changed. Sign in again.')}/>{/if}
+{#if maintenance}
+ <section class="maintenance-surface" class:concealed={!maintenanceOpen||maintenanceLogin} inert={!maintenanceOpen||maintenanceLogin} aria-label="Independent maintenance">
+  <div class="maintenance-bar"><span>Relay / independent maintenance</span><span>Monitoring is independent · changes require fresh authorization</span><button disabled={phase!=='ready'||user?.role!=='admin'||user?.mustChange} onclick={standaloneMaintenance}>Standalone recovery (new tab)</button><button aria-label="Close maintenance" onclick={()=>maintenanceOpen=false}>×</button></div>
+  <iframe use:mountMaintenance title={maintenance.ending?'Retiring Relay updater':'Independent Relay updater'} referrerpolicy="no-referrer"></iframe>
+ </section>
+ {#if !maintenance.ending&&(!maintenanceOpen||maintenanceLogin)}<button class="maintenance-restore" onclick={()=>{maintenanceOpen=true;maintenanceLogin=false;}}>Return to maintenance monitor</button>{/if}
+{/if}
 </div>
 <style>
+ .maintenance-surface{position:fixed;inset:54px 12px 56px;z-index:100;background:#0b0b0a;border:1px solid #77756e;display:flex;flex-direction:column}.maintenance-surface.concealed{visibility:hidden;pointer-events:none}.maintenance-bar{display:flex;flex-wrap:wrap;gap:16px;align-items:center;font:11px ui-monospace,monospace;padding:6px 10px;border-bottom:1px solid #44443f}.maintenance-bar span:nth-child(2){margin-left:auto;color:#aaa8a0}.maintenance-bar button{padding:4px 10px;border:1px solid #77756e}.maintenance-surface iframe{width:100%;height:100%;min-height:0;flex:1;border:0}.maintenance-restore{position:fixed;right:12px;bottom:56px;z-index:101;background:#111110;color:#efeee5;border:1px solid #77756e;padding:12px;font:12px ui-monospace,monospace}
  .window-layer{position:absolute;inset:0;z-index:10;pointer-events:none}.window-layer :global(.desktop-window){pointer-events:auto}.window-layer.unavailable{visibility:hidden}
  .path{min-width:0;overflow-x:auto;white-space:nowrap;margin-right:16px;scrollbar-width:none}.path a{color:inherit;text-decoration:none;flex:none}.path a:hover{text-decoration:underline}.path a:focus-visible{outline:1px dashed #fafaf9;outline-offset:2px}time{flex:none}.tab-landing{position:absolute;left:50%;top:30%;transform:translateX(-50%);padding:24px;background:#1c1917;border:1px solid #a8a29e;z-index:2;max-width:calc(100% - 24px)}.tab-landing button{border:1px solid #a8a29e;padding:10px}
 </style>

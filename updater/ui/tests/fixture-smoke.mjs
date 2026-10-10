@@ -35,7 +35,10 @@ test('real disposable fixture success and rollback appear in the compiled transf
   await desktop.getByRole('button',{name:'Maximize Updater',exact:true}).click();
   await desktop.screenshot({path:ROOT+'/screenshots/updater-desktop-browse-fixture.png',fullPage:true});
   await desktop.getByRole('button',{name:'Restore size Updater',exact:true}).click();
-  const opened = context.waitForEvent('page'); await desktop.getByRole('button', { name: 'Start update', exact: true }).click();
+  // Exercise the preserved safe standalone launcher explicitly. Normal desktop
+  // Start update now embeds and is covered by updater-embedded.test.mjs.
+  await desktop.addScriptTag({content:(await readFile(ROOT+'/src/updater.js','utf8')).replaceAll('export ','')});
+  const opened = context.waitForEvent('page');await desktop.evaluate(()=>launchUpdater(async()=>{const session=await(await fetch('/api/session')).json();return(await fetch('/api/updater/launch',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':session.csrf},body:'{}'})).json();},()=>true,window,'v0.3.1'));
   const page = await opened; const pageErrors = []; page.on('pageerror', error => pageErrors.push(error.message));
   await expect(page.locator('#mode')).toHaveText('FIXTURE SANDBOX');
   await page.getByRole('button', { name: 'Check releases' }).click();

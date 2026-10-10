@@ -1,3 +1,4 @@
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -37,17 +38,19 @@ for(const networkMode of ['loopback','private-lan'])test(`${networkMode}: compil
  // Select the fixture's successful release on the desktop, not in the independent tab.
  const reviewedVersion='v0.3.1';await browse.getByLabel('Available release').selectOption(reviewedVersion);
  const installTargets=[];let installs=0;context.on('request',r=>{if(r.url().endsWith('/api/install')){installs++;installTargets.push(r.postDataJSON().version);}});
- await desktop.evaluate(()=>{window.realOpen=window.open;window.open=()=>null;});await browse.getByRole('button',{name:'Start update',exact:true}).click();await expect(browse.getByRole('alert')).toContainText('Allow a new tab');assert.equal(installs,0);await desktop.evaluate(()=>window.open=window.realOpen);
+ await desktop.addScriptTag({content:(await readFile(ROOT+'/src/updater.js','utf8')).replaceAll('export ','')});
+ const standalone=()=>desktop.evaluate(()=>launchUpdater(async()=>{const session=await(await fetch('/api/session')).json();const response=await fetch('/api/updater/launch',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':session.csrf},body:'{}'});const body=await response.json();if(!response.ok)throw Error(body.error);return body;},()=>true,window,'v0.3.1').then(()=>'',e=>e.message));
+ await desktop.evaluate(()=>{window.realOpen=window.open;window.open=()=>null;});assert.match(await standalone(),/Allow a new tab/);assert.equal(installs,0);await desktop.evaluate(()=>window.open=window.realOpen);
  await expect(browse.locator('.chamber canvas')).toBeVisible();
  for(const reply of [{status:403,json:{error:'Launch denied'}},{status:200,json:{}}]){
-  await desktop.route('**/api/updater/launch',route=>route.fulfill(reply));const opening=context.waitForEvent('page');await browse.getByRole('button',{name:'Start update',exact:true}).click();const rejected=await opening;await expect.poll(()=>rejected.isClosed()).toBe(true);assert.equal(installs,0);await desktop.unroute('**/api/updater/launch');
+  await desktop.route('**/api/updater/launch',route=>route.fulfill(reply));const opening=context.waitForEvent('page');const result=standalone();const rejected=await opening;assert.ok(await result);await expect.poll(()=>rejected.isClosed()).toBe(true);assert.equal(installs,0);await desktop.unroute('**/api/updater/launch');
  }
  let resume;const gate=new Promise(r=>resume=r);let intercepted;const arrived=new Promise(r=>intercepted=r);
  await desktop.route('**/api/updater/launch',async route=>{intercepted();await gate;await route.continue();});
- const closing=context.waitForEvent('page');await browse.getByRole('button',{name:'Start update',exact:true}).click();const closed=await closing;await arrived;await closed.close();resume();await expect(browse.getByRole('alert')).toContainText('tab closed');await desktop.unroute('**/api/updater/launch');assert.equal(installs,0);
+ const closing=context.waitForEvent('page');const result=standalone();const closed=await closing;await arrived;await closed.close();resume();assert.match(await result,/tab closed/);await desktop.unroute('**/api/updater/launch');assert.equal(installs,0);
  await browse.getByRole('button',{name:'Check releases',exact:true}).click();await expect(browse.getByRole('alert')).toHaveCount(0);
  await desktop.screenshot({path:ROOT+'screenshots/updater-desktop-browse-fixture.png'});
- const opened=context.waitForEvent('page');await browse.getByRole('button',{name:'Start update',exact:true}).click();const page=await opened;const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const opened=context.waitForEvent('page');const launched=standalone();const page=await opened;assert.equal(await launched,'');const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await expect(page.locator('#release-select')).toHaveValue(reviewedVersion);assert.equal(installs,0);
  await page.screenshot({path:ROOT+'screenshots/updater-independent-handoff-fixture.png',fullPage:true});
  // Browsing again must not rotate or invalidate the independent monitoring cookie.
@@ -58,9 +61,10 @@ for(const networkMode of ['loopback','private-lan'])test(`${networkMode}: compil
  assert.deepEqual(installTargets,[reviewedVersion]);
  await expect(page.locator('#phase')).toContainText(/complete|succeed/i);await expect(page.locator('#bytes')).toContainText('bytes');assert.equal(await page.locator('#password').inputValue(),'');
  const staticPage=await context.newPage();await staticPage.addInitScript(()=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type.includes('webgl')?null:original.call(this,type,...args);};});
- await staticPage.goto(g.origin);await staticPage.getByRole('button',{name:'Open Updater',exact:true}).click();const staticBrowse=staticPage.locator('[data-window-id="system-updater"]');await expect(staticBrowse.getByLabel('Available release')).not.toBeEmpty();await expect(staticBrowse.locator('.chamber svg')).toBeVisible();await expect(staticBrowse.locator('iframe')).toHaveCount(0);
+ await staticPage.goto(g.origin);await staticPage.getByRole('button',{name:'Open Updater',exact:true}).click();const staticBrowse=staticPage.locator('[data-window-id="system-updater"]');await expect(staticBrowse.getByLabel('Available release')).not.toBeEmpty();await expect(staticBrowse.locator('.static-view')).toBeVisible();await expect(staticBrowse.locator('iframe')).toHaveCount(0);
  await staticPage.setViewportSize({width:390,height:844});assert.equal(await staticBrowse.locator('.updater-browser').evaluate(el=>el.scrollWidth<=el.clientWidth),true);await staticPage.screenshot({path:ROOT+'screenshots/updater-desktop-static-narrow-fixture.png'});
- await staticPage.getByRole('button',{name:'Navigation',exact:true}).click();await staticPage.getByRole('button',{name:'Sign out',exact:true}).click();await expect(staticBrowse).toHaveCount(0);await expect(browse).toHaveCount(0,{timeout:7000});await expect(page.locator('#current-version')).toHaveText('v0.3.1');await staticPage.close();
+ await staticPage.getByRole('button',{name:'Navigation',exact:true}).click();await staticPage.getByRole('button',{name:'Sign out',exact:true}).click();await expect(staticBrowse).toHaveCount(0);await expect(browse).toHaveCount(0,{timeout:7000});await expect(page.locator('#console')).toBeHidden({timeout:7000});await staticPage.close();
+ await browserLogin(desktop,g.origin,root+'/browser-relay');const reissued=await desktop.evaluate(async()=>{const session=await(await fetch('/api/session')).json();return(await fetch('/api/updater/launch',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':session.csrf},body:'{}'})).json();});await page.goto('about:blank');await page.goto(reissued.url);await expect(page.locator('#current-version')).toHaveText('v0.3.1');
  await desktop.close();await g.close();g=null;await page.reload();await expect(page.locator('#mode')).toHaveText('FIXTURE SANDBOX');await expect(page.locator('#current-version')).toHaveText('v0.3.1');
  await page.locator('#release-select').selectOption('v0.3.2');await page.getByRole('button',{name:'Review installation'}).click();await page.locator('#confirmed').check();await page.getByLabel('Current Relay password').fill(password);await page.getByRole('button',{name:'Authorize installation',exact:true}).click();await expect(page.locator('#confirm-error')).toContainText('Read-only monitoring remains available');assert.equal(await page.locator('#password').inputValue(),'');assert.deepEqual(errors,[]);
 });

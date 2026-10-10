@@ -378,6 +378,28 @@ listener evidence, not an installed Caddy/browser test: actual Caddy/browser and
 three-network-namespace coverage are separate source-preflight gates. No live
 server, external trust, DNS, public exposure or production deployment is tested.
 
+## Signed updater redesign qualification (v0.6.3 to v0.6.4)
+
+Dispatch the candidate's `release.yml` with `version=v0.6.4` and
+`upgrade-from=v0.6.3` after its public signed prerelease exists. Both loopback
+and private-LAN matrices must pass. The harness installs genuine signed v0.6.3
+runtime and control-plane archives, enables version-3 mTLS Gateway with
+synthetic offline credentials, then upgrades only the runtime. It probes the
+preserved mTLS listener before/after upgrade, changes managed Gateway state to
+version 2 after upgrade, and requires rollback to restore matching v0.6.3
+accounts, personal desktop, version-3 configuration, credentials and listener.
+The old independent engine/web/UI/configuration/units remain byte- and
+metadata-identical. Fresh-password/CSRF consent, signed provenance, readiness,
+session rejection and fresh-host guards remain mandatory.
+
+Fresh signed v0.6.4 installation separately uses the attested new control-plane
+archive. Runtime-only upgrade leaves the old framing-denying web/UI in place:
+use explicit Standalone recovery, not normal embedded Start update, until a
+separately approved and qualified operator migration. The fresh installer
+refuses an existing host; no privileged control-plane self-update is added.
+Signed HTTP/systemd qualification is not a signed browser-rendering test,
+public-PKI/Safari qualification, power-loss test or production deployment.
+
 ## Recovery, limits and local verification
 
 For an interrupted apply: stop only the newly created Relay units, preserve the

@@ -77,6 +77,8 @@ and `maintenance:true` before admission reopens. Failure restores both code and
 matching state. A first baseline has no earlier signed release to roll back to.
 The independent updater is not replaced by runtime updates and never self-updates.
 
+The Unreleased embedded redesign changes the independent web headers and UI as well as the runtime host. Existing installations retain their old DENY/frame-ancestors policy and old UI after a runtime-only upgrade. The normal embedded flow therefore requires a separately verified control-plane distribution/migration; it cannot be activated by claiming a runtime version bump. Keep standalone maintenance usable until an operator-approved replacement has been backed up, provenance/hash checked and requalified. The fresh installer deliberately refuses existing installations and is not a migration tool. See [embedded architecture and migration gates](../../docs/updater-embedded.md). No installed-control-plane replacement, self-update, production change or new signed-release/systemd qualification was performed for this local redesign.
+
 On broker restart, interrupted activation remains gated and the journal records
 interruption. No ambiguous automatic restore. Preserve candidate, journal, prior
 verified code and matching state checkpoint for operator inspection. A failed

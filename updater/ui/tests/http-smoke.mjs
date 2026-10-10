@@ -41,7 +41,7 @@ test('compiled UI uses real HTTP cookies, CSRF and action bridge; read monitorin
   const relay = http.createServer(async (req, res) => {
     assert.ok(req.headers.cookie.includes('relay_session='));
     res.setHeader('Content-Type', 'application/json');
-    if (req.url === '/api/session') res.end(JSON.stringify({ user: { role: 'admin', disabled: false, mustChange: false }, csrf: 'e'.repeat(64) }));
+    if (req.url === '/api/session') res.end(JSON.stringify({ user: { id:'synthetic-user', role: 'admin', disabled: false, mustChange: false }, csrf: 'e'.repeat(64) }));
     else {
       let body = ''; for await (const chunk of req) body += chunk;
       const data = JSON.parse(body); assert.equal(data.password, 'synthetic-password'); assert.equal(data.confirmed, true); assert.equal(req.headers['x-csrf-token'], 'e'.repeat(64));

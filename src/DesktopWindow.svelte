@@ -8,7 +8,7 @@
  import {windowMotion} from './motion.js';
  import {safeExternal} from './webapps.js';
  import { clampBounds,TITLE_HEIGHT } from './geometry.js';
- let {win,index,areaWidth,areaHeight,onchange,onfocus,onminimize,onclose,onreload,onmaximize,motion=false,api,user,onrefresh}=$props();
+ let {win,index,areaWidth,areaHeight,onchange,onfocus,onminimize,onclose,onreload,onmaximize,motion=false,api,user,onrefresh,onmaintenance}=$props();
  let restore=$derived(win.maximized),gesture=$state(null),frame=$state(),bridgeCleanup=()=>{},nativeState=$state('loading');
  let navigation=$state({canGoBack:false,canGoForward:false,busy:true}),navigationPending=$state(false),navigationError=$state('');
  async function travel(direction){if(navigationPending)return;navigationPending=true;navigationError='';try{await api('/windows/'+encodeURIComponent(win.id)+'/navigate','POST',{direction});}catch(e){navigationError=e.message;}finally{navigationPending=false;}}
@@ -30,7 +30,7 @@
  </div>
  <div class="window-content">
   {#if win.mode==='system'&&win.appId==='system-updater'}
-   {#key win.reload}<UpdaterBrowser {api} {motion} visible={win.visible} onactivate={onfocus} />{/key}
+   {#key win.reload}<UpdaterBrowser {api} {motion} {onmaintenance} visible={win.visible} onactivate={onfocus} />{/key}
   {:else if win.mode==='system'&&win.appId==='system-control-panel'&&user?.role==='admin'&&!user.disabled&&!user.mustChange}
    <div class="control-panel-surface" onpointerdown={onfocus} onfocusin={onfocus} role="presentation">
     {#key win.reload}<Settings kind="admin" embedded {user} {api} {onrefresh} {onclose}/>{/key}

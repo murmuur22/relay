@@ -27,8 +27,16 @@ UPGRADE_ENV = {**base.DISPOSABLE_ENV,
                'RELAY_DISPOSABLE_SIGNED_UPGRADE': 'I_ACCEPT_FRESH_HOST_SIGNED_UPGRADE_AND_ROLLBACK'}
 
 
+BASELINES = ('v0.4.2', 'v0.6.1', 'v0.6.2', 'v0.6.3')
+
+
+def baseline_gateway_mode(old):
+    base.require(old in BASELINES, 'Unqualified baseline refused')
+    return {'v0.4.2': None, 'v0.6.1': 'direct', 'v0.6.2': 'reverse', 'v0.6.3': 'remote'}[old]
+
+
 def validate_versions(old, target):
-    base.require(old in ('v0.4.2', 'v0.6.1', 'v0.6.2'), 'Only explicit v0.4.2, v0.6.1 or v0.6.2 baselines are admitted')
+    base.require(old in BASELINES, 'Only explicit v0.4.2, v0.6.1, v0.6.2 or v0.6.3 baselines are admitted')
     base.require(isinstance(target, str) and re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', target),
                  'Exact stable-form target tag required')
     base.require(tuple(map(int, target[1:].split('.'))) > tuple(map(int, old[1:].split('.'))), 'Target must be newer than baseline')
@@ -201,7 +209,7 @@ def load_installed(old='v0.4.2'):
     """Resolve updater imports from the authenticated baseline, never the checkout."""
     root = Path('/opt/relay-updater')
     install.trusted_path(root)
-    base.require(old in ('v0.4.2', 'v0.6.1', 'v0.6.2') and json.loads((root / 'package.json').read_text())['version'] == old[1:],
+    base.require(old in BASELINES and json.loads((root / 'package.json').read_text())['version'] == old[1:],
                  'Not the exact old control plane')
     for name in tuple(sys.modules):
         if name == 'updater' or name.startswith('updater.'):
@@ -252,7 +260,9 @@ def installed_worker(apply, old, target, private_lan):
         base.require(status == 200 and folder.get('itemId'), 'Synthetic personal desktop state failed')
         state_paths = [Path('/var/lib/relay/accounts.json'), Path('/var/lib/relay/users')]
         tls_dir = Path('/var/lib/relay/qualification-tls')
-        if old in ('v0.6.1', 'v0.6.2'):
+        gateway_mode = baseline_gateway_mode(old)
+        backend = tls_dir / 'backend'
+        if gateway_mode:
             import pwd
             tls_dir.mkdir(mode=0o700)
             identity = pwd.getpwnam('relay')
@@ -263,8 +273,13 @@ def installed_worker(apply, old, target, private_lan):
             for path in (tls_dir, tls_dir / 'key.pem', tls_dir / 'cert.pem'):
                 os.chown(path, identity.pw_uid, identity.pw_gid)
                 path.chmod(0o700 if path.is_dir() else 0o600)
-            apply_gateway(gateway_reference(tls_dir, reverse=(old == 'v0.6.2')), cookie, csrf, password)
-            probe_gateway(reverse=(old == 'v0.6.2'))
+            if gateway_mode == 'remote':
+                make_remote_tls(backend)
+                for path in (backend, *backend.iterdir()):
+                    os.chown(path, identity.pw_uid, identity.pw_gid)
+            apply_gateway(gateway_reference(backend if gateway_mode == 'remote' else tls_dir,
+                                            reverse=(gateway_mode == 'reverse'), remote=(gateway_mode == 'remote')), cookie, csrf, password)
+            probe_gateway(reverse=(gateway_mode == 'reverse'), remote=backend if gateway_mode == 'remote' else None)
             state_paths += [Path('/var/lib/relay/gateway-managed.json'), tls_dir]
         state_before = {str(p): fingerprint(p) for p in state_paths}
         root_inode = Path('/var/lib/relay').stat().st_ino
@@ -284,12 +299,11 @@ def installed_worker(apply, old, target, private_lan):
         # Sessions must expire after the real restart. Reauthenticate normally.
         base.require(base.http(4180, '/api/session', cookie=cookie)[0] == 401, 'Old Relay session survived restart')
         cookie, csrf = base.authenticate(password)
-        if old in ('v0.6.1', 'v0.6.2'):
-            probe_gateway(reverse=(old == 'v0.6.2'))
-            if old == 'v0.6.2':
+        if gateway_mode:
+            probe_gateway(reverse=(gateway_mode == 'reverse'), remote=backend if gateway_mode == 'remote' else None)
+            if gateway_mode == 'reverse':
                 import pwd
                 identity = pwd.getpwnam('relay')
-                backend = tls_dir / 'backend'
                 make_remote_tls(backend)
                 for path in (backend, *backend.iterdir()):
                     os.chown(path, identity.pw_uid, identity.pw_gid)
@@ -310,11 +324,11 @@ def installed_worker(apply, old, target, private_lan):
         base.require(engine.current_release() == baseline_release, 'Rollback selected wrong signed baseline')
         base.require({str(p): fingerprint(p) for p in state_paths} == state_before, 'Rollback did not restore matching state')
         base.require(Path('/var/lib/relay').stat().st_ino == root_inode, 'Mounted state root replaced')
-        if old in ('v0.6.1', 'v0.6.2'):
-            probe_gateway(reverse=(old == 'v0.6.2'))
+        if gateway_mode:
+            probe_gateway(reverse=(gateway_mode == 'reverse'), remote=backend if gateway_mode == 'remote' else None)
         base.authenticate(password)
         base.require({str(p): fingerprint(p) for p in protected} == before, 'Rollback changed independent control plane/config/units')
-        return dict(passed=True, upgradeFrom=old, target=target, controlPlane=old, gatewayEnabled=(old in ('v0.6.1', 'v0.6.2')), remoteMTLS=(old == 'v0.6.2'),
+        return dict(passed=True, upgradeFrom=old, target=target, controlPlane=old, gatewayEnabled=bool(gateway_mode), remoteMTLS=(gateway_mode in ('reverse', 'remote')),
                     relayOrigin=base.NETWORK['relayOrigin'], updaterOrigin=base.NETWORK['uiOrigin'],
                     evidence=['official-signed-baseline', 'old-installed-engine-and-web',
                               'explicit-target-genuine-attestation-and-payload-verification',

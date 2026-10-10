@@ -9,7 +9,7 @@ on:
         required: true
         type: string
       upgrade-from:
-        description: 'OPTIONAL: v0.4.2 (gateway off), v0.6.1 (Direct to v2) or v0.6.2 (v2 to v3 mTLS and matching-state rollback)'
+        description: 'OPTIONAL: v0.4.2 (off), v0.6.1 (Direct to v2), v0.6.2 (v2 to v3) or v0.6.3 (v3 preserved, changed-state rollback)'
         required: false
         default: ''
         type: string
@@ -80,10 +80,11 @@ jobs:
           export RELAY_ICON_PYTHON="$(command -v python3)"
           python3 -m unittest discover -s updater/tests -v
           npm --prefix updater/ui run test:unit
-          node --test --test-timeout=70000 tests/backend/updater-web.test.mjs tests/backend/updater-bridge.test.mjs
-          node --test --test-timeout=90000 updater/ui/tests/http-smoke.mjs updater/ui/tests/fixture-smoke.mjs
+          node --test --test-concurrency=1 --test-timeout=130000 tests/backend/updater*.test.mjs
+          npm --prefix updater/ui test
+          node --test --test-concurrency=1 --test-timeout=90000 updater/ui/tests/http-smoke.mjs updater/ui/tests/fixture-smoke.mjs
           node deploy/verify-standalone.mjs
-          node --test --test-timeout=130000 tests/backend/private-lan*.test.mjs tests/backend/updater-real.test.mjs tests/frontend/updater-real.test.mjs
+          node --test --test-concurrency=1 --test-timeout=130000 tests/backend/private-lan*.test.mjs tests/frontend/updater*.test.mjs
           node --test --test-timeout=90000 tests/backend/web-request-body.test.mjs tests/backend/web-redirects.test.mjs tests/backend/stream-navigation.test.mjs tests/frontend/stream-navigation.test.mjs
           node --test --test-concurrency=1 --test-timeout=130000 tests/backend/desktop-gateway*.test.mjs tests/backend/gateway-*.test.mjs tests/backend/native-preview-validation.test.mjs tests/backend/system-apps.test.mjs tests/frontend/desktop-gateway.test.mjs tests/frontend/gateway-*.test.mjs tests/frontend/native-preview-retirement.test.mjs tests/frontend/control-panel.test.mjs
       - name: Package standalone runtime and independent control plane
@@ -192,7 +193,7 @@ jobs:
       - name: Require explicit old baseline and stable-form published target
         shell: bash
         run: |
-          [[ "$UPGRADE_FROM" = v0.4.2 || "$UPGRADE_FROM" = v0.6.1 || "$UPGRADE_FROM" = v0.6.2 ]]
+          [[ "$UPGRADE_FROM" = v0.4.2 || "$UPGRADE_FROM" = v0.6.1 || "$UPGRADE_FROM" = v0.6.2 || "$UPGRADE_FROM" = v0.6.3 ]]
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

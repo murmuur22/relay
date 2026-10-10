@@ -25,13 +25,14 @@ for(const networkMode of ['loopback','private-lan'])test(`${networkMode}: real b
  g=await createGateway(options);web=await createUpdaterWeb({uiOrigin,relayOrigin:g.origin,socketPath:config.socketPath,networkMode,bind:hostname});let auth=await authenticate(g.origin,options.runtime),api=client(g.origin,auth);
  const launch=await (await api('/updater/launch','POST',{})).json(),ticket=new URL(launch.url).hash.slice(1);
  const req=(path,method='GET',body,headers={})=>fetch(uiOrigin+'/updater/api'+path,{method,headers:{Origin:uiOrigin,'Content-Type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})});
- let r=await req('/exchange','POST',{ticket});assert.equal(r.status,200);const cookie=r.headers.get('set-cookie').split(';')[0],{csrf}=await r.json(),headers={cookie:cookie+'; '+auth.cookie,'X-CSRF-Token':csrf};
+ assert.equal((await req('/exchange','POST',{ticket})).status,401,'A launch ticket alone cannot create unbound monitoring');
+ let r=await req('/exchange','POST',{ticket},{cookie:auth.cookie});assert.equal(r.status,200);const cookie=r.headers.get('set-cookie').split(';')[0],{csrf}=await r.json(),headers={cookie:cookie+'; '+auth.cookie,'X-CSRF-Token':csrf};
  assert.equal(web.server.address().address,hostname);
  assert.equal(await new Promise((resolve,reject)=>{http.get(uiOrigin+'/updater/api/auth',{headers:{Host:'evil.test'}},res=>{res.resume();resolve(res.statusCode);}).on('error',reject);}),403);
  assert.equal((await req('/state','GET',null,{...headers,Origin:g.origin})).status,403);
  assert.equal((await req('/check','POST',{}, {cookie:headers.cookie})).status,403);
  assert.equal((await req('/check','POST',{}, {...headers,Origin:'http://evil.test'})).status,403);
- assert.equal((await req('/exchange','POST',{ticket})).status,403);
+ assert.equal((await req('/exchange','POST',{ticket},{cookie:auth.cookie})).status,403);
  const rpc=(action,params)=>brokerRequest(config.socketPath,{action,params});await assert.rejects(rpc('redeem-ui',{ticket,origin:uiOrigin}));await assert.rejects(rpc('state',{token:ticket}));
  const key=await readFile(config.bridgeKeyFile);const sign=(action,params,timestamp=Math.floor(Date.now()/1000))=>{const nonce=randomBytes(16).toString('hex'),payload=Buffer.from(JSON.stringify(params)).toString('base64');return {action,timestamp,nonce,payload,mac:createHmac('sha256',key).update(`${timestamp}\n${nonce}\n${action}\n${payload}`).digest('hex')};};
  const envelope=sign('issue-ui',{userId:'other-admin',interfaceAnimations:false,relayVersion:'0.3.0'}),issued=await brokerRequest(config.socketPath,envelope);await assert.rejects(brokerRequest(config.socketPath,envelope));await assert.rejects(brokerRequest(config.socketPath,{...envelope,mac:'0'.repeat(64)}));await assert.rejects(brokerRequest(config.socketPath,sign('issue-ui',{userId:'other-admin',interfaceAnimations:false},Math.floor(Date.now()/1000)-120)));

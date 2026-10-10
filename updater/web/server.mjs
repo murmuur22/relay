@@ -18,7 +18,7 @@ async function body(req){
 function relayRequest(origin,path,cookieValue,method='GET',data,csrf){
  const url=new URL(origin+path),text=data?JSON.stringify(data):null;
  return new Promise((resolve,reject)=>{
-  const req=http.request({hostname:url.hostname==='localhost'?'127.0.0.1':url.hostname,port:url.port||80,path:url.pathname,method,headers:{Host:url.host,Origin:origin,Cookie:'relay_session='+cookieValue,...(csrf?{'X-CSRF-Token':csrf}:{}),...(text?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(text)}:{})}},res=>{let size=0,chunks=[];res.on('data',c=>{size+=c.length;if(size>1048576){res.destroy();return;}chunks.push(c);});res.on('error',()=>finish(fail(503,'Relay unavailable. Sign in to Relay again before changing updates.')));res.on('end',()=>{if(res.statusCode!==200)return finish(fail([400,401,403,429,503].includes(res.statusCode)?res.statusCode:503,res.statusCode===403?'Reauthentication rejected. Check your password and administrator access.':'Relay unavailable or session expired. Sign in to Relay again.'));try{finish(null,JSON.parse(Buffer.concat(chunks)));}catch{finish(fail(503,'Invalid Relay response'));}});});
+  const req=http.request({hostname:url.hostname==='localhost'?'127.0.0.1':url.hostname,port:url.port||80,path:url.pathname,method,headers:{Host:url.host,Origin:origin,Cookie:'relay_session='+cookieValue,...(csrf?{'X-CSRF-Token':csrf}:{}),...(text?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(text)}:{})}},res=>{let size=0,chunks=[];res.on('data',c=>{size+=c.length;if(size>1048576){res.destroy();return;}chunks.push(c);});res.on('error',()=>finish(fail(503,'Relay unavailable. Sign in to Relay again before changing updates.')));res.on('end',()=>{if(res.statusCode!==200)return finish(Object.assign(fail([400,401,403,429,503].includes(res.statusCode)?res.statusCode:503,res.statusCode===403?'Reauthentication rejected. Check your password and administrator access.':'Relay unavailable or session expired. Sign in to Relay again.'),{runtimeInstance:res.headers['x-relay-runtime-instance']}));try{finish(null,{...JSON.parse(Buffer.concat(chunks)),runtimeInstance:res.headers['x-relay-runtime-instance']});}catch{finish(fail(503,'Invalid Relay response'));}});});
   let done=false;const timer=setTimeout(()=>{req.destroy();finish(fail(503,'Relay unavailable. Sign in to Relay again.'));},10000);function finish(error,result){if(done)return;done=true;clearTimeout(timer);error?reject(error):resolve(result);}
   req.on('error',()=>finish(fail(503,'Relay unavailable. Sign in to Relay again.')));req.end(text);
  });
@@ -44,11 +44,31 @@ export async function createUpdaterWeb({uiOrigin,relayOrigin,socketPath,networkM
     if(!['GET','POST'].includes(req.method))throw fail(405,'Method not allowed');
     const mutation=req.method==='POST';rate(mutation?(path.endsWith('/exchange')?'exchange':'write'):'read');
     if(mutation&&req.headers.origin!==uiOrigin)throw fail(403,'Exact Origin required');
+    if(s&&mutation&&path!=='/updater/api/exchange'&&req.headers['x-csrf-token']!==s.csrf)throw fail(403,'CSRF required');
+    if(s&&s.relayIdentity&&!path.endsWith('/logout')&&!path.endsWith('/exchange')){
+     const relayCookie=cookie(req,'relay_session'),sameCookie=relayCookie&&digest(relayCookie)===s.relayIdentity;
+     if(!relayCookie){if(!mutation)sessions.delete(digest(id));throw fail(401,'Monitoring session ended with Relay logout.');}
+     let current;
+     try{current=await relayRequest(relayOrigin,'/api/session',relayCookie);}
+     catch(error){
+      // Independent reads survive downtime and a positively observed NEW runtime,
+      // not revocation/expiry in the runtime that admitted the monitor.
+      const restarted=error.status===401&&capability(s.runtimeInstance)&&capability(error.runtimeInstance)&&s.runtimeInstance!==error.runtimeInstance;
+      if(!sameCookie||!(error.status===503||restarted)){sessions.delete(digest(id));throw fail(401,'Relay access ended. Launch Updater again from your administrator desktop.');}
+     }
+     if(current){
+      if(current.user?.id!==s.userId||current.user.role!=='admin'||current.user.disabled||current.user.mustChange){sessions.delete(digest(id));throw fail(401,'Monitoring belongs to another account.');}
+      if(sessions.get(digest(id))!==s)throw fail(401,'Monitoring session expired');
+      s.relayIdentity=digest(relayCookie);s.runtimeInstance=current.runtimeInstance;
+     }
+    }
     if(path==='/updater/api/auth'&&!mutation){send(200,s?{authenticated:true,csrf:s.csrf,interfaceAnimations:s.interfaceAnimations,relayOrigin}:{authenticated:false,relayOrigin});return;}
     if(path==='/updater/api/exchange'&&mutation){
+     const relayCookie=cookie(req,'relay_session');if(!capability(relayCookie))throw fail(401,'Active Relay session required to launch monitoring.');
      const data=await body(req);if(Object.keys(data).length!==1||!capability(data.ticket))throw fail(400,'Invalid launch ticket');if(sessions.size>=64)throw fail(429,'Updater session limit');
      const result=await call('redeem-ui',{ticket:data.ticket,origin:uiOrigin});data.ticket='';const expires=expiry(result.expiresAt);if(!capability(result.token)||expires<=Date.now()||typeof result.interfaceAnimations!=='boolean'||typeof result.userId!=='string')throw fail(503,'Invalid updater session');
-     const next=random(),session={token:result.token,expires,userId:result.userId,csrf:random(),interfaceAnimations:result.interfaceAnimations};if(id)sessions.delete(digest(id));sessions.set(digest(next),session);
+     const current=await relayRequest(relayOrigin,'/api/session',relayCookie);if(current.user?.id!==result.userId||current.user.role!=='admin'||current.user.disabled||current.user.mustChange)throw fail(401,'Active original administrator required');
+     const next=random(),session={token:result.token,expires,userId:result.userId,csrf:random(),interfaceAnimations:result.interfaceAnimations,relayIdentity:digest(relayCookie),runtimeInstance:current.runtimeInstance};if(id)sessions.delete(digest(id));sessions.set(digest(next),session);
      res.setHeader('Set-Cookie',`relay_updater_session=${next}; Path=/updater/; HttpOnly; SameSite=Strict; Max-Age=${Math.max(1,Math.floor((expires-Date.now())/1000))}`);send(200,{csrf:session.csrf,interfaceAnimations:session.interfaceAnimations});return;
     }
     if(!s)throw fail(401,'Launch Updater from your administrator desktop.');
@@ -61,7 +81,7 @@ export async function createUpdaterWeb({uiOrigin,relayOrigin,socketPath,networkM
     if('action'in data)throw fail(400,'Unexpected action field');const fields=actionFields(data,action),relayCookie=cookie(req,'relay_session');if(!relayCookie||!capability(relayCookie))throw fail(401,'Sign in to Relay again before changing updates.');
     let auth;try{
      const current=await relayRequest(relayOrigin,'/api/session',relayCookie);
-     if(current.user?.role!=='admin'||current.user.mustChange||current.user.disabled||!capability(current.csrf))throw fail(403,'Active Relay administrator session required');
+     if(current.user?.id!==s.userId||current.user?.role!=='admin'||current.user.mustChange||current.user.disabled||!capability(current.csrf))throw fail(403,'Active Relay administrator session required');
      auth=await relayRequest(relayOrigin,'/api/updater/authorize',relayCookie,'POST',{...fields,password:data.password,confirmed:true},current.csrf);
     }finally{data.password='';}
     if(!capability(auth.authorization))throw fail(503,'Invalid Relay authorization');if(sessions.get(digest(id))!==s||s.expires<=Date.now())throw fail(401,'Updater session expired');
@@ -71,6 +91,12 @@ export async function createUpdaterWeb({uiOrigin,relayOrigin,socketPath,networkM
    let rel;try{rel=decodeURIComponent(path.slice('/updater/'.length));}catch{throw fail(400,'Invalid path');}if(!rel)rel='index.html';if(rel.includes('\\')||rel.includes('\0')||rel.split('/').some(s=>s==='..'||s.startsWith('.')))throw fail(404,'Not found');
    const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2','.ico':'image/x-icon'};const type=types[extname(rel)];if(!type)throw fail(404,'Not found');
    let bytes;try{const base=await realpath(staticDir),file=await realpath(resolve(base,rel));if(!file.startsWith(base+sep))throw Error();const info=await stat(file);if(!info.isFile()||info.size>8*1024*1024)throw Error();bytes=await readFile(file);}catch{throw fail(404,'Updater UI not built or asset unavailable');}
+   // Only the independently served app document is embeddable, and only by
+   // the exact configured management origin. API Host/Origin policy is unchanged.
+   if(type.startsWith('text/html')){
+    res.removeHeader('X-Frame-Options');
+    res.setHeader('Content-Security-Policy',`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors ${relay.origin}; base-uri 'none'; form-action 'none'`);
+   }
    res.writeHead(200,{'Content-Type':type,'Content-Length':bytes.length});res.end(req.method==='HEAD'?undefined:bytes);
   }catch(error){if(!res.headersSent)send(error.status||503,{error:error.status?error.message:'Updater unavailable'});else res.destroy();req.resume();}finally{active--;}
  });

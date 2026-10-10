@@ -307,7 +307,7 @@ test('observe and empty releases never offer installation; session expiry hides 
 test('lost WebGL context switches to usable static fallback', async ({ page }) => {
   await mockAPI(page); await page.goto('/updater/');
   await expect(page.locator('#chamber')).toHaveAttribute('data-renderer', 'webgl');
-  await page.locator('#chamber canvas').evaluate(canvas => canvas.getContext('webgl2').getExtension('WEBGL_lose_context').loseContext());
+  await page.locator('#chamber canvas').evaluate(canvas => canvas.characterSource.getContext('webgl2').getExtension('WEBGL_lose_context').loseContext());
   await expect(page.locator('#chamber')).toHaveAttribute('data-renderer', 'static');
   await expect(page.locator('#fallback')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Review installation' })).toBeEnabled();

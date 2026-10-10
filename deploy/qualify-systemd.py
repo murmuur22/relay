@@ -143,11 +143,15 @@ def launch_monitor(cookie, csrf):
     require(status == 200, 'Normal desktop launch failed')
     url = urlsplit(value['url'])
     require(url.scheme == 'http' and url.netloc == f"{NETWORK['hostname']}:4191" and url.path == '/updater/' and not url.query, 'Unsafe launch target')
-    status, _, monitor = http(4191, '/updater/api/exchange', 'POST', {'ticket': url.fragment})
+    status, _, monitor = http(4191, '/updater/api/exchange', 'POST', {'ticket': url.fragment}, cookie=cookie)
     require(status == 200 and bool(monitor), 'Independent ticket exchange failed')
-    status, _, _ = http(4191, '/updater/api/exchange', 'POST', {'ticket': url.fragment})
+    status, _, _ = http(4191, '/updater/api/exchange', 'POST', {'ticket': url.fragment}, cookie=cookie)
     require(status != 200, 'Launch ticket was reusable')
     return monitor
+
+
+def monitor_state(cookie, monitor):
+    return http(4191, '/updater/api/state', cookie=cookie + '; ' + monitor)
 
 
 def isolation():
@@ -269,15 +273,15 @@ def qualify(args):
         cookie, csrf = authenticate(password)
         isolation()
         monitor = launch_monitor(cookie, csrf)
-        require(http(4191, '/updater/api/state', cookie=monitor)[0] == 200, 'Monitoring failed')
+        require(monitor_state(cookie, monitor)[0] == 200, 'Monitoring failed')
         gate()
         run(['/usr/bin/systemctl', 'restart', 'relay-updater-broker.service', 'relay.service'])
         wait_control()
         ready(args.version, True)
         require(http(4180, '/api/auth')[0] == 503 and GATE.exists(), 'Restart lost durable admission gate')
-        require(http(4191, '/updater/api/state', cookie=monitor)[0] == 200, 'Broker restart lost monitoring capability')
+        require(monitor_state(cookie, monitor)[0] == 200, 'Broker restart lost monitoring capability')
         run(['/usr/bin/systemctl', 'stop', 'relay.service'])
-        require(http(4191, '/updater/api/state', cookie=monitor)[0] == 200, 'Independent monitoring failed during stop')
+        require(monitor_state(cookie, monitor)[0] == 200, 'Independent monitoring failed during stop')
         run(['/usr/bin/systemctl', 'start', 'relay.service'])
         ready(args.version, True)
         signed_baseline_restore(args.version)

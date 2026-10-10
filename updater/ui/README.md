@@ -1,8 +1,8 @@
 # Independent updater UI
 
-A separate Vite / Three.js package for independent maintenance. Relay's Updater shortcut first opens a trusted native **desktop browsing window**, using the same chamber/state modules and a session-scoped read-only broker bridge. It does not iframe this application or rotate this application's cookie.
+A separate Vite / Three.js package for independent maintenance. Relay's Updater shortcut first opens a trusted native **desktop browsing window**, using the same chamber/state modules and a session-scoped read-only broker bridge. **Start update** now hosts this independent application in a scoped trusted surface outside Relay's ready/login/window lifecycle. It does not open another page or install anything automatically.
 
-**Start update** opens `/updater/#<single-use-ticket>~<selected-version>` in a user-initiated, opener-severed tab. The ticket is removed before the first API call. The release version is only a review hint—not authority and never an automatic install command. Final interruption consent and the current administrator password are entered in this independent tab, which remains available when Relay stops.
+The launch still navigates `/updater/#<single-use-ticket>~<selected-version>`. The host does not retain the ticket in an iframe src attribute; the child removes it before the first API call. The release version is only a review hint—not authority or an install command. Final consent and the current administrator password are entered inside Relay. Independent monitoring survives runtime stop/restart; the existing Login signs in again in the same page and never automatically retries a mutation. Standalone direct navigation and the explicitly requested opener-severed **Standalone recovery (new tab)** launch remain supported. See [architecture/security/control-plane migration](../../docs/updater-embedded.md).
 
 ## Build and test
 
@@ -35,8 +35,8 @@ The served artifact is `updater/ui/dist/`. Integration owns `updater/web/index.m
 ## Behavior
 
 - Every byte count, phase, installed version, release note and history entry comes from `/updater/api/state` or `/check`. Percentages describe artifact bytes only, never whole-job completion. Unknown totals have no numeric percentage or fabricated accumulation.
-- The independent tab lazy-loads Three.js after authentication and a state read. The native desktop browser reuses the same chamber module in its own bundle, with the same pinned Three.js dependency. Download fragments gather from the byte fraction; phase transitions change assembly directly, without delaying state for animation. Slow active-job rotation and spiral download trails are decorative activity, not progress or a throughput estimate. Trails disappear after the downloading phase; reduced motion freezes them without fabricating byte changes. Camera framing adapts to narrow WebGL viewports as well as desktop sizes.
-- OS reduced motion and handed-off `interfaceAnimations:false` suppress continuous motion. No audio. Missing/lost WebGL switches to a static SVG; controls and real telemetry remain usable.
+- The independently built bundles lazy-load the same pinned Three.js character renderer. A lit opaque 3D knot/core/orbit/particle scene is depth-tested into bounded stable cells and mapped to `. : + * # / @`. Slow elapsed-time rotation/precession, breathing, phase-driven scan/settle/pulse and curved inward particles are decorative, not throughput or progress estimates. Only artifact bytes supply numeric percentages.
+- OS reduced motion and handed-off `interfaceAnimations:false` suppress continuous motion, retaining a calm static view of the actual 3D knot. Hidden/offscreen surfaces and trusted host hiding pause animation. No audio. Missing/lost WebGL uses an explicit text fallback; controls and telemetry remain usable. Container queries stack the rail by actual app width.
 - State polling schedules the next read one second after completion, has a twelve-second fetch deadline, and permits only one state/check read at a time. Connectivity loss preserves and labels last-known data, disables mutation controls, and stops decorative motion. Expired monitoring sessions hide private state.
 - Install, cancel and rollback each require an explicit interruption confirmation and transient current Relay password. No mutation is automatically retried. A successful POST is followed by a state read, not an optimistic success screen. Relay reauthentication failures leave the independent read session intact.
 - Release notes, events, errors and history are text nodes, never broker-supplied HTML. No credentials, capabilities or UI state are written to localStorage/sessionStorage. No console logging.
@@ -47,6 +47,6 @@ After building, run `node tests/record-demo.mjs` from this directory to record `
 
 ## Design review
 
-Operate composition: a dark neutral chamber plus one release/action rail, followed by a compact disclosure ledger. System Arial is deliberately used as a neutral utility sans, with platform monospace for telemetry; no remote fonts or unverified font assets. No gradients, cards-as-marketing, glass, colored accent rails or ornamental statistics. Slop diagnostic: 0/10 after visual inspection. The light confirmation surface has an automated supporting-text contrast check of at least 4.5:1.
+Operate composition: nearly black and warm cream, a dominant actual shaded ASCII knot and narrow real events/status/actions rail. Crisp platform monospace, thin rectangular rules and container-width stacking; no remote fonts, unverified font assets, green/chromatic accents, rounded cards, slogans or decorative invented statistics. Confirmation remains a neutral bordered dialog; existing supporting-text contrast assertions are retained.
 
 Screenshots use synthetic content. Browser coverage is Chromium on macOS, not Safari, physical mobile, screen-reader qualification or Linux GPU/systemd qualification.

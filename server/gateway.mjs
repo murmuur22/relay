@@ -57,7 +57,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  if(gatewaySettings)authHostnames.add(gatewaySettings.deployment?.desktopHostname??'desktop.relay.test');
  for(const service of accounts.state.services)if(service.kind==='web'&&service.mode==='native'&&authHostnames.has(new URL(service.address).hostname))throw Error('Native apps must use a different hostname from Relay; cookies are not port isolated. Startup refused; existing account data is unchanged.');
  const app=express(),server=http.createServer(app),sessions=new Map();
- let setup=accounts.state.users.length?null:token();const authCsrf=token();
+ let setup=accounts.state.users.length?null:token();const authCsrf=token(),runtimeInstance=token();
  const wss=new WebSocketServer({noServer:true,maxPayload:8192,perMessageDeflate:false});
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,bind,resolve);});
  const origin=`http://${hostname}:${server.address().port}`;
@@ -97,7 +97,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   res.cookie('relay_session',id,{httpOnly:true,sameSite:'strict',path:'/',maxAge:sessionMs});res.json({user:publicUser(user)});
  };
  app.disable('x-powered-by');
- app.use((req,res,next)=>{res.set({'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});if(req.headers.host!==new URL(origin).host||(req.headers.origin&&req.headers.origin!==origin))return res.status(403).json({error:'Invalid Host or Origin'});next();});
+ app.use((req,res,next)=>{res.set({'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Relay-Runtime-Instance':runtimeInstance});if(req.headers.host!==new URL(origin).host||(req.headers.origin&&req.headers.origin!==origin))return res.status(403).json({error:'Invalid Host or Origin'});next();});
  app.get('/health/ready',(req,res)=>res.json({status:'ready',version:VERSION,maintenance:maintenance()}));
  app.use((req,res,next)=>{if(maintenance()&&!(['GET','HEAD'].includes(req.method)&&(req.path==='/'||/^\/desktop(?:\/|$)/.test(req.path)||req.path.startsWith('/assets/')||req.path.startsWith('/fonts/'))))return res.status(503).json({error:'Relay is in maintenance. Try again after the update.'});next();});
  app.use('/api',express.json({limit:'16kb'}));
@@ -111,7 +111,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   authBusy++;
   try{const user=accounts.state.users.find(u=>u.username===req.body?.username);const valid=await verify(req.body?.password,user?.password||accounts.dummy);if(!user||!valid||user.disabled){failures++;throw fail(401,'Invalid username or password');}if(accounts.state.users.find(u=>u.id===user.id)!==user)throw fail(401,'Account changed. Sign in again.');await login(req,res,user);}finally{authBusy--;}
  }));
- app.get(/^\/desktop(?:\/.*)?$/, (req,res)=>{if(req.originalUrl.length>4096||req.path.split('/').length>131)return res.status(414).json({error:'Desktop path too long'});res.sendFile(ROOT+'dist/index.html');});
+ app.get(/^\/desktop(?:\/.*)?$/, (req,res)=>{if(req.originalUrl.length>4096||req.path.split('/').length>131)return res.status(414).json({error:'Desktop path too long'});res.sendFile('index.html',{root:ROOT+'dist'});});
  app.use((req,res,next)=>{
   if(req.path==='/'||req.path.startsWith('/assets/')||req.path.startsWith('/fonts/'))return next();
   const s=getSession(req);if(!s)return res.status(401).json({error:'Authentication required'});req.session=s;next();

@@ -1,4 +1,4 @@
-import './style.css';
+import './terminal.css';
 import { phases, activeJob, transfer, formatTime } from './state.js';
 
 import {reviewHint, reviewVersion} from './review.js';
@@ -14,14 +14,31 @@ saveReview(requestedVersion);
 window.opener = null;
 const $ = id => document.getElementById(id);
 let csrf = '', state = null, selected = requestedVersion, authenticated = false;
-let animations = false;
+let animations = false, relayOrigin = '', hostVisible=true;
+const embedded = window.parent !== window;
+function hostMessage(type){if(embedded&&relayOrigin)window.parent.postMessage({type},relayOrigin);}
+window.addEventListener('message',async event=>{
+ if(!embedded||event.source!==window.parent||event.origin!==relayOrigin||!event.data||Object.keys(event.data).length!==1)return;
+ if(event.data.type==='relay-updater-hidden'||event.data.type==='relay-updater-visible'){hostVisible=event.data.type==='relay-updater-visible';motionChanged();}
+ if(event.data.type==='relay-updater-reconnected'){closeConfirmation();notice('Relay signed in again. Review and authorize any further action explicitly.');await readState();}
+ if(event.data.type==='relay-updater-end'){
+  const old=csrf;clearSession();
+  try{
+   const ended=await fetch('/updater/api/logout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':old},body:'{}',signal:AbortSignal.timeout(7000)});
+   if(!ended.ok&&ended.status!==401)throw Error('Independent logout was rejected.');
+   const check=await fetch('/updater/api/auth',{credentials:'same-origin',signal:AbortSignal.timeout(7000)});
+   if(!check.ok||(await check.json()).authenticated!==false)throw Error('Independent session termination could not be confirmed.');
+   hostMessage('relay-updater-ended');
+  }catch(error){notice(error.message);}
+ }
+});
 let pollTimer, readBusy = false;
 let chamber = null, chamberAttempted = false;
 let fresh = false, sessionEpoch = 0, bootBusy = false;
 const media = matchMedia('(prefers-reduced-motion: reduce)');
 
 $('app').innerHTML = `
-  <header><a class="brand" href="/updater/" aria-label="Relay updater">r<span>/</span></a><span class="path">RELAY <i>/</i> SYSTEM <i>/</i> UPDATER</span><span id="mode" class="badge">CONNECTING</span></header>
+  <header><a class="brand" href="/updater/" aria-label="Relay updater">WE RELAY</a><span class="path">TRANSFER TERMINAL</span><span id="mode" class="badge">CONNECTING</span></header>
   <div class="workspace">
     <div class="heading"><div><p class="eyebrow">INDEPENDENT MAINTENANCE CONSOLE</p><h1>Transfer chamber</h1></div><div class="connection" id="connection" role="status">Connecting to updater…</div></div>
     <p id="notice" role="alert" hidden></p>
@@ -29,25 +46,26 @@ $('app').innerHTML = `
     <div id="console" hidden>
       <div class="operate">
         <section class="transfer" aria-label="Update transfer">
-          <div class="section-line"><span>01 / TRANSFER</span><span id="render-mode">STATIC VIEW</span></div>
-          <div id="chamber" aria-hidden="true"><div class="cross top-left">+</div><div class="cross top-right">+</div><div class="cross bottom-left">+</div><div class="cross bottom-right">+</div><svg id="fallback" viewBox="0 0 600 370"><g fill="none" stroke="currentColor"><ellipse cx="300" cy="291" rx="156" ry="34" opacity=".2"/><path d="M300 73 405 134 405 255 300 316 195 255 195 134Z M195 134 300 195 405 134 M300 195V316 M300 73V195 M195 255 300 195 405 255"/><path opacity=".25" d="M300 105 378 150 378 239 300 284 222 239 222 150Z M222 150 300 195 378 150 M300 195V284"/></g></svg><span class="chamber-label">RELEASE / TRANSFER CORE</span></div>
+          <div class="section-line"><span>01 / TRANSFER</span><span id="render-mode" class="chamber-label">STATIC VIEW</span></div>
+          <div id="chamber" aria-hidden="true"><div id="fallback">. : + * # / @<br><br>3D VIEW UNAVAILABLE<br>Live status and actions remain available.</div><span class="coordinate north">90 +</span><span class="coordinate south">270 +</span><span class="coordinate west">180 +</span><span class="coordinate east">+ 0</span></div>
+          <p id="motion-explanation" class="fine">Shaded 3D character field. Moving particles illustrate activity, not transfer speed.</p>
+        </section>
+        <aside class="release"><div class="section-line"><span>SYSTEM EVENTS</span><button id="check" class="text-button">Check releases ↻</button></div>
           <div class="telemetry"><div><p class="eyebrow">BROKER PHASE</p><h2 id="phase">Idle</h2></div><span id="job-version" class="mono">—</span></div>
           <p id="phase-detail" class="muted">No update is running.</p>
-          <p id="motion-explanation" class="fine">Core assembly follows received bytes. Moving trails illustrate activity, not transfer speed.</p>
+          <section class="ledger"><details open><summary>Current job details <span id="event-count"></span></summary><ol id="events"></ol></details><details><summary>Update history <span id="history-count"></span></summary><ol id="history"></ol></details></section>
+          <div class="byte-row mono"><span id="percentage">—</span><span id="bytes">No transfer</span></div>
           <div id="progress" role="progressbar" aria-label="Artifact download" aria-valuemin="0" aria-valuemax="100"><div id="progress-fill"></div></div>
-          <div class="byte-row mono"><span id="bytes">No transfer</span><span id="percentage">—</span></div>
           <div class="transfer-actions"><button id="cancel" hidden>Cancel transfer</button><button id="rollback" hidden>Review rollback</button></div>
-        </section>
-        <aside class="release"><div class="section-line"><span>02 / RELEASE</span><button id="check" class="text-button">Check releases ↻</button></div>
           <dl class="installed"><dt>INSTALLED</dt><dd id="current-version">—</dd></dl>
           <label class="eyebrow" for="release-select">AVAILABLE RELEASE</label><select id="release-select"></select><p id="verification" class="muted"></p>
           <h2 class="small-heading">Release notes</h2><pre id="release-notes"></pre>
           <div class="release-bottom"><p id="install-reason" class="muted"></p><button id="install" class="primary" disabled>Review installation <span>↗</span></button><p class="fine">You authorize the change. The broker verifies and applies it.</p></div>
         </aside>
       </div>
-      <section class="ledger"><div class="section-line"><span>03 / ACTIVITY</span><span>SERVER-REPORTED EVENTS</span></div><details><summary>Current job details <span id="event-count"></span></summary><ol id="events"></ol></details><details><summary>Update history <span id="history-count"></span></summary><ol id="history"></ol></details></section>
+
     </div>
-    <footer><span>This tab stays open when Relay restarts.</span><span>NO SOUND · <span id="motion-label">MOTION OFF</span></span><button id="logout" hidden class="text-button">End monitoring session</button></footer>
+    <footer><span id="survival">Independent monitoring remains available when Relay restarts.</span><button id="relay-sign-in" hidden>Sign in to Relay</button><span>NO SOUND · <span id="motion-label">MOTION OFF</span></span><button id="logout" hidden class="text-button">End monitoring session</button></footer>
   </div>
   <dialog id="confirm" aria-labelledby="confirm-title"><form id="confirm-form">
     <p class="eyebrow">ADMINISTRATOR AUTHORIZATION</p><h2 id="confirm-title"></h2><p id="confirm-description"></p>
@@ -72,7 +90,7 @@ async function api(name, body) {
 }
 function notice(message = '') { $('notice').textContent = message; $('notice').hidden = !message; }
 function motionChanged() {
-  const enabled = animations && !media.matches && fresh && authenticated;
+  const enabled = animations && hostVisible && !media.matches && fresh && authenticated;
   $('motion-label').textContent = enabled && chamber ? 'MOTION ON' : 'MOTION OFF';
   chamber?.update(state?.job, enabled);
 }
@@ -125,7 +143,7 @@ function render(snapshot) {
   $('job-version').textContent = job?.version || '—';
   const { bytes, total, ratio } = transfer(job);
   $('bytes').textContent = !job ? 'No transfer' : total ? `${bytes.toLocaleString('en-US')} / ${total.toLocaleString('en-US')} bytes` : `${bytes.toLocaleString('en-US')} bytes · total unknown`;
-  $('percentage').textContent = ratio === null ? '—' : `${Math.floor(ratio * 100)}% of artifact`;
+  const value=document.createElement('span');value.textContent=ratio===null?'—':`${Math.floor(ratio*100)}%`;const scope=document.createElement('small');scope.textContent=ratio===null?'':' of artifact';scope.style.cssText='font-size:10px;letter-spacing:1px;display:block;color:var(--muted)';$('percentage').replaceChildren(value,scope);
   $('progress-fill').style.width = `${(ratio || 0) * 100}%`;
   if (ratio === null) $('progress').removeAttribute('aria-valuenow');
   else $('progress').setAttribute('aria-valuenow', String(Math.floor(ratio * 100)));
@@ -171,7 +189,7 @@ function confirmAction(action) {
   pendingAction = { action, ...(action === 'install' ? { version: selected } : { jobId: state.job.id }) };
   const label = { install: 'installation', cancel: 'cancellation', rollback: 'rollback' }[action];
   $('confirm-title').textContent = action === 'install' ? `Install ${selected}?` : action === 'cancel' ? 'Cancel this transfer?' : 'Restore the previous release?';
-  $('confirm-description').textContent = action === 'install' ? 'Save your work first. Relay will enter maintenance and restart; this tab remains available to monitor the job.' : action === 'cancel' ? 'Cancellation is allowed only before activation. The broker checks whether it is still safe when your request arrives.' : 'Restore the broker’s previous verified release and matching state checkpoint. Relay will restart and changes since that checkpoint may be lost.';
+  $('confirm-description').textContent = action === 'install' ? 'Save your work first. Relay will enter maintenance and restart; this independent console remains available to monitor the job.' : action === 'cancel' ? 'Cancellation is allowed only before activation. The broker checks whether it is still safe when your request arrives.' : 'Restore the broker’s previous verified release and matching state checkpoint. Relay will restart and changes since that checkpoint may be lost.';
   $('authorize').textContent = `Authorize ${label}`; $('authorize').disabled = true;
   $('password').value = ''; $('confirmed').checked = false; $('confirm-error').hidden = true;
   $('confirm').showModal(); $('confirmed').focus();
@@ -242,7 +260,7 @@ async function boot() {
     const auth = await api('auth');
     csrf = auth.csrf || ''; authenticated = auth.authenticated;
     animations = auth.interfaceAnimations === true;
-    if (auth.relayOrigin) { const url = new URL(auth.relayOrigin); if (['http:', 'https:'].includes(url.protocol) && url.hostname === location.hostname) { $('relay-link').href = url.origin; $('relay-link').hidden = false; } }
+    if (auth.relayOrigin) { const url = new URL(auth.relayOrigin); if (['http:', 'https:'].includes(url.protocol) && url.hostname === location.hostname && url.origin === auth.relayOrigin) { relayOrigin=url.origin;$('relay-link').href = url.origin; $('relay-link').hidden = embedded; $('relay-sign-in').hidden=!embedded; } }
     $('locked').hidden = authenticated; $('console').hidden = !authenticated; $('logout').hidden = !authenticated;
     if (!authenticated) { $('connection').textContent = 'Monitoring session required'; $('mode').textContent = 'LOCKED'; return; }
     render(await api('state'));
@@ -250,7 +268,8 @@ async function boot() {
     initChamber();
     schedulePoll();
   } catch (error) { fresh = false; notice(error.message); $('connection').textContent = 'Connection unavailable'; $('mode').textContent = 'UNAVAILABLE'; $('locked').hidden = false; }
-  finally { bootBusy = false; $('check').disabled = false; }
+  finally { bootBusy = false; $('check').disabled = false;hostMessage('relay-updater-ready'); }
 }
+$('relay-sign-in').onclick=()=>{closeConfirmation();hostMessage('relay-updater-sign-in');};
 $('retry').onclick = boot;
 boot();
