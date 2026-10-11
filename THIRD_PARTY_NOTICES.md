@@ -18,4 +18,6 @@ Gateway hostname validation uses the pinned MIT-licensed `tldts` and `tldts-core
 
 ## Fonts and local artifacts
 
-Reference font binaries are excluded until redistribution rights are verified. Fresh checkouts render with system fallback fonts. Private planning PDFs, agent working notes, runtime credentials, personal libraries, generated screenshots and local environments are also excluded from Git.
+Private reference font binaries remain excluded; the rest of the desktop still uses system fallbacks in fresh checkouts. Only updater surfaces bundle **Silkscreen Bold** (Copyright 2001 The Silkscreen Project Authors) and **Share Tech Mono Regular** (Copyright 2012 Carrois Type Design), both under **SIL Open Font License 1.1**. Original upstream licenses are preserved byte-for-byte as `silkscreen-OFL.txt` and `sharetechmono-OFL.txt` in both public license directories and built bundles. `updater/ui/src/assets/font-sources.json` records the pinned google/fonts commit, original TTF/license URLs and SHA-256 values, full-font WOFF2 conversion tooling and output hashes; the same record ships as `licenses/updater-font-sources.json`. These are freely redistributable upstream fonts, not the historical proprietary/local reference assets. No external font request is made at runtime.
+
+Private planning PDFs, agent working notes, runtime credentials, personal libraries, generated screenshots and local environments are excluded from Git.

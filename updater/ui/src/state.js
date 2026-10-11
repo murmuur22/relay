@@ -25,5 +25,5 @@ export function activeJob(job) { return Boolean(job && !terminalPhases.has(job.p
 export function transfer(job) {
   const bytes = Number.isSafeInteger(job?.downloadedBytes) && job.downloadedBytes >= 0 ? job.downloadedBytes : 0;
   const total = Number.isSafeInteger(job?.totalBytes) && job.totalBytes > 0 ? job.totalBytes : null;
-  return { bytes, total, ratio: total ? Math.min(1, bytes / total) : null };
+  return { bytes, total, ratio: total && job?.phase !== 'idle' ? Math.min(1, bytes / total) : null };
 }

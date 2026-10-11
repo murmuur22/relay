@@ -5,6 +5,17 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
+## [0.6.5] — 2026-10-11
+
+Candidate source; signed publication and qualification status are recorded separately in `TEST_REPORT.md`. No production deployment is implied.
+
+- Deliver the independently built updater presentation inside the ordinary signed runtime archive, with an inert web-API compatibility/file-hash descriptor and exact-version asset URLs. Keep the protocol-1 release manifest shape unchanged and all seven privileged broker modules byte-identical to v0.6.3/v0.6.4.
+- Add an unprivileged fixed-root static bridge with complete bounded immutable frontend pins, safe fallback to the independent built-in UI, and retained lazy assets through runtime switching, candidate cleanup and rollback. Fresh installations receive the bridge; existing installations require the separately qualified, operator-controlled web-only bootstrap. Runtime updates do not change an already installed web server by magic.
+- Refine both updater surfaces to a small “Relay updater” header and monochrome progress/focus accents; remove the WE RELAY wordmark, terminal subtitle and decorative slogans while retaining the byte-driven percentage, segmented bar and chamber.
+- Redesign only the desktop Updater browser and independently served updater UI as a reference-led Monitor terminal: cream rules, near-black texture, minimal “Relay updater” header, a dominant actual shaded Three.js knot with dotted coordinates, monochrome artifact percentage and a byte-driven character-block bar. Release review/consent stays secondary; other desktop surfaces retain their neutral design.
+- Bundle self-hosted Silkscreen Bold and Share Tech Mono Regular under their original SIL OFL 1.1 licenses, with pinned upstream URLs, source/output hashes and exact notices in both distributions. No runtime font CDN requests or private reference fonts.
+- Suppress percentages for idle/unknown-total snapshots, preserve semantic artifact-only progress and all original-owner, CSRF, password, embedding, stale-state and reduced-motion/WebGL boundaries. Presentation delivery never replaces the installed broker, web API, configuration or units; no privileged self-update or production change.
+
 ## [0.6.4] — 2026-10-10
 
 Published as [v0.6.4](https://github.com/murmuur22/relay/releases/tag/v0.6.4) after exact-source Linux preflight, official signed publication, anonymous asset verification, dual-mode signed fresh installs and unchanged-v0.6.3-control-plane enabled-Gateway runtime upgrade/matching-state rollback passed. Ordinary credential-free discovery from v0.6.3 also passed. Exact run URLs and hashes are in `TEST_REPORT.md`; no production deployment was performed.

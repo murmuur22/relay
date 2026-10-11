@@ -33,9 +33,29 @@ jobs:
           npm run build:updater
           python3 -m pip install Pillow==11.3.0
           node node_modules/playwright/cli.js install --with-deps chromium
+          # Preserve only runtime Chromium/FFmpeg bytes before adding WebKit's test tier.
+          mkdir -m 700 "$RUNNER_TEMP/relay-package-browsers"
+          cp -a "$RUNNER_TEMP/relay-browsers/." "$RUNNER_TEMP/relay-package-browsers/"
+          node node_modules/playwright/cli.js install --with-deps webkit
           # This is a fresh hosted VM, not an operator/production host.
           # Chromium remains sandbox-enabled; allow its user namespaces here.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Verify unchanged signed old broker modules for real HMAC browser fixtures
+        run: |
+          for baseline in v0.6.3 v0.6.4; do
+            directory="$RUNNER_TEMP/public-$baseline"
+            mkdir -m 700 "$directory"
+            for asset in relay-release.json relay-release.attestation.json relay-updater-linux-x64.tar.gz; do
+              env -i PATH="$PATH" curl -q --fail --location --proto '=https' --proto-redir '=https' --max-time 180 --max-filesize 1048576 --output "$directory/$asset" "https://github.com/murmuur22/relay/releases/download/$baseline/$asset"
+            done
+            if [ "$baseline" = v0.6.3 ]; then source=220553aa557d0d6b4a442a11f2f1ee7ed88625ab; else source=0bf423eae6709b28fd5ace2a4b97e74924626fc8; fi
+            anonymous_home="$(mktemp -d "$RUNNER_TEMP/relay-old-verifier.XXXXXX")"
+            env -i PATH="$PATH" LANG=C.UTF-8 HOME="$anonymous_home" GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 gh attestation verify "$directory/relay-release.json" --bundle "$directory/relay-release.attestation.json" --repo murmuur22/relay --signer-workflow murmuur22/relay/.github/workflows/release.yml --source-ref "refs/tags/$baseline" --source-digest "$source" --signer-digest "$source" --deny-self-hosted-runners
+            rm -rf -- "$anonymous_home"
+            python3 -m updater.release.verify_broker_baseline --source "$GITHUB_WORKSPACE" --manifest "$directory/relay-release.json" --archive "$directory/relay-updater-linux-x64.tar.gz"
+          done
+          printf 'RELAY_PRESENTATION_OLD_UPDATER_ARCHIVE=%s/public-v0.6.4/relay-updater-linux-x64.tar.gz\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'RELAY_PRESENTATION_EVIDENCE_DIR=%s\nTMPDIR=%s\n' "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Provision checksummed isolated Caddy test binary (no service installation)
         run: |
           mkdir -m 700 "$RUNNER_TEMP/relay-caddy"
@@ -83,5 +103,5 @@ jobs:
           VERSION="v$(node -p 'JSON.parse(require("fs").readFileSync("package.json","utf8")).version')"
           python3 -m updater.release.validate_tag "$VERSION"
           npm prune --omit=dev --ignore-scripts
-          python3 -m updater.release.build --source "$GITHUB_WORKSPACE" --browsers "$PLAYWRIGHT_BROWSERS_PATH" --output "$RUNNER_TEMP/relay-preflight-artifacts" --version "$VERSION"
+          python3 -m updater.release.build --source "$GITHUB_WORKSPACE" --browsers "$RUNNER_TEMP/relay-package-browsers" --output "$RUNNER_TEMP/relay-preflight-artifacts" --version "$VERSION"
           # No attestation, release, tag or deployment is created by this job.

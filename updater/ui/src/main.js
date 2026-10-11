@@ -1,4 +1,4 @@
-import './terminal.css';
+import './terminal-shell.css';
 import { phases, activeJob, transfer, formatTime } from './state.js';
 
 import {reviewHint, reviewVersion} from './review.js';
@@ -37,8 +37,9 @@ let chamber = null, chamberAttempted = false;
 let fresh = false, sessionEpoch = 0, bootBusy = false;
 const media = matchMedia('(prefers-reduced-motion: reduce)');
 
+$('app').classList.add('relay-terminal');
 $('app').innerHTML = `
-  <header><a class="brand" href="/updater/" aria-label="Relay updater">WE RELAY</a><span class="path">TRANSFER TERMINAL</span><span id="mode" class="badge">CONNECTING</span></header>
+  <header><a class="brand" href="/updater/" aria-label="Relay updater">Relay updater</a><span id="mode" class="badge">CONNECTING</span></header>
   <div class="workspace">
     <div class="heading"><div><p class="eyebrow">INDEPENDENT MAINTENANCE CONSOLE</p><h1>Transfer chamber</h1></div><div class="connection" id="connection" role="status">Connecting to updater…</div></div>
     <p id="notice" role="alert" hidden></p>
@@ -51,11 +52,12 @@ $('app').innerHTML = `
           <p id="motion-explanation" class="fine">Shaded 3D character field. Moving particles illustrate activity, not transfer speed.</p>
         </section>
         <aside class="release"><div class="section-line"><span>SYSTEM EVENTS</span><button id="check" class="text-button">Check releases ↻</button></div>
+          <section class="ledger"><details open><summary>Current job details <span id="event-count"></span></summary><ol id="events"></ol></details><details><summary>Update history <span id="history-count"></span></summary><ol id="history"></ol></details></section>
+          <div id="percentage" class="percentage">—</div>
           <div class="telemetry"><div><p class="eyebrow">BROKER PHASE</p><h2 id="phase">Idle</h2></div><span id="job-version" class="mono">—</span></div>
           <p id="phase-detail" class="muted">No update is running.</p>
-          <section class="ledger"><details open><summary>Current job details <span id="event-count"></span></summary><ol id="events"></ol></details><details><summary>Update history <span id="history-count"></span></summary><ol id="history"></ol></details></section>
-          <div class="byte-row mono"><span id="percentage">—</span><span id="bytes">No transfer</span></div>
-          <div id="progress" role="progressbar" aria-label="Artifact download" aria-valuemin="0" aria-valuemax="100"><div id="progress-fill"></div></div>
+          <p id="bytes" class="bytes mono">No transfer</p>
+          <div id="progress" class="progress" role="progressbar" aria-label="Artifact download" aria-valuemin="0" aria-valuemax="100"><div id="progress-fill" class="progress-fill" aria-hidden="true"></div></div>
           <div class="transfer-actions"><button id="cancel" hidden>Cancel transfer</button><button id="rollback" hidden>Review rollback</button></div>
           <dl class="installed"><dt>INSTALLED</dt><dd id="current-version">—</dd></dl>
           <label class="eyebrow" for="release-select">AVAILABLE RELEASE</label><select id="release-select"></select><p id="verification" class="muted"></p>
@@ -143,8 +145,11 @@ function render(snapshot) {
   $('job-version').textContent = job?.version || '—';
   const { bytes, total, ratio } = transfer(job);
   $('bytes').textContent = !job ? 'No transfer' : total ? `${bytes.toLocaleString('en-US')} / ${total.toLocaleString('en-US')} bytes` : `${bytes.toLocaleString('en-US')} bytes · total unknown`;
-  const value=document.createElement('span');value.textContent=ratio===null?'—':`${Math.floor(ratio*100)}%`;const scope=document.createElement('small');scope.textContent=ratio===null?'':' of artifact';scope.style.cssText='font-size:10px;letter-spacing:1px;display:block;color:var(--muted)';$('percentage').replaceChildren(value,scope);
-  $('progress-fill').style.width = `${(ratio || 0) * 100}%`;
+  const value=document.createElement('span');value.textContent=ratio===null?'—':String(Math.floor(ratio*100));
+  const symbol=document.createElement('span');symbol.className='percent-symbol';symbol.textContent=ratio===null?'':'%';
+  const scope=document.createElement('small');scope.textContent=ratio===null?'':' of artifact';$('percentage').replaceChildren(value,symbol,scope);
+  const filled = ratio === null ? 0 : Math.floor(ratio * 40);
+  $('progress-fill').textContent = '█'.repeat(filled) + '░'.repeat(40 - filled);
   if (ratio === null) $('progress').removeAttribute('aria-valuenow');
   else $('progress').setAttribute('aria-valuenow', String(Math.floor(ratio * 100)));
   $('progress').setAttribute('aria-valuetext', $('bytes').textContent);

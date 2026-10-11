@@ -1,0 +1,39 @@
+@font-face{font-family:'Relay Pixel';src:url('./assets/silkscreen-bold.woff2') format('woff2');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:'Relay Mono';src:url('./assets/share-tech-mono.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
+.relay-terminal{--muted:#aaa99e;--line:#77796d;--paper:#efeee5;--ink:#0b0d0a;--accent:#efeee5;color:var(--paper);background:var(--ink);font-family:'Relay Mono',monospace;font-weight:400;font-synthesis:none;font-size:13px;color-scheme:dark;container-type:inline-size;background-image:repeating-linear-gradient(0deg,transparent 0 2px,rgba(239,238,229,.015) 2px 3px)}
+.relay-terminal a{color:inherit}
+.relay-terminal *{box-sizing:border-box}.relay-terminal [hidden]{display:none!important}
+.relay-terminal header{height:52px;display:flex;gap:24px;align-items:center;border-bottom:1px solid var(--line)}
+.relay-terminal .brand{font-family:'Relay Mono',monospace;font-size:18px;line-height:1.2;font-weight:400;letter-spacing:.5px;text-decoration:none;white-space:nowrap}
+.relay-terminal .path{font-size:14px;letter-spacing:2px}.relay-terminal .badge{margin-left:auto;font-size:10px;letter-spacing:1px;text-align:right}
+.relay-terminal h1,.relay-terminal h2{font:inherit;margin:0}.relay-terminal h2{font-size:25px}.relay-terminal p{font-size:13px;line-height:1.5;margin:8px 0}
+.relay-terminal .eyebrow,.relay-terminal .fine{font-size:11px;color:var(--muted);line-height:1.45}.relay-terminal .eyebrow{letter-spacing:1.5px}.relay-terminal .muted{color:var(--muted)}
+.relay-terminal button,.relay-terminal input,.relay-terminal select{font:inherit;border-radius:0;accent-color:var(--accent)}
+.relay-terminal button{color:inherit;background:transparent;border:1px solid var(--line);padding:8px 10px;cursor:pointer;min-height:36px}
+.relay-terminal button:hover:not(:disabled){background:#24271f}.relay-terminal button:disabled{opacity:.45;cursor:not-allowed}
+.relay-terminal :is(button,a,input,select,summary):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.relay-terminal .primary,.relay-terminal .start{background:var(--paper);color:var(--ink);width:100%}.relay-terminal .primary:hover:not(:disabled),.relay-terminal .start:hover:not(:disabled){background:var(--accent)}
+.relay-terminal .section-line{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:10px;letter-spacing:1.5px;color:var(--muted);min-height:24px}
+.relay-terminal .operate,.relay-terminal .columns{display:grid;grid-template-columns:minmax(0,7fr) minmax(275px,2.8fr);border-bottom:1px solid var(--line)}
+.relay-terminal .transfer{position:relative;min-width:0;display:flex;flex-direction:column;padding:0 16px 0 0}
+.relay-terminal .release{min-width:0;border-left:1px solid var(--line);padding:12px 0 12px 16px;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--line) var(--ink)}
+.relay-terminal .release>.section-line{border-bottom:1px solid var(--line);padding-bottom:8px}
+.relay-terminal #chamber,.relay-terminal .chamber{position:relative;flex:1;min-height:420px;overflow:hidden}
+.relay-terminal :is(#chamber,.chamber) canvas{display:block;position:absolute;inset:0}
+.relay-terminal .coordinate{position:absolute;color:#b9bbae;font-size:10px;z-index:1}.relay-terminal .north{top:8px;left:50%;transform:translateX(-50%)}.relay-terminal .south{bottom:8px;left:50%;transform:translateX(-50%)}.relay-terminal .west{left:5px;top:50%}.relay-terminal .east{right:5px;top:50%}
+.relay-terminal .edge-caption{position:absolute;z-index:1;color:#aaa99e;font-size:9px;line-height:1.2;letter-spacing:1.5px;max-width:84px}.relay-terminal .edge-top{top:20px;left:0}.relay-terminal .edge-bottom{bottom:20px;right:0;text-align:right}
+.relay-terminal #fallback,.relay-terminal .static-view{position:absolute;inset:0;display:grid;place-content:center;text-align:center;color:var(--muted);font-size:12px;line-height:1.7}
+.relay-terminal .ledger{padding:14px 0;border-bottom:1px solid var(--line);min-height:145px}.relay-terminal summary{font-size:11px;color:var(--muted);cursor:pointer;padding:6px 0}.relay-terminal summary span{float:right}
+.relay-terminal ol{list-style:none;padding:0;margin:4px 0;max-height:145px;overflow:auto}.relay-terminal li{font-size:12px;line-height:1.5;padding:8px 0;overflow-wrap:anywhere}.relay-terminal li::before{content:'[·] ';color:var(--accent)}
+.relay-terminal .percentage{font-family:'Relay Pixel',monospace;font-weight:700;font-size:clamp(56px,7cqw,76px);line-height:1.1;color:var(--accent);letter-spacing:-3px;margin-top:12px}
+.relay-terminal .percent-symbol{font:400 .65em 'Relay Mono',monospace;letter-spacing:0}
+.relay-terminal .percentage small{display:block;font:10px 'Relay Mono',monospace;letter-spacing:1.5px;color:var(--muted);margin:2px 0 12px}
+.relay-terminal .telemetry{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:8px 0}.relay-terminal .telemetry h2{font-size:26px}.relay-terminal .telemetry .eyebrow{display:none}
+.relay-terminal .mono{font-variant-numeric:tabular-nums}.relay-terminal .bytes{font-size:16px;margin:12px 0}
+.relay-terminal .progress{display:flex;align-items:center;margin:12px 0;color:var(--paper);font-family:monospace;font-size:13px;line-height:1;white-space:nowrap}.relay-terminal .progress::before{content:'[';margin-right:6px}.relay-terminal .progress::after{content:']';margin-left:6px}.relay-terminal .progress-fill{display:block;overflow:hidden;font-size:clamp(7px,1.12cqw,13px);letter-spacing:-1px;flex:1;text-align:center}
+.relay-terminal .transfer-actions{display:flex;gap:8px;margin:14px 0}.relay-terminal .installed{border-top:1px solid var(--line);padding-top:14px;margin:16px 0;display:flex;align-items:center;justify-content:space-between}.relay-terminal .installed dt{font-size:10px;letter-spacing:1.5px;color:var(--muted)}.relay-terminal .installed dd{font-size:18px;margin:0}
+.relay-terminal label{display:block;margin:12px 0 6px}.relay-terminal select{width:100%;padding:9px;background:var(--ink);color:var(--paper);border:1px solid var(--line)}
+.relay-terminal pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.5;max-height:150px;overflow:auto}.relay-terminal .small-heading{font-size:16px;margin-top:16px}.relay-terminal .release-bottom{border-top:1px solid var(--line);margin-top:16px;padding-top:8px}
+.relay-terminal footer{display:flex;gap:14px;justify-content:space-between;align-items:center;min-height:42px;font-size:10px;color:var(--muted);letter-spacing:1px}.relay-terminal .text-button{border:0;padding:3px 0;min-height:24px;font-size:10px}.relay-terminal [role=alert]{border:1px solid var(--line);padding:10px;overflow-wrap:anywhere}
+@container(max-width:700px){.relay-terminal .operate,.relay-terminal .columns{grid-template-columns:1fr;height:auto}.relay-terminal .release{border-left:0;border-top:1px solid var(--line);padding:16px 0;overflow:visible}.relay-terminal .transfer{padding:0}.relay-terminal :is(#chamber,.chamber){min-height:380px;height:380px;flex:none}.relay-terminal header{height:auto;min-height:70px;flex-wrap:wrap;gap:8px 16px;padding:8px 0}.relay-terminal .brand{font-size:18px}.relay-terminal .path{font-size:11px}.relay-terminal .badge{font-size:9px}.relay-terminal footer{flex-wrap:wrap;padding:12px 0}.relay-terminal button{min-height:44px}.relay-terminal .progress-fill{font-size:13px}.relay-terminal .percentage{font-size:76px}}
+@media(prefers-reduced-motion:reduce){.relay-terminal *{scroll-behavior:auto}}

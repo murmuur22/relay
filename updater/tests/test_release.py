@@ -8,6 +8,33 @@ from updater.release.build import build
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_control_plane_packages_only_named_updater_fonts_and_exact_notices(self):
+        from updater.release.build import control_bundle, CONTROL_FILES
+        from updater.broker.auth import Denied
+        with tempfile.TemporaryDirectory() as tmp:
+            source, output = Path(tmp) / 'source', Path(tmp) / 'out'
+            output.mkdir()
+            allowed = ('updater/ui/dist/index.html', 'updater/ui/dist/assets/silkscreen-bold-ABC123.woff2',
+                       'updater/ui/dist/assets/share-tech-mono-XYZ789.woff2',
+                       'updater/ui/dist/licenses/silkscreen-OFL.txt', 'updater/ui/dist/licenses/sharetechmono-OFL.txt',
+                       'updater/ui/dist/licenses/updater-font-sources.json')
+            for name in (*CONTROL_FILES, *allowed):
+                path = source / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('synthetic packaging fixture')
+            result = control_bundle(source, output, {'version': '0.6.4'})
+            with tarfile.open(output / result['name']) as archive:
+                for name in allowed:
+                    member = archive.extractfile(name)
+                    assert member is not None
+                    self.assertEqual(member.read(), (source / name).read_bytes())
+            for forbidden in ('assets/private.woff2', 'licenses/private-OFL.txt', 'licenses/secret.json'):
+                path = source / 'updater/ui/dist' / forbidden
+                path.write_text('must not be packaged')
+                with self.assertRaisesRegex(Denied, 'Unexpected updater UI asset'):
+                    control_bundle(source, output, {'version': '0.6.4'})
+                path.unlink()
+
     def test_optional_updater_manifest_and_initial_installer_verification(self):
         import hashlib
         from updater.broker import releases
@@ -116,6 +143,12 @@ class ReleaseTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('synthetic')
             output = root / 'out'
+            from updater.release.presentation import describe
+            presentation = source / 'updater/ui/presentation-dist'
+            (presentation / 'assets').mkdir(parents=True)
+            (presentation / 'index.html').write_text('<script src="/updater/presentation/v1.2.3/assets/index-ABC123.js"></script>')
+            (presentation / 'assets/index-ABC123.js').write_text('synthetic presentation')
+            describe(presentation, 'v1.2.3')
             result = build(source, source / 'browsers', output, 'v1.2.3', allow_nonlinux=True)
             with tarfile.open(output / 'relay-linux-x64.tar.gz') as archive:
                 names = archive.getnames()

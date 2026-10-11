@@ -1,0 +1,33 @@
+{
+  "repository": "https://github.com/google/fonts",
+  "commit": "bd8f81ddb5c74d5c8897b36ad88b440266245103",
+  "conversion": "uv run --with fonttools==4.60.1 --with brotli==1.1.0 fonttools ttLib.woff2 compress (full font, no subsetting)",
+  "sources": [
+    {
+      "family": "silkscreen",
+      "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/silkscreen/Silkscreen-Bold.ttf",
+      "sha256": "768476aa712d4f5c3e18d3bce80f980a8bd3f72b7094d22ec5e768df3acfed61",
+      "license": "SIL Open Font License 1.1",
+      "woff2Sha256": "eb1e8471d5e81886e7bd12ea8bcd2564d27f3e3dddb7820a25c034b5afd7bf4e"
+    },
+    {
+      "family": "silkscreen",
+      "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/silkscreen/OFL.txt",
+      "sha256": "86c5e9c9382cdcc5948704fdfe60f2aa164a719746931219a42736ecd9cefbd3",
+      "license": "SIL Open Font License 1.1"
+    },
+    {
+      "family": "sharetechmono",
+      "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/sharetechmono/ShareTechMono-Regular.ttf",
+      "sha256": "9ceab1f87414829af259c0f537573ae03ef7dd3147c0b27a36a1a0beb6732677",
+      "license": "SIL Open Font License 1.1",
+      "woff2Sha256": "c3f34d40f4f0077c1196b24dc200d40479eb63e2c3f8f2a8343172ab17d53069"
+    },
+    {
+      "family": "sharetechmono",
+      "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/sharetechmono/OFL.txt",
+      "sha256": "9d96f445b6e9c701428811d0177f894874f8d6f07ecc30d568c506542368f3ff",
+      "license": "SIL Open Font License 1.1"
+    }
+  ]
+}

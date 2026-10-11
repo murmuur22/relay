@@ -4,12 +4,12 @@ Only `.github/workflows/release.yml` on the official repository's exact stable-f
 
 The hosted job builds both browser bundles with dependency lifecycle scripts disabled, installs matching Linux Chromium, runs the Python security/engine/installer tests and actual browser/HTTP fixture and standalone checks, prunes development dependencies, and packages:
 
-- `relay-linux-x64.tar.gz`: standalone Relay server, compiled desktop, production Node dependencies, matching Chromium payload, image normalizer, version metadata and the shared broker client.
+- `relay-linux-x64.tar.gz`: standalone Relay server, compiled desktop, production Node dependencies, matching Chromium payload, image normalizer, version metadata, the shared broker client, and the separately built first-party `updater-presentation/` with exact-version asset URLs and an inert complete file-hash/API-compatibility descriptor.
 - `relay-updater-linux-x64.tar.gz`: exact allowlisted broker and web sources, independently compiled UI, exact installer/qualifier/operator sources and systemd templates. No fixture code, tests, keys or secret configs. Its root package metadata is ESM and carries the canonical release version.
 - `relay-release.json`: protocol 1, existing `artifact` descriptor unchanged, plus `updaterArtifact` with fixed name, SHA-256 and size. The manifest's GitHub attestation covers BOTH shipped archives transitively.
 - `relay-release.attestation.json`: actual GitHub build-provenance bundle. Local builds never synthesize one.
 
-The control plane is for initial operator installation. Normal broker updates continue to install only `artifact`; this is NOT control-plane self-update. Existing protocol-1 manifests without `updaterArtifact` remain accepted by the runtime updater, while initial installation requires both artifacts.
+The control plane is for initial operator installation. Normal broker updates continue to install only `artifact`; this is NOT control-plane self-update. A fresh 0.6.5 installation, or a separately qualified manual web-only bootstrap of an old installation, enables the independent unprivileged web reader to serve compatible runtime presentation files. It never replaces installed broker/web API/configuration/units. Full-byte immutable pins keep old lazy assets available during runtime switching/failure/rollback, bounded by the [delivery policy](../../docs/updater-ui-delivery.md). Existing protocol-1 manifests without `updaterArtifact` remain accepted by the runtime updater, while initial installation requires both artifacts.
 
 ## Trust and anonymous installation
 

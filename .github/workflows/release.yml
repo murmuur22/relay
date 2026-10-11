@@ -9,7 +9,7 @@ on:
         required: true
         type: string
       upgrade-from:
-        description: 'OPTIONAL: v0.4.2 (off), v0.6.1 (Direct to v2), v0.6.2 (v2 to v3) or v0.6.3 (v3 preserved, changed-state rollback)'
+        description: 'OPTIONAL: v0.4.2 (off), v0.6.1 (Direct to v2), v0.6.2 (v2 to v3), v0.6.3/v0.6.4 (signed runtime upgrade/rollback plus web-only delivery bootstrap)'
         required: false
         default: ''
         type: string
@@ -48,16 +48,36 @@ jobs:
           npm ci --ignore-scripts
           npm --prefix updater/ui ci --ignore-scripts
           npm run build
-          npm --prefix updater/ui run build
+          npm run build:updater
           python3 -m pip install Pillow==11.3.0
       - name: Install matching Linux Chromium with system dependencies
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-browsers
         run: |
           node node_modules/playwright/cli.js install --with-deps chromium
+          # Preserve only runtime Chromium/FFmpeg bytes before adding WebKit's test tier.
+          mkdir -m 700 "$RUNNER_TEMP/relay-package-browsers"
+          cp -a "$RUNNER_TEMP/relay-browsers/." "$RUNNER_TEMP/relay-package-browsers/"
+          node node_modules/playwright/cli.js install --with-deps webkit
           # Hosted Ubuntu AppArmor blocks user namespaces by default. Permit
           # namespaces on this disposable runner; Chromium's sandbox stays ON.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Verify unchanged signed old broker modules for real HMAC browser fixtures
+        run: |
+          for baseline in v0.6.3 v0.6.4; do
+            directory="$RUNNER_TEMP/public-$baseline"
+            mkdir -m 700 "$directory"
+            for asset in relay-release.json relay-release.attestation.json relay-updater-linux-x64.tar.gz; do
+              env -i PATH="$PATH" curl -q --fail --location --proto '=https' --proto-redir '=https' --max-time 180 --max-filesize 1048576 --output "$directory/$asset" "https://github.com/murmuur22/relay/releases/download/$baseline/$asset"
+            done
+            if [ "$baseline" = v0.6.3 ]; then source=220553aa557d0d6b4a442a11f2f1ee7ed88625ab; else source=0bf423eae6709b28fd5ace2a4b97e74924626fc8; fi
+            anonymous_home="$(mktemp -d "$RUNNER_TEMP/relay-old-verifier.XXXXXX")"
+            env -i PATH="$PATH" LANG=C.UTF-8 HOME="$anonymous_home" GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 gh attestation verify "$directory/relay-release.json" --bundle "$directory/relay-release.attestation.json" --repo murmuur22/relay --signer-workflow murmuur22/relay/.github/workflows/release.yml --source-ref "refs/tags/$baseline" --source-digest "$source" --signer-digest "$source" --deny-self-hosted-runners
+            rm -rf -- "$anonymous_home"
+            python3 -m updater.release.verify_broker_baseline --source "$GITHUB_WORKSPACE" --manifest "$directory/relay-release.json" --archive "$directory/relay-updater-linux-x64.tar.gz"
+          done
+          printf 'RELAY_PRESENTATION_OLD_UPDATER_ARCHIVE=%s/public-v0.6.4/relay-updater-linux-x64.tar.gz\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'RELAY_PRESENTATION_EVIDENCE_DIR=%s\nTMPDIR=%s\n' "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Provision checksummed isolated Caddy test binary (no service installation)
         run: |
           mkdir -m 700 "$RUNNER_TEMP/relay-caddy"
@@ -92,7 +112,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           npm prune --omit=dev --ignore-scripts
-          python3 -m updater.release.build --source "$GITHUB_WORKSPACE" --browsers "$RUNNER_TEMP/relay-browsers" --output "$RUNNER_TEMP/relay-release" --version "$RELEASE_TAG"
+          python3 -m updater.release.build --source "$GITHUB_WORKSPACE" --browsers "$RUNNER_TEMP/relay-package-browsers" --output "$RUNNER_TEMP/relay-release" --version "$RELEASE_TAG"
       - name: Attest manifest binding BOTH payload hashes and sizes
         id: attest
         uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
@@ -102,11 +122,12 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          RELEASE_SOURCE: ${{ github.sha }}
         run: |
           cp -- "$BUNDLE" "$RUNNER_TEMP/relay-release/relay-release.attestation.json"
           GH_ANON_HOME="$(mktemp -d)"
           trap 'rm -rf -- "$GH_ANON_HOME"' EXIT
-          env -i PATH="$PATH" LANG=C.UTF-8 HOME="$GH_ANON_HOME" GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 gh attestation verify "$RUNNER_TEMP/relay-release/relay-release.json" --bundle "$RUNNER_TEMP/relay-release/relay-release.attestation.json" --repo murmuur22/relay --signer-workflow murmuur22/relay/.github/workflows/release.yml --source-ref "refs/tags/$RELEASE_TAG" --deny-self-hosted-runners
+          env -i PATH="$PATH" LANG=C.UTF-8 HOME="$GH_ANON_HOME" GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 gh attestation verify "$RUNNER_TEMP/relay-release/relay-release.json" --bundle "$RUNNER_TEMP/relay-release/relay-release.attestation.json" --repo murmuur22/relay --signer-workflow murmuur22/relay/.github/workflows/release.yml --source-ref "refs/tags/$RELEASE_TAG" --source-digest "$RELEASE_SOURCE" --signer-digest "$RELEASE_SOURCE" --deny-self-hosted-runners
       - name: Publish public PRERELEASE, never latest (promotion is a separate human gate)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -193,7 +214,7 @@ jobs:
       - name: Require explicit old baseline and stable-form published target
         shell: bash
         run: |
-          [[ "$UPGRADE_FROM" = v0.4.2 || "$UPGRADE_FROM" = v0.6.1 || "$UPGRADE_FROM" = v0.6.2 || "$UPGRADE_FROM" = v0.6.3 ]]
+          [[ "$UPGRADE_FROM" = v0.4.2 || "$UPGRADE_FROM" = v0.6.1 || "$UPGRADE_FROM" = v0.6.2 || "$UPGRADE_FROM" = v0.6.3 || "$UPGRADE_FROM" = v0.6.4 ]]
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -205,7 +226,7 @@ jobs:
       - name: Local harness regression and disposable prerequisites (no root npm)
         run: |
           python3 -m updater.release.validate_tag "$RELEASE_TAG"
-          python3 -m unittest updater.tests.test_deployment updater.tests.test_private_lan updater.tests.test_upgrade_qualification -v
+          python3 -m unittest updater.tests.test_deployment updater.tests.test_private_lan updater.tests.test_upgrade_qualification updater.tests.test_presentation_bootstrap -v
           npm ci --ignore-scripts
           node node_modules/playwright/cli.js install-deps chromium
           sudo apt-get update

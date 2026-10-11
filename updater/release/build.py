@@ -9,17 +9,22 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import stat
 import tarfile
 
 from updater.broker.auth import Denied, atomic_json, VERSION
 from updater.broker.releases import ARTIFACT, UPDATER_ARTIFACT, MAX_ARCHIVE, MAX_EXPANDED
+from updater.release.presentation import validate as validate_presentation
 
 
 CONTROL_FILES = tuple('updater/broker/' + name + '.py' for name in
                       ('auth', 'server', 'releases', 'engine', 'observe', 'enroll', 'driver')) + (
     'updater/web/index.mjs', 'updater/web/server.mjs', 'updater/web/broker-client.mjs',
+    'updater/web/presentation.mjs',
     'deploy/install-release.py', 'deploy/qualify-systemd.py', 'deploy/relay.service',
+    'deploy/qualify-presentation-bootstrap.py', 'docs/updater-ui-delivery-bootstrap.md',
+    'docs/updater-ui-delivery.md',
     'deploy/verify-standalone.mjs', 'deploy/README.md', 'LICENSE',
     'updater/web/relay-updater-web.service',
     'updater/deploy/relay-updater-broker.service', 'updater/deploy/README.md',
@@ -38,7 +43,11 @@ def control_bundle(source, output, package):
                 raise Denied('Control bundle contains link')
         for name in sorted(files):
             path = Path(directory) / name
-            if path.suffix not in ('.html', '.js', '.css') and path.relative_to(dist).as_posix() != 'licenses/three.txt':
+            relative = path.relative_to(dist).as_posix()
+            notices = {'licenses/three.txt', 'licenses/silkscreen-OFL.txt',
+                       'licenses/sharetechmono-OFL.txt', 'licenses/updater-font-sources.json'}
+            updater_font = re.fullmatch(r'assets/(silkscreen-bold|share-tech-mono)-[A-Za-z0-9_-]+\.woff2', relative)
+            if path.suffix not in ('.html', '.js', '.css') and relative not in notices and not updater_font:
                 raise Denied('Unexpected updater UI asset')
             selected.append((path.relative_to(source).as_posix(), path))
     size = 0
@@ -107,6 +116,16 @@ def build(source, browsers, output, version, allow_nonlinux=False):
                     relative = prefix + '/' + path.relative_to(base).as_posix()
                     selected.append((relative, path))
     selected.extend((name, source / name) for name in ('version.js', 'updater/web/broker-client.mjs', 'tools/icon-normalize.py', 'LICENSE'))
+    # Browser-only files fit the old signed runtime extraction/preflight contract.
+    # No descriptor key, opcode, privileged path or executable is added to manifests.
+    presentation = source / 'updater/ui/presentation-dist'
+    try:
+        descriptor = validate_presentation(presentation, version)
+    except (OSError, ValueError) as error:
+        raise Denied('Missing or invalid runtime updater presentation') from error
+    selected.extend(('updater-presentation/' + entry['path'], presentation / entry['path'])
+                    for entry in descriptor['files'])
+    selected.append(('updater-presentation/presentation.json', presentation / 'presentation.json'))
     size = 0
     seen = set()
     with tarfile.open(output / ARTIFACT, 'w:gz', compresslevel=6) as archive:

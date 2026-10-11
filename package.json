@@ -1,6 +1,6 @@
 {
   "name": "we-relay",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,8 +8,8 @@
     "setup": "node tools/setup.mjs",
     "setup:standalone": "node tools/setup-standalone.mjs",
     "build": "vite build",
-    "setup:updater": "npm --prefix updater/ui ci --ignore-scripts && npm --prefix updater/ui run build",
-    "build:updater": "npm --prefix updater/ui run build",
+    "setup:updater": "npm --prefix updater/ui ci --ignore-scripts && npm run build:updater",
+    "build:updater": "npm --prefix updater/ui run build && node updater/release/build-presentation.mjs",
     "test:updater": "python3 -m unittest discover -s updater/tests -v && npm --prefix updater/ui run test:unit && npm --prefix updater/ui test",
     "start:updater-web": "node updater/web/index.mjs",
     "start:updater-broker": "python3 -m updater.broker.server",

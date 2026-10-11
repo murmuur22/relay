@@ -50,6 +50,141 @@ class UpgradeQualificationTests(unittest.TestCase):
         exchange = [c for c in calls if c[1] == '/updater/api/exchange']
         self.assertEqual([c[4] for c in exchange], ['relay_session=owner', 'relay_session=owner'])
 
+    def test_post_rollback_retention_reads_only_http_after_candidate_is_absent(self):
+        q = qualifier()
+        self.assertTrue(hasattr(q, 'retained_presentation'), 'Missing post-deletion lazy asset probe')
+        pin = {'index.html': b'new index', 'assets/lazy-HASH.js': b'lazy', 'assets/font-HASH.woff2': b'font'}
+        def raw(port, path):
+            if path == '/updater/':
+                return 200, b'old fallback', {'x-relay-updater-presentation': 'builtin'}
+            name = path.removeprefix('/updater/presentation/v0.6.5/')
+            return 200, pin[name], {}
+        with patch.object(q.base, 'raw_http', side_effect=raw) as request:
+            q.retained_presentation('v0.6.5', pin, b'old fallback')
+            self.assertEqual(request.call_count, 3)
+        def bad_lazy(port, path):
+            if path == '/updater/':
+                return raw(port, path)
+            return 200, b'bad lazy bytes', {}
+        with patch.object(q.base, 'raw_http', side_effect=bad_lazy):
+            with self.assertRaises(q.install.InstallError):
+                q.retained_presentation('v0.6.5', pin, b'old fallback')
+        with patch.object(q.base, 'raw_http', return_value=(200, b'bad', {'x-relay-updater-presentation': 'builtin'})):
+            with self.assertRaises(q.install.InstallError):
+                q.retained_presentation('v0.6.5', pin, b'old fallback')
+
+    def test_delivery_cycle_is_separate_and_uses_guarded_second_worker_not_old_path(self):
+        q = qualifier()
+        self.assertTrue(hasattr(q, 'delivery_release'), 'Missing separate UI-delivery qualification cycle')
+        self.assertTrue(q.delivery_release('v0.6.4', 'v0.6.5'))
+        self.assertTrue(q.delivery_release('v0.6.3', 'v0.6.5'))
+        self.assertFalse(q.delivery_release('v0.6.3', 'v0.6.4'))
+        self.assertFalse(q.delivery_release('v0.6.2', 'v0.6.3'))
+        self.assertNotIn('--delivery-worker', q.worker_command('v0.6.3', 'v0.6.4', None))
+        self.assertIn('--delivery-worker', q.worker_command('v0.6.4', 'v0.6.5', None, delivery=True))
+        with patch.dict(q.os.environ, {}, clear=True), patch.object(q, 'load_installed') as load:
+            with self.assertRaises(q.install.InstallError):
+                q.installed_worker(True, 'v0.6.4', 'v0.6.5', None, delivery=True)
+            load.assert_not_called()
+        source = (ROOT / 'deploy/qualify-upgrade.py').read_text()
+        self.assertIn('qualify_bootstrap(args.apply', source)
+        self.assertIn('retained_presentation(target, pin,', source)
+        self.assertIn('base.service_identity(\'relay-updater-web.service\') == web_identity', source)
+
+    def test_signed_upgrade_auth_and_poll_keep_original_owner_cookie(self):
+        q = qualifier()
+        with patch.object(q.base, 'http', side_effect=[
+            (200, {'authenticated': True, 'csrf': 'csrf'}, ''),
+            (200, {'job': {'id': 'id'}}, '')
+        ]) as http:
+            q.mutate('install', 'relay_session=owner', 'relay_updater_session=monitor', 'secret', version='v0.6.5')
+            self.assertEqual(http.call_args_list[0].kwargs['cookie'], 'relay_session=owner; relay_updater_session=monitor')
+        with patch.object(q.base, 'http', return_value=(200, {'job': {'id': 'id', 'phase': 'succeeded', 'outcome': 'succeeded'}}, '')) as http:
+            q.wait_job('relay_updater_session=monitor', 'id', 'succeeded', cookie='relay_session=owner')
+            self.assertEqual(http.call_args.kwargs['cookie'], 'relay_session=owner; relay_updater_session=monitor')
+
+    def test_process_identity_requires_live_pid_and_start_and_fresh_probe_is_version_scoped(self):
+        q = qualifier()
+        self.assertTrue(hasattr(q.base, 'service_identity'), 'Missing actual unchanged web PID/start check')
+        with patch.object(q.base, 'run', return_value='MainPID=123\nExecMainStartTimestampMonotonic=456\nActiveState=active'):
+            self.assertEqual(q.base.service_identity('relay-updater-web.service'), ('123', '456'))
+        for response in ('MainPID=0\nExecMainStartTimestampMonotonic=456\nActiveState=inactive',
+                         'MainPID=123\nExecMainStartTimestampMonotonic=0\nActiveState=active'):
+            with patch.object(q.base, 'run', return_value=response), self.assertRaises(q.install.InstallError):
+                q.base.service_identity('relay-updater-web.service')
+        self.assertFalse(q.base.presentation_required('v0.6.4'))
+        self.assertTrue(q.base.presentation_required('v0.6.5'))
+        self.assertTrue(q.base.presentation_required('v0.7.0'))
+        with self.assertRaises(q.install.InstallError):
+            q.base.presentation_required('v0.6.5\n')
+        # The dispatch path must exercise this probe, not just ship a helper.
+        self.assertIn('presentation_probe(args.version)', (ROOT / 'deploy/qualify-systemd.py').read_text())
+
+    def test_runtime_presentation_probe_reads_real_http_index_and_every_descriptor_byte(self):
+        import hashlib
+        import json
+        import tempfile
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        q = qualifier()
+        self.assertTrue(hasattr(q.base, 'presentation_probe'), 'Missing actual runtime-presentation HTTP qualification')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'assets').mkdir()
+            blobs = {'index.html': b'<script src="/updater/presentation/v0.6.5/assets/index-HASH.js"></script>',
+                     'assets/index-HASH.js': b'console.log("synthetic")', 'assets/lazy-HASH.js': b'lazy bytes'}
+            files = []
+            for name, raw in blobs.items():
+                (root / name).write_bytes(raw)
+                files.append(dict(path=name, size=len(raw), sha256=hashlib.sha256(raw).hexdigest()))
+            descriptor = dict(schema=1, webApi=1, version='v0.6.5', files=files)
+            (root / 'presentation.json').write_text(json.dumps(descriptor))
+            requests = []
+            broken = {'marker': False, 'bytes': False}
+            class Handler(BaseHTTPRequestHandler):
+                def log_message(self, *args):
+                    pass
+                def do_GET(self):
+                    requests.append(self.path)
+                    name = 'index.html' if self.path == '/updater/' else self.path.removeprefix('/updater/presentation/v0.6.5/')
+                    self.send_response(200)
+                    self.send_header('X-Relay-Updater-Presentation', 'builtin' if broken['marker'] else 'v0.6.5')
+                    self.end_headers()
+                    self.wfile.write(b'corrupt' if broken['bytes'] and name.startswith('assets/') else blobs[name])
+            server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                pin = q.base.presentation_probe('v0.6.5', root, port=server.server_port)
+                self.assertEqual(pin, blobs)
+                self.assertIn('/updater/presentation/v0.6.5/assets/lazy-HASH.js', requests)
+                requests.clear()
+                self.assertEqual(q.base.presentation_probe('v0.6.5', root, port=server.server_port, defer_lazy=True), blobs)
+                self.assertNotIn('/updater/presentation/v0.6.5/assets/lazy-HASH.js', requests)
+                self.assertIn('/updater/presentation/v0.6.5/assets/index-HASH.js', requests)
+                for key in broken:
+                    broken[key] = True
+                    with self.subTest(key=key), self.assertRaises(q.install.InstallError):
+                        q.base.presentation_probe('v0.6.5', root, port=server.server_port)
+                    broken[key] = False
+                descriptor['webApi'] = 2
+                (root / 'presentation.json').write_text(json.dumps(descriptor))
+                with self.assertRaises(q.install.InstallError):
+                    q.base.presentation_probe('v0.6.5', root, port=server.server_port)
+            finally:
+                server.shutdown()
+                thread.join(5)
+                server.server_close()
+
+    def test_v064_baseline_admits_ui_delivery_without_changing_v063_gateway_path(self):
+        q = qualifier()
+        q.validate_versions('v0.6.4', 'v0.6.5')
+        self.assertEqual(q.baseline_gateway_mode('v0.6.4'), 'remote')
+        self.assertEqual(q.baseline_gateway_mode('v0.6.3'), 'remote')
+        for target in ('v0.6.4', 'v0.6.3', 'v0.6.5-rc1', 'v0.6.5\n'):
+            with self.subTest(target=target), self.assertRaises(q.install.InstallError):
+                q.validate_versions('v0.6.4', target)
+
     def test_v063_baseline_preserves_enabled_mtls_and_requires_newer_exact_target(self):
         q = qualifier()
         q.validate_versions('v0.6.3', 'v0.6.4')
@@ -57,7 +192,7 @@ class UpgradeQualificationTests(unittest.TestCase):
         self.assertEqual(q.baseline_gateway_mode('v0.6.2'), 'reverse')
         self.assertEqual(q.baseline_gateway_mode('v0.6.1'), 'direct')
         self.assertIsNone(q.baseline_gateway_mode('v0.4.2'))
-        for old, target in [('v0.6.3', 'v0.6.3'), ('v0.6.3', 'v0.6.2'), ('v0.6.3', 'v0.6.4-rc1'), ('v0.6.3\n', 'v0.6.4'), ('v0.6.4', 'v0.6.5')]:
+        for old, target in [('v0.6.3', 'v0.6.3'), ('v0.6.3', 'v0.6.2'), ('v0.6.3', 'v0.6.4-rc1'), ('v0.6.3\n', 'v0.6.4'), ('v0.6.5', 'v0.6.6')]:
             with self.subTest(old=old, target=target), self.assertRaises(q.install.InstallError):
                 q.validate_versions(old, target)
         workflow = (ROOT / '.github/workflows/release.yml').read_text()

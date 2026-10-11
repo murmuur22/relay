@@ -5,6 +5,7 @@ import {readFile,realpath,stat} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {isAbsolute,resolve,extname,sep} from 'node:path';
 import {brokerRequest,loopbackOrigin,networkHost,capability,actionFields} from './broker-client.mjs';
+import {createPresentationReader} from './presentation.mjs';
 const fail=(status,message)=>Object.assign(new Error(message),{status});
 const random=()=>randomBytes(32).toString('hex');
 const digest=value=>createHash('sha256').update(value).digest('hex');
@@ -23,10 +24,11 @@ function relayRequest(origin,path,cookieValue,method='GET',data,csrf){
   req.on('error',()=>finish(fail(503,'Relay unavailable. Sign in to Relay again.')));req.end(text);
  });
 }
-export async function createUpdaterWeb({uiOrigin,relayOrigin,socketPath,networkMode='loopback',bind='127.0.0.1',staticDir=fileURLToPath(new URL('../ui/dist/',import.meta.url))}={}){
+export async function createUpdaterWeb({uiOrigin,relayOrigin,socketPath,networkMode='loopback',bind='127.0.0.1',staticDir=fileURLToPath(new URL('../ui/dist/',import.meta.url)),presentationFixture}={}){
  const ui=loopbackOrigin(uiOrigin,networkMode),relay=loopbackOrigin(relayOrigin,networkMode);
  if(bind!==networkHost(ui.hostname,networkMode)||ui.hostname!==relay.hostname||ui.origin===relay.origin||typeof socketPath!=='string'||!isAbsolute(socketPath)||!isAbsolute(staticDir))throw Error('Invalid updater web configuration');
  if(networkMode==='private-lan'&&!Object.values(networkInterfaces()).flat().some(n=>n.family==='IPv4'&&!n.internal&&n.address===bind))throw Error('Private LAN IPv4 must be assigned to this host');
+ const presentation=createPresentationReader({presentationFixture});
  const sessions=new Map(),rates=new Map();let active=0;
  const prune=()=>{for(const [id,s] of sessions)if(s.expires<=Date.now())sessions.delete(id);};
  const rate=key=>{let r=rates.get(key);if(!r||r.until<Date.now()){r={count:0,until:Date.now()+60000};rates.set(key,r);}if(++r.count>(key==='read'?1800:key==='exchange'?20:60))throw fail(429,'Updater request rate limited');};
@@ -39,7 +41,12 @@ export async function createUpdaterWeb({uiOrigin,relayOrigin,socketPath,networkM
   try{
    if(req.headers.host!==ui.host||(req.headers.origin&&req.headers.origin!==uiOrigin))throw fail(403,'Invalid Host or Origin');
    if(req.url.length>2048||!req.url.startsWith('/updater/'))throw fail(404,'Not found');const url=new URL(req.url,uiOrigin);if(url.search)throw fail(400,'Query parameters are not supported');
-   const path=url.pathname;prune();const id=cookie(req,'relay_updater_session'),s=id?sessions.get(digest(id)):null;
+   const path=url.pathname;
+   // Check raw, decoded and normalized presentation namespaces for traversal
+   // into or out of canonical literal URLs; public keys are never disk paths.
+   let decoded;try{decoded=decodeURIComponent(req.url);}catch{throw fail(400,'Invalid path');}
+   if((req.url.startsWith('/updater/presentation')||decoded.startsWith('/updater/presentation')||path.startsWith('/updater/presentation'))&&(req.url!==path||req.url.includes('%')||req.url.includes('\\')||req.url.split('/').some(s=>s==='.'||s==='..')))throw fail(404,'Not found');
+   prune();const id=cookie(req,'relay_updater_session'),s=id?sessions.get(digest(id)):null;
    if(path.startsWith('/updater/api/')){
     if(!['GET','POST'].includes(req.method))throw fail(405,'Method not allowed');
     const mutation=req.method==='POST';rate(mutation?(path.endsWith('/exchange')?'exchange':'write'):'read');
@@ -89,11 +96,15 @@ export async function createUpdaterWeb({uiOrigin,relayOrigin,socketPath,networkM
    }
    if(!['GET','HEAD'].includes(req.method))throw fail(405,'Method not allowed');
    let rel;try{rel=decodeURIComponent(path.slice('/updater/'.length));}catch{throw fail(400,'Invalid path');}if(!rel)rel='index.html';if(rel.includes('\\')||rel.includes('\0')||rel.split('/').some(s=>s==='..'||s.startsWith('.')))throw fail(404,'Not found');
-   const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2','.ico':'image/x-icon'};const type=types[extname(rel)];if(!type)throw fail(404,'Not found');
-   let bytes;try{const base=await realpath(staticDir),file=await realpath(resolve(base,rel));if(!file.startsWith(base+sep))throw Error();const info=await stat(file);if(!info.isFile()||info.size>8*1024*1024)throw Error();bytes=await readFile(file);}catch{throw fail(404,'Updater UI not built or asset unavailable');}
+   const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2','.ico':'image/x-icon'};const type=types[extname(rel)]||(path.startsWith('/updater/presentation/')?{'.txt':'text/plain; charset=utf-8','.json':'application/json'}[extname(rel)]:null);if(!type)throw fail(404,'Not found');
+   let bytes;
+   if(path.startsWith('/updater/presentation/')){bytes=presentation.asset(path);if(!bytes)throw fail(404,'Not found');}
+   else if(path==='/updater/'||path==='/updater/index.html')bytes=await presentation.index();
+   if(!bytes)try{const base=await realpath(staticDir),file=await realpath(resolve(base,rel));if(!file.startsWith(base+sep))throw Error();const info=await stat(file);if(!info.isFile()||info.size>8*1024*1024)throw Error();bytes=await readFile(file);}catch{throw fail(404,'Updater UI not built or asset unavailable');}
    // Only the independently served app document is embeddable, and only by
    // the exact configured management origin. API Host/Origin policy is unchanged.
    if(type.startsWith('text/html')){
+    res.setHeader('X-Relay-Updater-Presentation',presentation.versionForIndex(bytes));
     res.removeHeader('X-Frame-Options');
     res.setHeader('Content-Security-Policy',`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors ${relay.origin}; base-uri 'none'; form-action 'none'`);
    }

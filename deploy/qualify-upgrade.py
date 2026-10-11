@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Signed v0.4.2 -> explicit candidate -> signed rollback, DISPOSABLE HOSTS ONLY.
+"""Signed old baseline -> explicit candidate -> matching rollback, DISPOSABLE ONLY.
 
 The checkout harness is not the control plane. It uses the unchanged installed
 Engine/Broker, production verification and real HTTP consent. Never run on prod.
@@ -27,16 +27,16 @@ UPGRADE_ENV = {**base.DISPOSABLE_ENV,
                'RELAY_DISPOSABLE_SIGNED_UPGRADE': 'I_ACCEPT_FRESH_HOST_SIGNED_UPGRADE_AND_ROLLBACK'}
 
 
-BASELINES = ('v0.4.2', 'v0.6.1', 'v0.6.2', 'v0.6.3')
+BASELINES = ('v0.4.2', 'v0.6.1', 'v0.6.2', 'v0.6.3', 'v0.6.4')
 
 
 def baseline_gateway_mode(old):
     base.require(old in BASELINES, 'Unqualified baseline refused')
-    return {'v0.4.2': None, 'v0.6.1': 'direct', 'v0.6.2': 'reverse', 'v0.6.3': 'remote'}[old]
+    return {'v0.4.2': None, 'v0.6.1': 'direct', 'v0.6.2': 'reverse', 'v0.6.3': 'remote', 'v0.6.4': 'remote'}[old]
 
 
 def validate_versions(old, target):
-    base.require(old in BASELINES, 'Only explicit v0.4.2, v0.6.1, v0.6.2 or v0.6.3 baselines are admitted')
+    base.require(old in BASELINES, 'Only explicit v0.4.2, v0.6.1, v0.6.2, v0.6.3 or v0.6.4 baselines are admitted')
     base.require(isinstance(target, str) and re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', target),
                  'Exact stable-form target tag required')
     base.require(tuple(map(int, target[1:].split('.'))) > tuple(map(int, old[1:].split('.'))), 'Target must be newer than baseline')
@@ -140,7 +140,7 @@ def select_target(engine, target):
 
 def mutate(action, cookie, monitor, password, **target):
     base.require(action in ('install', 'rollback'), 'Unsupported qualification action')
-    status, auth, _ = base.http(4191, '/updater/api/auth', cookie=monitor)
+    status, auth, _ = base.http(4191, '/updater/api/auth', cookie=cookie + '; ' + monitor)
     base.require(status == 200 and auth.get('authenticated') is True, 'Independent authentication lost')
     status, result, _ = base.http(4191, '/updater/api/' + action, 'POST',
                                   dict(confirmed=True, password=password, **target),
@@ -149,12 +149,12 @@ def mutate(action, cookie, monitor, password, **target):
     return result['job']['id']
 
 
-def wait_job(monitor, job_id, expected, timeout=420):
+def wait_job(monitor, job_id, expected, timeout=420, cookie=''):
     import time
     terminal = {'succeeded', 'failed', 'rolled-back', 'rollback-failed', 'cancelled', 'interrupted'}
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        status, result, _ = base.http(4191, '/updater/api/state', cookie=monitor)
+        status, result, _ = base.http(4191, '/updater/api/state', cookie=cookie + '; ' + monitor)
         base.require(status == 200, 'Independent monitoring failed during upgrade')
         job = result.get('job') or {}
         base.require(job.get('id') == job_id, 'Unexpected qualification job')
@@ -166,7 +166,30 @@ def wait_job(monitor, job_id, expected, timeout=420):
     raise install.InstallError('Signed qualification job timed out')
 
 
-def worker_command(old, target, private_lan):
+def delivery_release(old, target):
+    return old in ('v0.6.3', 'v0.6.4') and target == 'v0.6.5'
+
+
+def bootstrap_helper():
+    spec = importlib.util.spec_from_file_location('relay_bootstrap', Path(__file__).with_name('qualify-presentation-bootstrap.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.base.NETWORK = base.NETWORK
+    return module
+
+
+def retained_presentation(target, pin, fallback):
+    status, index, headers = base.raw_http(4191, '/updater/')
+    base.require(status == 200 and index == fallback and headers.get('x-relay-updater-presentation') == 'builtin',
+                 'Rollback did not select old built-in fallback')
+    for name, raw in pin.items():
+        if name == 'index.html':
+            continue
+        status, served, _ = base.raw_http(4191, '/updater/presentation/' + target + '/' + name)
+        base.require(status == 200 and served == raw, 'Pinned lazy asset lost after rollback/candidate deletion')
+
+
+def worker_command(old, target, private_lan, delivery=False):
     # Reuse the broker-equivalent hardening, but execute this separately owned
     # harness, NEVER replace a file in the signed old control-plane tree.
     command = base.restore_command(old)
@@ -177,6 +200,7 @@ def worker_command(old, target, private_lan):
     return [*command, *('--setenv=' + k + '=' + v for k, v in UPGRADE_ENV.items()),
             '/usr/bin/python3', str(HARNESS / 'qualify-upgrade.py'), '--installed-worker',
             '--upgrade-from', old, '--version', target, '--apply',
+            *(['--delivery-worker'] if delivery else []),
             *(['--private-lan', private_lan] if private_lan else [])]
 
 
@@ -223,7 +247,7 @@ def load_installed(old='v0.4.2'):
     return Engine, Broker
 
 
-def installed_worker(apply, old, target, private_lan):
+def installed_worker(apply, old, target, private_lan, delivery=False):
     import secrets
     import threading
     guard_environment(apply, old, target)
@@ -235,22 +259,41 @@ def installed_worker(apply, old, target, private_lan):
     fields = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines() if ':' in line)
     base.require(fields['NoNewPrivs'].strip() == '1', 'Worker requires hardened systemd execution')
     base.NETWORK = install.deployment_network(private_lan)
+    ui_release = delivery_release(old, target)
+    helper = bootstrap_helper() if ui_release else None
+    if delivery:
+        base.require(ui_release, 'Delivery worker is only for qualified UI-delivery release')
+        marker = HARNESS / 'delivery-marker.json'
+        helper.inventory(marker)
+        base.require(marker.stat().st_mode & 0o777 == 0o600, 'Missing protected bootstrap completion marker')
+        helper.admit_baseline(Path('/opt/relay-updater'), json.loads(marker.read_bytes()))
     protected = [Path('/opt/relay-updater'), Path('/etc/relay-updater'),
                  *(Path('/etc/systemd/system') / u for u in install.UNITS)]
-    before = {str(p): fingerprint(p) for p in protected}
+    control_fingerprint = helper.inventory if helper else fingerprint
+    before = {str(p): control_fingerprint(p) for p in protected}
+    web_identity = base.service_identity('relay-updater-web.service')
+    broker_identity = (os.getpid(), Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19])
     Engine, Broker = load_installed(old)
     engine = Engine(json.loads(Path('/etc/relay-updater/broker.json').read_text()))
     broker = thread = None
     try:
+        starting_job = engine.data['job']
         base.require(engine.mode == 'production' and engine.data['currentVersion'] == old and
-                     engine.data['job'] is None and not engine.maintenance.exists(), 'Fresh signed baseline required')
+                     (starting_job is None if not delivery else starting_job and starting_job.get('phase') == 'rolled-back') and
+                     not engine.maintenance.exists(), 'Fresh signed baseline/matching rollback required')
         manifest = select_target(engine, target)
         broker = Broker(engine)
         thread = threading.Thread(target=broker.serve_forever, kwargs={'poll_interval': 0.1}, daemon=True)
         thread.start()
         base.wait_control()
         base.ready(old, False)
-        password = secrets.token_urlsafe(40)
+        if ui_release:
+            secret = HARNESS / 'password'
+            helper.inventory(secret)
+            base.require(secret.stat().st_mode & 0o777 == 0o600, 'Unprotected synthetic qualification password')
+            password = secret.read_text()
+        else:
+            password = secrets.token_urlsafe(40)
         cookie, csrf = base.authenticate(password)
         base.isolation()
         status, _, _ = base.http(4180, '/api/onboarding/complete', 'POST', {}, cookie, csrf)
@@ -262,7 +305,7 @@ def installed_worker(apply, old, target, private_lan):
         tls_dir = Path('/var/lib/relay/qualification-tls')
         gateway_mode = baseline_gateway_mode(old)
         backend = tls_dir / 'backend'
-        if gateway_mode:
+        if gateway_mode and not delivery:
             import pwd
             tls_dir.mkdir(mode=0o700)
             identity = pwd.getpwnam('relay')
@@ -280,13 +323,14 @@ def installed_worker(apply, old, target, private_lan):
             apply_gateway(gateway_reference(backend if gateway_mode == 'remote' else tls_dir,
                                             reverse=(gateway_mode == 'reverse'), remote=(gateway_mode == 'remote')), cookie, csrf, password)
             probe_gateway(reverse=(gateway_mode == 'reverse'), remote=backend if gateway_mode == 'remote' else None)
+        if gateway_mode:
             state_paths += [Path('/var/lib/relay/gateway-managed.json'), tls_dir]
         state_before = {str(p): fingerprint(p) for p in state_paths}
         root_inode = Path('/var/lib/relay').stat().st_ino
         baseline_release = engine.current_release()
         monitor = base.launch_monitor(cookie, csrf)
         job = mutate('install', cookie, monitor, password, version=target)
-        result = wait_job(monitor, job, 'succeeded')
+        result = wait_job(monitor, job, 'succeeded', cookie=cookie)
         base.require(result['currentVersion'] == target, 'Target current version mismatch')
         engine.thread.join(30)
         base.require(not engine.thread.is_alive(), 'Install cleanup did not finish')
@@ -295,7 +339,21 @@ def installed_worker(apply, old, target, private_lan):
         base.require(receipt == dict(mode='production', version=target, sha256=manifest['artifact']['sha256']),
                      'Genuine engine receipt differs from verified target')
         base.require({str(p): fingerprint(p) for p in state_paths} == state_before, 'Upgrade changed baseline state')
-        base.require({str(p): fingerprint(p) for p in protected} == before, 'Upgrade changed independent control plane/config/units')
+        pin = None
+        candidate_release = engine.current_release()
+        if ui_release:
+            if delivery:
+                pin = base.presentation_probe(target, defer_lazy=True)
+            else:
+                status, index, headers = base.raw_http(4191, '/updater/')
+                base.require(status == 200 and index == Path('/opt/relay-updater/updater/ui/dist/index.html').read_bytes() and
+                             headers.get('x-relay-updater-presentation') != target, 'Old web unexpectedly changed with runtime')
+                if old == 'v0.6.3':
+                    base.require(headers.get('x-frame-options') == 'DENY' and "frame-ancestors 'none'" in
+                                 headers.get('content-security-policy', ''), 'Old v0.6.3 framing DENY was lost before bootstrap')
+        base.require(base.service_identity('relay-updater-web.service') == web_identity,
+                     'Runtime upgrade restarted updater web')
+        base.require({str(p): control_fingerprint(p) for p in protected} == before, 'Upgrade changed independent control plane/config/units')
         # Sessions must expire after the real restart. Reauthenticate normally.
         base.require(base.http(4180, '/api/session', cookie=cookie)[0] == 401, 'Old Relay session survived restart')
         cookie, csrf = base.authenticate(password)
@@ -317,7 +375,7 @@ def installed_worker(apply, old, target, private_lan):
         base.require(status == 200, 'Post-upgrade synthetic state mutation failed')
         base.require({str(p): fingerprint(p) for p in state_paths} != state_before, 'Rollback test lacks changed state')
         job = mutate('rollback', cookie, monitor, password)
-        result = wait_job(monitor, job, 'rolled-back')
+        result = wait_job(monitor, job, 'rolled-back', cookie=cookie)
         engine.thread.join(30)
         base.require(not engine.thread.is_alive() and result['currentVersion'] == old, 'Rollback incomplete')
         base.ready(old, False)
@@ -326,15 +384,33 @@ def installed_worker(apply, old, target, private_lan):
         base.require(Path('/var/lib/relay').stat().st_ino == root_inode, 'Mounted state root replaced')
         if gateway_mode:
             probe_gateway(reverse=(gateway_mode == 'reverse'), remote=backend if gateway_mode == 'remote' else None)
-        base.authenticate(password)
-        base.require({str(p): fingerprint(p) for p in protected} == before, 'Rollback changed independent control plane/config/units')
-        return dict(passed=True, upgradeFrom=old, target=target, controlPlane=old, gatewayEnabled=bool(gateway_mode), remoteMTLS=(gateway_mode in ('reverse', 'remote')),
+        final_cookie, final_csrf = base.authenticate(password)
+        base.require({str(p): control_fingerprint(p) for p in protected} == before, 'Rollback changed independent control plane/config/units')
+        base.require(base.service_identity('relay-updater-web.service') == web_identity and
+                     (os.getpid(), Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19]) == broker_identity and thread.is_alive(),
+                     'Upgrade/rollback restarted independent web or qualification broker')
+        if ui_release:
+            # The unchanged engine refuses a duplicate staged release. Its existing
+            # prune primitive removes ONLY obsolete releases after matching rollback.
+            base.require(engine.data['previous'] is None and engine.current_release() == baseline_release,
+                         'Candidate cleanup requires complete matching rollback')
+            engine.prune()
+            base.require(not candidate_release.exists(), 'Obsolete signed candidate was not removed')
+            if delivery:
+                retained_presentation(target, pin, Path('/opt/relay-updater/updater/ui/dist/index.html').read_bytes())
+        base.require(base.http(4180, '/api/logout', 'POST', {}, final_cookie, final_csrf)[0] == 200,
+                     'Synthetic final session cleanup failed')
+        return dict(passed=True, deliveryCycle=delivery, upgradeFrom=old, target=target, controlPlane=old, gatewayEnabled=bool(gateway_mode), remoteMTLS=(gateway_mode in ('reverse', 'remote')),
+                    webBootstrap=target if delivery else None, webIdentity=web_identity, brokerHarnessIdentity=broker_identity,
                     relayOrigin=base.NETWORK['relayOrigin'], updaterOrigin=base.NETWORK['uiOrigin'],
-                    evidence=['official-signed-baseline', 'old-installed-engine-and-web',
+                    evidence=['official-signed-baseline',
+                              'old-installed-engine-with-signed-web-only-bootstrap' if delivery else 'old-installed-engine-and-web',
                               'explicit-target-genuine-attestation-and-payload-verification',
                               'HTTP-password-consent-install-and-rollback', 'accounts-and-personal-desktop-preserved',
                               'matching-state-signed-rollback', 'control-plane-config-units-unchanged',
-                              'port-4180-readiness-and-session-revocation'],
+                              'port-4180-readiness-and-session-revocation', 'unchanged-web-and-broker-harness-PID-start',
+                              *(['runtime-index-descriptor-eager-assets-and-post-deletion-lazy-pin-retention'] if delivery else []),
+                              *(['v063-old-screen-framing-DENY-before-bootstrap'] if ui_release and not delivery and old == 'v0.6.3' else [])],
                     limits=['no-browser-click-or-rendering', 'no-production-access', 'no-power-loss-test',
                             'qualification-only-explicit-target-not-production-prerelease-discovery'])
     finally:
@@ -368,8 +444,21 @@ def qualify(args):
         with install.prepare(baseline) as (work, manifest):
             installed = True  # owns partial mutations only AFTER fresh-host checks
             install.apply_install(work, manifest, args.upgrade_from, args.private_lan)
-        HARNESS.mkdir(mode=0o700)
-        for name in ('qualify-upgrade.py', 'qualify-systemd.py', 'install-release.py'):
+            HARNESS.mkdir(mode=0o700)
+            if delivery_release(args.upgrade_from, args.version):
+                import shutil
+                helper = bootstrap_helper()
+                signed_control = HARNESS / 'signed-control'
+                shutil.copytree(work / 'control', signed_control, copy_function=helper.copy_preserving)
+                signed_control.chmod(0o755)
+                signed_inventory = helper.inventory(signed_control)
+                helper.admit_baseline(Path('/opt/relay-updater'), signed_inventory)
+                install.write_new(HARNESS / 'signed-baseline.json', json.dumps(signed_inventory))
+                install.write_new(HARNESS / 'password', __import__('secrets').token_urlsafe(40))
+        names = ['qualify-upgrade.py', 'qualify-systemd.py', 'install-release.py']
+        if delivery_release(args.upgrade_from, args.version):
+            names.append('qualify-presentation-bootstrap.py')
+        for name in names:
             install.write_new(HARNESS / name, Path(__file__).with_name(name).read_bytes())
         install.write_new(HARNESS / 'marker.json', json.dumps(dict(old=args.upgrade_from,
                           target=args.version, privateLan=args.private_lan)))
@@ -384,6 +473,22 @@ def qualify(args):
         result = json.loads(install.run(worker_command(args.upgrade_from, args.version, args.private_lan), timeout=960))
         base.require(result.get('passed') is True and result.get('target') == args.version and
                      result.get('upgradeFrom') == args.upgrade_from, 'Invalid qualification worker result')
+        if delivery_release(args.upgrade_from, args.version):
+            # The first cycle has ended with matching old code/state and unchanged
+            # whole control tree. Only this explicitly separate phase changes web.
+            install.run(['/usr/bin/systemctl', 'start', 'relay-updater-broker.service'])
+            base.wait_control()
+            bootstrap_result = bootstrap_helper().qualify_bootstrap(args.apply, args.upgrade_from, args.version, args.private_lan)
+            base.require(bootstrap_result.get('passed') is True, 'Web-only bootstrap did not qualify')
+            install.run(['/usr/bin/systemctl', 'stop', 'relay-updater-broker.service'])
+            delivery_result = json.loads(install.run(worker_command(args.upgrade_from, args.version, args.private_lan, delivery=True), timeout=960))
+            base.require(delivery_result.get('passed') is True and delivery_result.get('deliveryCycle') is True and
+                         delivery_result.get('upgradeFrom') == args.upgrade_from and delivery_result.get('target') == args.version,
+                         'Invalid presentation-delivery cycle result')
+            result = dict(passed=True, target=args.version, upgradeFrom=args.upgrade_from,
+                          networkMode=base.NETWORK['networkMode'], noBootstrap=result,
+                          webOnlyBootstrap=bootstrap_result, runtimePresentationDelivery=delivery_result,
+                          productionTouched=False)
     finally:
         if installed:
             if base.GATE.parent.is_dir():
@@ -398,15 +503,17 @@ def qualify(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--release-dir', help='Four official baseline v0.4.2 assets (not candidate assets)')
+    parser.add_argument('--release-dir', help='Four official assets for the exact --upgrade-from baseline (not candidate assets)')
     parser.add_argument('--upgrade-from', required=True)
     parser.add_argument('--version', required=True, help='Published exact candidate target tag')
     parser.add_argument('--private-lan', metavar='CANONICAL_IP')
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--installed-worker', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--delivery-worker', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    base.require(not args.delivery_worker or args.installed_worker, 'Internal delivery phase requires installed worker')
     if args.installed_worker:
-        print(json.dumps(installed_worker(args.apply, args.upgrade_from, args.version, args.private_lan)))
+        print(json.dumps(installed_worker(args.apply, args.upgrade_from, args.version, args.private_lan, args.delivery_worker)))
     else:
         if not args.release_dir:
             parser.error('--release-dir is required')

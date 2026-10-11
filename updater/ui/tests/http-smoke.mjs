@@ -60,8 +60,10 @@ test('compiled UI uses real HTTP cookies, CSRF and action bridge; read monitorin
     const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
     await context.addCookies([{ name: 'relay_session', value: 'f'.repeat(64), url: uiOrigin, httpOnly: true, sameSite: 'Strict' }]);
     const page = await context.newPage(); const errors = []; page.on('pageerror', error => errors.push(error.message));
+    const fonts=[];page.on('response',response=>{if(response.url().endsWith('.woff2'))fonts.push(response.status());});
     await page.goto(`${uiOrigin}/updater/#${ticket}`);
     await page.getByRole('button', { name: 'Review installation' }).click();
+    await page.evaluate(()=>document.fonts.ready);assert.deepEqual(fonts,[200,200]);assert.equal(await page.evaluate(()=>document.fonts.check('700 44px "Relay Pixel"')&&document.fonts.check('400 12px "Relay Mono"')),true);
     await page.getByLabel('Current Relay password').fill('synthetic-password');
     await page.getByLabel('I understand active Relay sessions will be interrupted.').check();
     await page.getByRole('button', { name: 'Authorize installation' }).click();

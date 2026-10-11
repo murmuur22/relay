@@ -66,6 +66,100 @@ def http(port, path, method='GET', data=None, cookie='', csrf=''):
         conn.close()
 
 
+def raw_http(port, path, method='GET', data=None, cookie='', csrf='', headers=None):
+    """Bounded real HTTP, retaining security/presentation headers; no redirects."""
+    conn = HTTPConnection(NETWORK['bind'], port, timeout=10)
+    values = {'Host': f"{NETWORK['hostname']}:{port}",
+              'Origin': f"http://{NETWORK['hostname']}:{port}",
+              'Content-Type': 'application/json', 'Cookie': cookie, 'X-CSRF-Token': csrf}
+    if headers:
+        values.update(headers)
+    try:
+        conn.request(method, path, body=json.dumps(data) if data is not None else None, headers=values)
+        response = conn.getresponse()
+        raw = response.read(4 * 1024 * 1024 + 1)
+        require(len(raw) <= 4 * 1024 * 1024, 'Oversized presentation HTTP response')
+        return response.status, raw, dict((k.lower(), v) for k, v in response.getheaders())
+    finally:
+        conn.close()
+
+
+def presentation_probe(version, root=Path('/opt/relay/current/updater-presentation'), port=4191, defer_lazy=False):
+    """Compare runtime descriptor AND each served byte; return complete private pin."""
+    import hashlib
+    import re
+    import stat
+    root = Path(root)
+    raw = (root / 'presentation.json').read_bytes()
+    require(len(raw) <= 16384, 'Presentation descriptor exceeds bound')
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, 'Duplicate presentation descriptor key')
+            result[key] = value
+        return result
+    descriptor = json.loads(raw, object_pairs_hook=unique)
+    require(set(descriptor) == {'schema', 'webApi', 'version', 'files'} and
+            type(descriptor['schema']) is int and descriptor['schema'] == 1 and
+            type(descriptor['webApi']) is int and descriptor['webApi'] == 1 and
+            descriptor['version'] == version and isinstance(descriptor['files'], list) and
+            0 < len(descriptor['files']) <= 64, 'Invalid runtime presentation descriptor')
+    pin = {}
+    total = 0
+    for entry in descriptor['files']:
+        require(isinstance(entry, dict) and set(entry) == {'path', 'size', 'sha256'}, 'Invalid presentation inventory')
+        name, size, digest = entry['path'], entry['size'], entry['sha256']
+        require(isinstance(name, str) and re.fullmatch(r'(?:index\.html|(?:assets|licenses)/[A-Za-z0-9_-]+\.[A-Za-z0-9]+)', name)
+                and name not in pin and type(size) is int and 0 <= size <= 4 * 1024 * 1024 and
+                isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest), 'Invalid presentation file')
+        total += size
+        require(total <= 4 * 1024 * 1024, 'Presentation exceeds release byte bound')
+        path = root / name
+        info = path.lstat()
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size == size,
+                'Unsafe presentation file')
+        require(not path.parent.is_symlink(), 'Presentation directory symlink')
+        content = path.read_bytes()
+        require(len(content) == size and hashlib.sha256(content).hexdigest() == digest, 'Presentation digest mismatch')
+        pin[name] = content
+    actual = {p.relative_to(root).as_posix() for p in root.rglob('*') if not p.is_dir()}
+    require(actual == set(pin) | {'presentation.json'} and 'index.html' in pin, 'Presentation path set mismatch')
+    status, index, headers = raw_http(port, '/updater/')
+    require(status == 200 and headers.get('x-relay-updater-presentation') == version and index == pin['index.html'],
+            'Runtime presentation index was not selected')
+    prefix = '/updater/presentation/' + version + '/'
+    references = re.findall(r'(?:src|href)=[\"\']([^\"\']+)[\"\']', pin['index.html'].decode('utf-8'))
+    require(references and all(ref.startswith(prefix) and ref[len(prefix):] in pin for ref in references),
+            'Presentation index does not pin exact-version assets')
+    eager = {ref[len(prefix):] for ref in references}
+    if defer_lazy:
+        require(any(name.endswith('.js') and name not in eager for name in pin), 'Qualification needs an unrequested lazy JavaScript asset')
+    for name, content in pin.items():
+        if name == 'index.html' or (defer_lazy and name not in eager):
+            continue
+        status, served, _ = raw_http(port, prefix + name)
+        require(status == 200 and served == content, 'Runtime presentation asset differs from descriptor')
+    return pin
+
+
+def service_identity(unit):
+    require(unit in install.UNITS, 'Unknown qualification service')
+    text = run(['/usr/bin/systemctl', 'show', unit, '--property=MainPID',
+                '--property=ExecMainStartTimestampMonotonic', '--property=ActiveState'])
+    fields = dict(line.split('=', 1) for line in text.splitlines() if '=' in line)
+    pid, started = fields.get('MainPID', ''), fields.get('ExecMainStartTimestampMonotonic', '')
+    require(pid.isdigit() and int(pid) > 0 and started.isdigit() and int(started) > 0 and
+            fields.get('ActiveState') == 'active', 'Qualification service is not live')
+    return pid, started
+
+
+def presentation_required(version):
+    import re
+    require(isinstance(version, str) and re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version),
+            'Exact presentation qualification tag required')
+    return tuple(map(int, version[1:].split('.'))) >= (0, 6, 5)
+
+
 def ready(version, maintenance):
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
@@ -272,6 +366,8 @@ def qualify(args):
         password = secrets.token_urlsafe(40)
         cookie, csrf = authenticate(password)
         isolation()
+        if presentation_required(args.version):
+            presentation_probe(args.version)
         monitor = launch_monitor(cookie, csrf)
         require(monitor_state(cookie, monitor)[0] == 200, 'Monitoring failed')
         gate()
@@ -292,7 +388,8 @@ def qualify(args):
                       evidence=['official-attested-initial-enrollment', 'systemd-distinct-uids-no-new-privileges',
                                 'key-state-DAC-denial', 'normal-admin-auth-and-HTTP-ticket-handoff',
                                 'monitoring-during-stop', 'persistent-maintenance-across-restarts',
-                                'unexpected-version-readiness-rejection', 'signed-baseline-code-and-state-restore'],
+                                'unexpected-version-readiness-rejection', 'signed-baseline-code-and-state-restore',
+                                *(['runtime-selected-presentation-index-descriptor-and-all-assets'] if presentation_required(args.version) else [])],
                       limits=['no-second-signed-release-update', 'no-browser-rendering-or-stream-test',
                               'no-host-reboot-or-power-loss', 'not-production-deployment'])
     finally:
