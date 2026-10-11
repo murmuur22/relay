@@ -1,0 +1,106 @@
+name: Disposable signed UI delivery diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed-sha:
+        description: 'Exact independently reviewed workflow AND harness commit; must equal dispatch SHA'
+        required: true
+        type: string
+      acknowledge:
+        description: 'Enter DIAGNOSTIC_FRESH_HOST_ONLY'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: ui-delivery-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  diagnostic:
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        network-mode: [loopback, private-lan]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: release
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: v0.6.5
+      UPGRADE_FROM: v0.6.3
+      REVIEWED_SHA: ${{ inputs['reviewed-sha'] }}
+      DISPATCH_SHA: ${{ github.sha }}
+      ACKNOWLEDGE: ${{ inputs.acknowledge }}
+      RUNNER_KIND: ${{ runner.environment }}
+    steps:
+      - name: Guard exact reviewed disposable diagnostic trigger before root operations
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" = workflow_dispatch ]] || exit 1
+          [[ "$GITHUB_REPOSITORY" = murmuur22/relay ]] || exit 1
+          [[ "$GITHUB_REF" = refs/heads/ci/v065-bounded-diagnostic-retry ]] || exit 1
+          [[ "$RUNNER_KIND" = github-hosted ]] || exit 1
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ && "$REVIEWED_SHA" = "$DISPATCH_SHA" ]] || exit 1
+          [[ "$ACKNOWLEDGE" = DIAGNOSTIC_FRESH_HOST_ONLY ]] || exit 1
+      - name: Checkout immutable signed candidate source (not installed control)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 3a13737d619cd832a29c25db3c2108a7b2c65998
+          persist-credentials: false
+          path: source
+      - name: Checkout separately reviewed diagnostic harness
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs['reviewed-sha'] }}
+          persist-credentials: false
+          path: reviewed-overlay
+      - name: Admit exact source and overlay only qualifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C source rev-parse HEAD)" = 3a13737d619cd832a29c25db3c2108a7b2c65998 ]]
+          [[ "$(git -C reviewed-overlay rev-parse HEAD)" = "$REVIEWED_SHA" ]]
+          printf '%s  %s\n' e774fb61082c430c6103d1fb58529cee36790d0e5ebd1ae097a00f3bb108b59c reviewed-overlay/deploy/qualify-upgrade.py | sha256sum --check -
+          cp -- reviewed-overlay/deploy/qualify-upgrade.py source/deploy/qualify-upgrade.py
+          [[ "$(git -C source diff --name-only)" = deploy/qualify-upgrade.py ]]
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26.8.1'
+      - name: Prepare fresh disposable runner prerequisites (never production)
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python3 -m updater.release.validate_tag "$RELEASE_TAG"
+          npm ci --ignore-scripts
+          node node_modules/playwright/cli.js install-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+          sudo install -m 0755 "$(command -v node)" /usr/bin/node
+          sudo chmod 0755 /opt
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Download same genuine old signed public artifacts anonymously
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RUNNER_TEMP/old-public-release"
+          for asset in relay-release.json relay-release.attestation.json relay-linux-x64.tar.gz relay-updater-linux-x64.tar.gz; do
+            env -i PATH="$PATH" curl -q --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --max-filesize 1073741824 --output "$RUNNER_TEMP/old-public-release/$asset" "https://github.com/murmuur22/relay/releases/download/$UPGRADE_FROM/$asset"
+          done
+      - name: ORIGINAL wait_job behavior against signed v063 to immutable v065
+        working-directory: source
+        env:
+          NETWORK_MODE: ${{ matrix.network-mode }}
+        run: |
+          set -euo pipefail
+          network_args=()
+          if [ "$NETWORK_MODE" = private-lan ]; then
+            PRIVATE_IP="$(node --input-type=module -e "import {networkInterfaces} from 'node:os'; import {privateIPv4} from './updater/web/broker-client.mjs'; const ip=Object.values(networkInterfaces()).flat().find(n=>n.family==='IPv4'&&!n.internal&&privateIPv4(n.address))?.address; if(!ip)process.exit(1); console.log(ip)")"
+            network_args=(--private-lan "$PRIVATE_IP")
+          fi
+          sudo env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME=/nonexistent GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted RELAY_DISPOSABLE_SYSTEMD=I_ACCEPT_DISPOSABLE_HOST_MUTATION RELAY_DISPOSABLE_SIGNED_UPGRADE=I_ACCEPT_FRESH_HOST_SIGNED_UPGRADE_AND_ROLLBACK /usr/bin/python3 deploy/qualify-upgrade.py --release-dir "$RUNNER_TEMP/old-public-release" --upgrade-from "$UPGRADE_FROM" --version "$RELEASE_TAG" --apply "${network_args[@]}"
+      - name: Fixed sanitized journal labels only (no service bodies or private state)
+        if: always()
+        run: sudo journalctl -t relay-qualification-diagnostic --no-pager -o cat -n 20
+      # No publisher, promotion, SSH, secret changes, installed harness overlay or alternate root.

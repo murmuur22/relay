@@ -28,6 +28,46 @@ UPGRADE_ENV = {**base.DISPOSABLE_ENV,
 
 
 BASELINES = ('v0.4.2', 'v0.6.1', 'v0.6.2', 'v0.6.3', 'v0.6.4')
+DIAGNOSTIC_CONTEXT = None
+
+
+def diagnostic_monitor_failure(old, target, delivery):
+    """Fixed public journal label; no exception string or private request data."""
+    import subprocess
+    base.require(old in ('v0.6.3', 'v0.6.4') and target == 'v0.6.5' and type(delivery) is bool,
+                 'Invalid diagnostic enums')
+    message = ('stage=delivery.wait_job.monitor-state status=401 exception=InstallError '
+               'reason=independent-monitoring-failed old=' + old + ' target=' + target +
+               ' delivery=' + str(delivery).lower() + ' file=qualify-upgrade.py function=wait_job')
+    try:
+        subprocess.run(['/usr/bin/logger', '--socket-errors=on', '-t',
+                        'relay-qualification-diagnostic', '--', message],
+                       check=False, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        pass  # Never replace the original qualification failure.
+
+
+
+def diagnostic_exception(error):
+    """Only fixed type/file/function enums and an integer source line."""
+    import subprocess
+    kind = 'InstallError' if isinstance(error, install.InstallError) else 'Exception'
+    function, line = 'unknown', 0
+    trace = error.__traceback__
+    while trace is not None:
+        code = trace.tb_frame.f_code
+        if (Path(code.co_filename).resolve() == Path(__file__).resolve() and
+                code.co_name in ('main', 'qualify', 'installed_worker', 'wait_job', 'guard', 'guard_environment')):
+            function, line = code.co_name, trace.tb_lineno
+        trace = trace.tb_next
+    message = ('stage=qualification.exception exception=' + kind +
+               ' file=qualify-upgrade.py function=' + function + ' line=' + str(line))
+    try:
+        subprocess.run(['/usr/bin/logger', '--socket-errors=on', '-t',
+                        'relay-qualification-diagnostic', '--', message],
+                       check=False, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def baseline_gateway_mode(old):
@@ -114,6 +154,7 @@ def probe_gateway(reverse=False, remote=None):
 
 
 def guard_environment(apply, old, target):
+    base.require(old in ('v0.6.3', 'v0.6.4') and target == 'v0.6.5', 'Bounded diagnostic target only')
     validate_versions(old, target)
     base.require(all(os.environ.get(k) == v for k, v in UPGRADE_ENV.items()),
                  'Explicit disposable signed-upgrade acknowledgment required')
@@ -155,6 +196,8 @@ def wait_job(monitor, job_id, expected, timeout=420, cookie=''):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         status, result, _ = base.http(4191, '/updater/api/state', cookie=cookie + '; ' + monitor)
+        if status == 401 and DIAGNOSTIC_CONTEXT is not None and DIAGNOSTIC_CONTEXT[2]:
+            diagnostic_monitor_failure(*DIAGNOSTIC_CONTEXT)
         base.require(status == 200, 'Independent monitoring failed during upgrade')
         job = result.get('job') or {}
         base.require(job.get('id') == job_id, 'Unexpected qualification job')
@@ -422,6 +465,7 @@ def installed_worker(apply, old, target, private_lan, delivery=False):
 
 
 def guard(apply, old, target, private_lan):
+    base.require(old in ('v0.6.3', 'v0.6.4') and target == 'v0.6.5', 'Bounded diagnostic target only')
     validate_versions(old, target)
     base.require(all(os.environ.get(k) == v for k, v in UPGRADE_ENV.items()),
                  'Explicit disposable signed-upgrade acknowledgment required')
@@ -502,6 +546,7 @@ def qualify(args):
 
 
 def main(argv=None):
+    global DIAGNOSTIC_CONTEXT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release-dir', help='Four official assets for the exact --upgrade-from baseline (not candidate assets)')
     parser.add_argument('--upgrade-from', required=True)
@@ -511,6 +556,8 @@ def main(argv=None):
     parser.add_argument('--installed-worker', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--delivery-worker', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    base.require(args.upgrade_from in ('v0.6.3', 'v0.6.4') and args.version == 'v0.6.5', 'Bounded diagnostic target only')
+    DIAGNOSTIC_CONTEXT = (args.upgrade_from, args.version, args.delivery_worker)
     base.require(not args.delivery_worker or args.installed_worker, 'Internal delivery phase requires installed worker')
     if args.installed_worker:
         print(json.dumps(installed_worker(args.apply, args.upgrade_from, args.version, args.private_lan, args.delivery_worker)))
@@ -523,7 +570,8 @@ def main(argv=None):
 if __name__ == '__main__':
     try:
         main()
-    except Exception:
+    except Exception as error:
+        diagnostic_exception(error)
         # Do not expose passwords, sessions, private state, or subprocess output.
         print('Signed upgrade qualification refused/failed. No success claimed; retain gated disposable runner diagnostics.', file=sys.stderr)
         sys.exit(1)
