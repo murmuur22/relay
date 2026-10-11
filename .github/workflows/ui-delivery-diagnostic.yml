@@ -33,9 +33,10 @@ jobs:
       REVIEWED_SHA: ${{ inputs['reviewed-sha'] }}
       DISPATCH_SHA: ${{ github.sha }}
       ACKNOWLEDGE: ${{ inputs.acknowledge }}
-      RUNNER_KIND: ${{ runner.environment }}
     steps:
       - name: Guard exact reviewed disposable diagnostic trigger before root operations
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
         shell: bash
         run: |
           set -euo pipefail
