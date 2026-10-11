@@ -1,0 +1,109 @@
+name: Disposable signed legacy and modern UI compatibility gates
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed-sha:
+        description: 'Exact independently reviewed workflow and qualifier commit; must equal dispatch SHA'
+        required: true
+        type: string
+      acknowledge:
+        description: 'Enter SEPARATE_LEGACY_MODERN_FRESH_HOST_GATES'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: ui-compatibility-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  qualify:
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        network-mode: [loopback, private-lan]
+        baseline: [v0.6.3, v0.6.4]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: release
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: v0.6.5
+      UPGRADE_FROM: ${{ matrix.baseline }}
+      REVIEWED_SHA: ${{ inputs['reviewed-sha'] }}
+      DISPATCH_SHA: ${{ github.sha }}
+      ACKNOWLEDGE: ${{ inputs.acknowledge }}
+    steps:
+      - name: Guard independently reviewed separate signed gates before root operations
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" = workflow_dispatch ]] || exit 1
+          [[ "$GITHUB_REPOSITORY" = murmuur22/relay ]] || exit 1
+          [[ "$GITHUB_REF" = refs/heads/ci/v065-compatibility-qualification ]] || exit 1
+          [[ "$RUNNER_KIND" = github-hosted ]] || exit 1
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ && "$REVIEWED_SHA" = "$DISPATCH_SHA" ]] || exit 1
+          [[ "$ACKNOWLEDGE" = SEPARATE_LEGACY_MODERN_FRESH_HOST_GATES ]] || exit 1
+          [[ "$UPGRADE_FROM" = v0.6.3 || "$UPGRADE_FROM" = v0.6.4 ]] || exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 3a13737d619cd832a29c25db3c2108a7b2c65998
+          persist-credentials: false
+          path: source
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs['reviewed-sha'] }}
+          persist-credentials: false
+          path: reviewed-overlay
+      - name: Overlay only exact reviewed qualifier into immutable source checkout
+        run: |
+          set -euo pipefail
+          [[ "$(git -C source rev-parse HEAD)" = 3a13737d619cd832a29c25db3c2108a7b2c65998 ]] || exit 1
+          [[ "$(git -C reviewed-overlay rev-parse HEAD)" = "$REVIEWED_SHA" ]] || exit 1
+          printf '%s  %s\n' 81496ec677875d087e8bb7ed7c1e49248db899e6f04d6aeef4279237f6d8b340 reviewed-overlay/deploy/qualify-upgrade.py | sha256sum --check -
+          cp -- reviewed-overlay/deploy/qualify-upgrade.py source/deploy/qualify-upgrade.py
+          [[ "$(git -C source diff --name-only)" = deploy/qualify-upgrade.py ]] || exit 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26.8.1'
+      - name: Retain all original harness regressions and disposable prerequisites
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python3 -m updater.release.validate_tag "$RELEASE_TAG"
+          python3 -m unittest updater.tests.test_deployment updater.tests.test_private_lan updater.tests.test_upgrade_qualification updater.tests.test_presentation_bootstrap -v
+          npm ci --ignore-scripts
+          node node_modules/playwright/cli.js install-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+          sudo install -m 0755 "$(command -v node)" /usr/bin/node
+          sudo chmod 0755 /opt
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Download genuinely signed public baseline anonymously
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RUNNER_TEMP/old-public-release"
+          for asset in relay-release.json relay-release.attestation.json relay-linux-x64.tar.gz relay-updater-linux-x64.tar.gz; do
+            env -i PATH="$PATH" curl -q --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --max-filesize 1073741824 --output "$RUNNER_TEMP/old-public-release/$asset" "https://github.com/murmuur22/relay/releases/download/$UPGRADE_FROM/$asset"
+          done
+      - name: Legacy v063 runtime-only cycle OR modern v064 complete bootstrap delivery rollback
+        working-directory: source
+        env:
+          NETWORK_MODE: ${{ matrix.network-mode }}
+        run: |
+          set -euo pipefail
+          network_args=()
+          if [ "$NETWORK_MODE" = private-lan ]; then
+            PRIVATE_IP="$(node --input-type=module -e "import {networkInterfaces} from 'node:os'; import {privateIPv4} from './updater/web/broker-client.mjs'; const ip=Object.values(networkInterfaces()).flat().find(n=>n.family==='IPv4'&&!n.internal&&privateIPv4(n.address))?.address; if(!ip)process.exit(1); console.log(ip)")"
+            network_args=(--private-lan "$PRIVATE_IP")
+          fi
+          compatibility_args=()
+          if [ "$UPGRADE_FROM" = v0.6.3 ]; then compatibility_args=(--legacy-no-bootstrap); fi
+          sudo env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME=/nonexistent GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted RELAY_DISPOSABLE_SYSTEMD=I_ACCEPT_DISPOSABLE_HOST_MUTATION RELAY_DISPOSABLE_SIGNED_UPGRADE=I_ACCEPT_FRESH_HOST_SIGNED_UPGRADE_AND_ROLLBACK /usr/bin/python3 deploy/qualify-upgrade.py --release-dir "$RUNNER_TEMP/old-public-release" --upgrade-from "$UPGRADE_FROM" --version "$RELEASE_TAG" --apply "${network_args[@]}" "${compatibility_args[@]}"
+      - name: Sanitized fixed qualification journal labels
+        if: always()
+        run: sudo journalctl -t relay-qualification-diagnostic --no-pager -o cat -n 20
+      # Separate gates only: does NOT prove v063-control runtime-first bridge or explicit browser recovery.
+      # No publisher, promotion, SSH, installed control overlay, configuration change or alternate-root CLI.

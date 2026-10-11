@@ -154,7 +154,6 @@ def probe_gateway(reverse=False, remote=None):
 
 
 def guard_environment(apply, old, target):
-    base.require(old in ('v0.6.3', 'v0.6.4') and target == 'v0.6.5', 'Bounded diagnostic target only')
     validate_versions(old, target)
     base.require(all(os.environ.get(k) == v for k, v in UPGRADE_ENV.items()),
                  'Explicit disposable signed-upgrade acknowledgment required')
@@ -465,7 +464,6 @@ def installed_worker(apply, old, target, private_lan, delivery=False):
 
 
 def guard(apply, old, target, private_lan):
-    base.require(old in ('v0.6.3', 'v0.6.4') and target == 'v0.6.5', 'Bounded diagnostic target only')
     validate_versions(old, target)
     base.require(all(os.environ.get(k) == v for k, v in UPGRADE_ENV.items()),
                  'Explicit disposable signed-upgrade acknowledgment required')
@@ -478,7 +476,14 @@ def guard(apply, old, target, private_lan):
                  'Existing upgrade qualification unit refused')
 
 
+def legacy_no_bootstrap_admission(enabled, old, target):
+    base.require(type(enabled) is bool and (not enabled or (old == 'v0.6.3' and target == 'v0.6.5')),
+                 'Legacy-only phase requires exact v063 to v065')
+    return enabled
+
+
 def qualify(args):
+    legacy_only = legacy_no_bootstrap_admission(getattr(args, 'legacy_no_bootstrap', False), args.upgrade_from, args.version)
     guard(args.apply, args.upgrade_from, args.version, args.private_lan)
     base.NETWORK = install.deployment_network(args.private_lan)
     baseline = argparse.Namespace(release_dir=args.release_dir, version=args.upgrade_from,
@@ -517,7 +522,15 @@ def qualify(args):
         result = json.loads(install.run(worker_command(args.upgrade_from, args.version, args.private_lan), timeout=960))
         base.require(result.get('passed') is True and result.get('target') == args.version and
                      result.get('upgradeFrom') == args.upgrade_from, 'Invalid qualification worker result')
-        if delivery_release(args.upgrade_from, args.version):
+        if legacy_only:
+            base.require(result.get('deliveryCycle') is False and result.get('webBootstrap') is None,
+                         'Legacy cycle must not bootstrap web')
+            result = dict(passed=True, target=args.version, upgradeFrom=args.upgrade_from,
+                          networkMode=base.NETWORK['networkMode'], noBootstrap=result,
+                          compatibility='legacy-signed-runtime-only-no-new-web',
+                          webOnlyBootstrap=None, runtimePresentationDelivery=None,
+                          modernMonitoringQualified=False, productionTouched=False)
+        elif delivery_release(args.upgrade_from, args.version):
             # The first cycle has ended with matching old code/state and unchanged
             # whole control tree. Only this explicitly separate phase changes web.
             install.run(['/usr/bin/systemctl', 'start', 'relay-updater-broker.service'])
@@ -553,6 +566,7 @@ def main(argv=None):
     parser.add_argument('--version', required=True, help='Published exact candidate target tag')
     parser.add_argument('--private-lan', metavar='CANONICAL_IP')
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--legacy-no-bootstrap', action='store_true', help='Separate legacy signed runtime-only gate; never counts as modern delivery')
     parser.add_argument('--installed-worker', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--delivery-worker', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
