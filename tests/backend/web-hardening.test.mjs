@@ -71,7 +71,8 @@ test('background status fairly probes more than transport capacity and deduplica
  try{const api=client(g.origin,await authenticate(g.origin,runtime));const ids=[];for(let n=0;n<30;n++){const r=await api('/admin/apps','POST',{kind:'web',mode:'stream',label:'Fixture '+n,address:f.address+n});assert.equal(r.status,200);ids.push((await r.json()).id);}
  const first=api('/status');await hit;await api('/preferences','PATCH',{showAppStatus:false});const second=api('/status');
  const check=await api('/admin/apps/check','POST',{kind:'web',mode:'stream',label:'Interactive',address:f.address+'interactive'});assert.equal((await check.json()).state,'Online');
- for(const response of await Promise.all([first,second])){const status=await response.json();for(const id of ids)assert.equal(status[id].state,'Online',JSON.stringify(status[id]));}
+ for(const response of await Promise.all([first,second]))assert.deepEqual(await response.json(),{},'hidden-status preference suppresses even a held response');
+ await api('/preferences','PATCH',{showAppStatus:true});const status=await(await api('/status')).json();for(const id of ids)assert.equal(status[id].state,'Online',JSON.stringify(status[id]));
  assert.equal(hits.size,30);assert.ok(maxActive<=4,`health concurrency ${maxActive}`);assert.ok([...hits.values()].every(n=>n===1),'pending cache survives immutable account writes');
  }finally{await g.close();await f.close();await rm(runtime,{recursive:true,force:true});}
 });
@@ -94,7 +95,7 @@ for(const action of ['remove','close'])test(`pending real stream ${action} cance
 
 test('HTTP error responses indicate uncertain application health, not unreachable transport',async()=>{
  const f=await fixture((req,res)=>{res.statusCode=Number(req.url.slice(1));res.end();});const transport=new Transport();
- try{for(const code of [404,500]){const result=await transport.probe({address:f.address+code});assert.equal(result.state,'Unknown');assert.equal(result.httpStatus,code);assert.match(result.detail,new RegExp('HTTP '+code));}}finally{await transport.close();await f.close();}
+ try{for(const code of [401,403,404,500]){const result=await transport.probe({address:f.address+code});assert.equal(result.state,'Reached');assert.equal(result.httpStatus,code);assert.match(result.detail,new RegExp('HTTP '+code));}}finally{await transport.close();await f.close();}
 });
 
 test('persisted preference corruption refuses startup; absent legacy preference defaults true',async()=>{

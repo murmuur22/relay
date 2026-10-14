@@ -33,12 +33,13 @@ export class Transport{
  if(this.gateway&&Number(u.port||(u.protocol==='https:'?443:80))===Number(this.gateway.port)&&records.some(r=>this.local.has(r.address)||r.address.startsWith('127.')))throw fail(400,'Relay cannot be registered as an upstream app');
  return {u,record:records[0]};
  }
- async request(value,policy,{method='GET',headers={},body,maxBytes=4*1024*1024,timeout=5000,signal}={}){
+ async request(value,policy,{method='GET',headers={},body,maxBytes=4*1024*1024,timeout=5000,signal,authorize}={}){
  signal?.throwIfAborted();if(this.closed||this.pending>=24)throw fail(429,'Transport busy');if(body&&body.length>1024*1024)throw fail(400,'Request body too large');this.pending++;
  let timer;const controller=new AbortController();const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();timer=setTimeout(abort,timeout);this.active.add(controller);
  try{
  const {u,record}=await Promise.race([this.validate(value,policy),new Promise((_,reject)=>controller.signal.addEventListener('abort',()=>reject(fail(400,'Upstream timed out')),{once:true}))]);
  if(controller.signal.aborted)throw fail(400,'Upstream timed out');
+ if(authorize&&authorize()!==true)throw fail(401,'Status observation authority expired');
  return await new Promise((resolve,reject)=>{const req=(u.protocol==='https:'?https:http).request(u,{method,headers:{...cleanHeaders(headers),'accept-encoding':'identity'},agent:false,signal:controller.signal,lookup:(_hostname,options,cb)=>options.all?cb(null,[record]):cb(null,record.address,record.family),servername:isIP(host(u))?undefined:host(u),rejectUnauthorized:true},res=>{
  const chunks=[];let size=0;res.on('error',reject);res.on('aborted',()=>reject(fail(400,'Upstream response interrupted')));
  if(method==='HEAD'){resolve({status:res.statusCode,headers:cleanHeaders(res.headers),body:Buffer.alloc(0)});res.destroy();return;}
@@ -47,6 +48,6 @@ export class Transport{
  });req.on('error',reject);req.end(body);});
  }finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);this.active.delete(controller);this.pending--;}
  }
- async probe(config,{signal}={}){try{const r=await this.request(config.address,config,{method:'HEAD',timeout:2500,signal});return {state:r.status>=200&&r.status<400?'Online':'Unknown',source:'relay',checkedAt:Date.now(),detail:r.status>=300&&r.status<400?'Relay received a redirect; destination not followed.':`Relay received HTTP ${r.status}; device reachability may differ.`,httpStatus:r.status};}catch(e){return {state:e.status?'Unknown':'Offline',source:'relay',checkedAt:Date.now(),detail:e.status?e.message:'No bounded HTTP response from Relay.'};}}
+ async probe(config,{signal,authorize}={}){try{const r=await this.request(config.address,config,{method:'HEAD',timeout:2500,signal,authorize});return {state:r.status>=200&&r.status<400?'Online':'Reached',source:'relay',checkedAt:Date.now(),detail:r.status>=300&&r.status<400?'Relay received a redirect; destination not followed.':`Relay received HTTP ${r.status}; device reachability may differ.`,httpStatus:r.status};}catch(e){return {state:e.status?'Unknown':'Offline',source:'relay',checkedAt:Date.now(),detail:e.status?e.message:'No bounded HTTP response from Relay.'};}}
  async close(){this.closed=true;for(const c of this.active)c.abort();}
 }

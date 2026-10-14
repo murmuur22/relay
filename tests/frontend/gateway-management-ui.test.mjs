@@ -18,7 +18,7 @@ test('real Control Panel enables managed gateway, adds a target app through UI, 
   await browserLogin(page,gateway.origin,runtime);
   const button=name=>page.getByRole('button',{name,exact:true});
   await button('Open Control Panel').click();await page.getByRole('tab',{name:'Apps',exact:true}).click();await button('Add app').click();
-  await button('Next').click();await page.getByLabel('App name',{exact:true}).fill('Preserved Files');await page.getByLabel('Address',{exact:true}).fill('https://draft.example.test');await page.getByRole('combobox',{name:/^Icon/}).selectOption('folder');await button('Back').click();
+  await button('Next').click();await page.getByLabel('App name',{exact:true}).fill('Preserved Files');await page.getByLabel('Address',{exact:true}).fill('https://draft.example.test');await page.getByRole('combobox',{name:/^Icon(?! group)/}).selectOption('folder');await button('Back').click();
   await page.getByLabel('Gateway (experimental)',{exact:true}).check();await expect(button('Next')).toBeDisabled();
   await button('Set up Gateway').click();
   await expect(page.getByRole('tab',{name:'Gateway',exact:true})).toHaveAttribute('aria-selected','true');
@@ -33,7 +33,7 @@ test('real Control Panel enables managed gateway, adds a target app through UI, 
   const saved=JSON.parse(await readFile(runtime+'/gateway-managed.json','utf8'));assert.equal(saved.desktopHostname,'desktop.example.test');assert.equal(saved.targets[0].id,'files');assert(!('key' in saved));
   await mkdir('screenshots',{recursive:true});await page.locator('.settings-body').evaluate(el=>el.scrollTop=0);await page.screenshot({path:'screenshots/gateway-settings-running.png'});
   await button('Add a gateway app').click();await button('Next').click();
-  await expect(page.getByLabel('App name',{exact:true})).toHaveValue('Preserved Files');await expect(page.getByRole('combobox',{name:/^Icon/})).toHaveValue('folder');
+  await expect(page.getByLabel('App name',{exact:true})).toHaveValue('Preserved Files');await expect(page.getByRole('combobox',{name:/^Icon(?! group)/})).toHaveValue('folder');
   await page.getByRole('combobox',{name:'Gateway target',exact:true}).selectOption('files');
   await button('Next').click();await button('Next').click();await button('Next').click();await button('Save app').click();await expect(button('Edit app Preserved Files')).toBeVisible();
   await page.getByRole('tab',{name:'Gateway',exact:true}).click();

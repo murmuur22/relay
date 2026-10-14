@@ -5,6 +5,21 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
+Target source version: **0.6.6**.
+
+- Prepare source candidate 0.6.6; published v0.6.5 source, signatures and artifacts remain immutable. Publication, signed Linux qualification and production maintenance are separate gates.
+- Close runtime-owned management TCP sockets after normal session/operation/browser/native cleanup and listener closure. Incomplete HTTP headers and unfinished request bodies can no longer hold shutdown beyond the unchanged updater driver deadline. Preserve live HTTP/WebSocket revocation and ordinary rejection/body-drain behavior; this reproduced defect is not attributed to a historical Linux rollback.
+- Refresh only supported transitive patches: devalue 5.9.2 → 5.9.4 through Svelte and source-map-js 1.2.1 → 1.2.2 through Vite/PostCSS in both build packages. Retain pinned direct dependencies, integrity-locked artifacts and behavioral security regressions; no major upgrade or audit suppression.
+
+- Use a single virtual personal home root displayed as `~`, retaining `/desktop` links, stable owner-scoped keys, existing layouts/overrides and all user-created folders (including folders named Desktop). Version-1 desktop metadata migrates atomically to version 2 without flattening content.
+- Let ordinary users add private Native shortcuts with URL/name/icon through desktop right-click, keyboard and Navigation/touch actions. Store at most 64 shortcuts per internal owner UUID, separate from administrator registry/grants; keep normalized icons private and deny management/active or retired Gateway cookie hostnames and namespaces across ports. No personal-URL server fetching, shared definitions or Gateway/Streamed grants are added.
+- Bundle 68 audited free Pixelarticons from integrity-pinned npm 1.8.1 as fixed geometric path data, with original MIT notice/provenance. Searchable grouped pickers serve personal appearance, personal Add app and managed app editors; existing icon identities/uploads remain compatible. Native windows always expose a user-gesture new-tab fallback without inferring embedding from iframe load.
+- Remove only the redundant Add Jellyfin target button; retain configured/preset targets, generic target creation, drafts and permission boundaries. Add numbered target headings for readability.
+- Explain Native CORS-unobservable checks instead of discarding them; distinguish received HTTP errors/challenges from unreachable transport, label stale observations and bind device checks to their authentication epoch. Personal URLs are measured only by credential-free visitor-browser CORS. Gateway status uses passive actual session-owned transport response evidence, not arbitrary new probes; unopened Gateway upstreams remain explicitly unobserved. Hidden status suppresses API observations and visitor probes.
+- Prevent Gateway activation from introducing a cookie-host conflict with retained private shortcuts, including a held creation racing configuration. Keep owner-only unavailable-shortcut cleanup, full-capacity role-promotion recovery and revision overflow refusal without weakening launch authority or evicting content.
+- Recheck status authority before queue/DNS admission, preserve other live observation waiters, and drop ended-route/replaced-definition evidence from held responses. Make stale text age through the actual UI clock. Replace the legacy lifecycle test's fixed short sleeps with actual paused/close/context-settlement deadlines; no stream runtime behavior was changed for that fixture timing correction.
+- Keep Gateway Experimental branding and capability disclaimers. This is local source/test work, not browser-wide maturity, production qualification, publication or deployment.
+
 ## [0.6.5] — 2026-10-11
 
 Candidate source; signed publication and qualification status are recorded separately in `TEST_REPORT.md`. No production deployment is implied.

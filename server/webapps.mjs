@@ -1,4 +1,6 @@
 import {fail} from './accounts.mjs';
+import {pixelIcons} from './pixel-icons.mjs';
+export const appIconChoices=['globe','folder','notes','media','terminal',...Object.keys(pixelIcons)];
 export const RUNTIME_URL_LIMIT=32768;
 export function webURL(value,maxLength=2048){
  if(typeof value!=='string'||value.length>maxLength||!/^https?:\/\//i.test(value)||value!==value.trim())throw fail(400,'Enter an explicit absolute HTTP or HTTPS address.');
@@ -10,12 +12,12 @@ export function webConfig(body){
  if(body?.mode==='gateway'){
   if(Object.keys(body).some(k=>!['id','kind','mode','label','gateway','icon','openMode','allowedOrigins','enabled','description','userIds'].includes(k))||['enabled','icon','openMode'].some(k=>k in body&&body[k]===null))throw fail(400,'Invalid experimental gateway fields');
   const g=body.gateway;
-  if(body.kind!=='web'||typeof body.label!=='string'||!body.label.trim()||body.label.length>64||!g||typeof g!=='object'||Array.isArray(g)||Object.keys(g).length!==1||typeof g.target!=='string'||!/^[a-z][a-z0-9-]{0,31}$/.test(g.target)||'address' in body||('openMode' in body&&body.openMode!=='window')||('allowedOrigins' in body&&(!Array.isArray(body.allowedOrigins)||body.allowedOrigins.length))||!['globe','folder','notes','media','terminal'].includes(body.icon??'globe')||typeof (body.enabled??true)!=='boolean')throw fail(400,'Invalid experimental gateway app');
+  if(body.kind!=='web'||typeof body.label!=='string'||!body.label.trim()||body.label.length>64||!g||typeof g!=='object'||Array.isArray(g)||Object.keys(g).length!==1||typeof g.target!=='string'||!/^[a-z][a-z0-9-]{0,31}$/.test(g.target)||'address' in body||('openMode' in body&&body.openMode!=='window')||('allowedOrigins' in body&&(!Array.isArray(body.allowedOrigins)||body.allowedOrigins.length))||!appIconChoices.includes(body.icon??'globe')||typeof (body.enabled??true)!=='boolean')throw fail(400,'Invalid experimental gateway app');
   return {kind:'web',mode:'gateway',label:body.label.trim(),gateway:{target:g.target},icon:body.icon??'globe',openMode:'window',enabled:body.enabled??true,description:'Experimental private gateway. End app session or Close clears gateway identity; app Logout may not.'};
  }
  if(body&&'gateway' in body)throw fail(400,'Gateway configuration requires gateway mode');
  if(!body||typeof body!=='object'||['enabled','icon','openMode','allowedOrigins'].some(k=>k in body&&body[k]===null))throw fail(400,'Invalid app fields');
- if(body.kind!=='web'||!['native','stream'].includes(body.mode)||typeof body.label!=='string'||!body.label.trim()||body.label.length>64||!['globe','folder','notes','media','terminal'].includes(body.icon??'globe')||!['window','tab'].includes(body.openMode??'window')||typeof (body.enabled??true)!=='boolean')throw fail(400,'Invalid app fields');
+ if(body.kind!=='web'||!['native','stream'].includes(body.mode)||typeof body.label!=='string'||!body.label.trim()||body.label.length>64||!appIconChoices.includes(body.icon??'globe')||!['window','tab'].includes(body.openMode??'window')||typeof (body.enabled??true)!=='boolean')throw fail(400,'Invalid app fields');
  const address=webURL(body.address).href;
  if(!Array.isArray(body.allowedOrigins??[])||(body.allowedOrigins??[]).length>16)throw fail(400,'Invalid approved origins');
  const allowedOrigins=[...new Set((body.allowedOrigins??[]).map(value=>{const u=webURL(value);if(u.pathname!=='/'||u.search)throw fail(400,'Approved origins must not include paths or queries');return u.origin;}))];

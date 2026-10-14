@@ -1,6 +1,9 @@
 <script>
  import {tick,onDestroy,onMount} from 'svelte';
  import Icon from './Icon.svelte';
+ import IconPicker from './IconPicker.svelte';
+ import {pixelIcons} from '../server/pixel-icons.mjs';
+ const icons=['globe','folder','notes','media','terminal',...Object.keys(pixelIcons)];
  import {webAddress,nativeAddress,origins,checkDevice,statusLabel,statusDetail} from './webapps.js';
  let {draft,users,api,onsave,oncancel,onbusy,onsetupgateway}= $props();
  let error=$state(''),busy=$state(false),relay=$state(null),device=$state(null),image=$state(''),nativePreview=$state(''),heading;
@@ -39,7 +42,7 @@
   <label>App name<input bind:value={draft.label} required maxlength="64"/></label>
   {#if draft.mode==='gateway'}<label>Gateway target<select bind:value={draft.gatewayTarget} required><option value="">Choose configured target</option>{#each gateway.targets as target}<option value={target.id}>{target.label}</option>{/each}</select></label><p class="full-width muted">Only administrator-configured targets are available. No upstream address or credential is stored in this app definition.</p>{:else}<label>Address<input bind:value={draft.address} required placeholder="https://app.example" autocomplete="off"/></label>
   <p class="full-width muted">Enter an explicit http:// or https:// address. For a bare IP, choose the protocol yourself. No URL credentials or fragments.</p>{/if}
-  <label>Icon<select bind:value={draft.icon}>{#each ['globe','folder','notes','media','terminal'] as icon}<option value={icon}>{icon}</option>{/each}</select></label><div class="icon-preview"><Icon name={draft.icon}/></div>
+  <label>Icon<select bind:value={draft.icon}>{#each icons as icon}<option value={icon}>{pixelIcons[icon]?.label||icon}</option>{/each}</select></label><div class="icon-preview"><Icon name={draft.icon}/></div><div class="full-width"><IconPicker choices={icons} selected={draft.icon} onchoose={id=>draft.icon=id}/></div>
  {:else if draft.step===3}
   {#if draft.mode==='gateway'}
    <p class="full-width muted">Experimental gateway runs the app in an isolated browser origin. The app's own Logout may not clear gateway identity. End app session and Close destroy the private credential jar and active connections; minimize preserves the session. Reopening starts a fresh app origin and login. Compatibility and certificate trust still require qualification.</p>

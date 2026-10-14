@@ -89,6 +89,7 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
   for(const route of [...routes.values()])if(route.session===session&&route.appId===data.appId&&route.launchId===data.launchId)retire(route);
   return {ended:true};
  }
+ function status(session,appId){authority(session,appId);const route=[...routes.values()].find(r=>r.session===session&&r.appId===appId);if(route){current(route);if(route.observation)return {...route.observation};}return {state:'Unknown',source:'relay',checkedAt:0,detail:'Gateway configured; No upstream response observed for this session. Open the app to measure transport; listener availability is not upstream health.'};}
  function closeWindow(session,appId){for(const route of [...routes.values()])if(route.session===session&&route.appId===appId)retire(route);}
  function getCap(req,route){const c=caps.get(cookie(req,'__Host-relay_cap'));if(!c||c.route!==route||c.expires<=Date.now())throw denied();current(route);return c;}
  function bridgeHeaders(req){
@@ -165,7 +166,7 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
   for(const [id,t] of tickets)if(t.expires<=Date.now())tickets.delete(id);
   for(const r of [...routes.values()])try{current(r);if(r.expires<=Date.now()||![...tickets.values(),...caps.values()].some(v=>v.route===r))retire(r);}catch{retire(r);}
  },100).unref();
- return {desktopOrigin,available,validateDefinition,launch,end,endSession,endApp,closeWindow,stats:()=>({routes:routes.size,tickets:tickets.size,caps:caps.size,active:active.size}),async close({preserveManagement=false}={}){
+ return {desktopOrigin,available,status,validateDefinition,launch,end,endSession,endApp,closeWindow,stats:()=>({routes:routes.size,tickets:tickets.size,caps:caps.size,active:active.size}),async close({preserveManagement=false}={}){
   closed=true;clearInterval(timer);for(const r of [...routes.values()]){
    const state=cancellations(r.session);
    if(state.ids.size>=512&&!state.ids.has(r.launchId))state.cooldownUntil=Date.now()+60000;

@@ -15,7 +15,7 @@ test('unavailable private locations are visible without destroying existing wind
   const message=page.getByText('This location is unavailable.',{exact:true});await expect(message).toBeVisible();
   assert.equal(await message.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),true,'An old maximized window must not cover the unavailable route');
   await expect(page.locator('[data-app="parcels"] iframe')).toHaveCount(1);await expect(page.locator('[data-app="parcels"] iframe')).not.toBeVisible();
-  await page.getByRole('link',{name:'Desktop',exact:true}).click();await expect(page.getByRole('button',{name:'Maximize Parcels',exact:true})).toBeVisible();
+  await page.getByRole('link',{name:'Home',exact:true}).click();await expect(page.getByRole('button',{name:'Maximize Parcels',exact:true})).toBeVisible();
   assert.equal(await page.locator('[data-app="parcels"] iframe').evaluate((el,previous)=>el===previous,frame),true);
  }finally{await browser.close();await g.close();await rm(runtime,{recursive:true,force:true});}
 });

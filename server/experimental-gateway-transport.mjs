@@ -72,6 +72,9 @@ export function createTransport({active,desktopOrigin,stillAuthorized=async()=>{
    remote=r;
    try{
    const out={};
+   // Passive transport evidence belongs only to this live session/app route.
+   // A received response is reachability, never proof of login or app readiness.
+   c.route.observation={state:r.statusCode>=200&&r.statusCode<400?'Online':'Reached',source:'relay',checkedAt:Date.now(),httpStatus:r.statusCode,detail:`Gateway upstream received HTTP ${r.statusCode}; not a readiness or authenticated-health check.`};
    for(const name of ['content-type','content-length','content-range','accept-ranges','content-encoding','etag','last-modified','content-security-policy','content-security-policy-report-only','x-frame-options','x-content-type-options','referrer-policy','permissions-policy','cross-origin-opener-policy','cross-origin-embedder-policy','cross-origin-resource-policy','strict-transport-security','content-disposition',...c.app.responseHeaders])if(r.headers[name])out[name]=r.headers[name];
    if(Number(out['content-length']||0)>(c.app.maxResponseBytes??RESPONSE_LIMIT))return badGateway();
    if(r.headers.location){const target=new URL(r.headers.location,c.app.upstream+req.url);if(target.origin!==c.app.upstream||target.username||target.password||!validPath(target.pathname+target.search+target.hash))return badGateway();out.location=c.route.origin+target.pathname+target.search+target.hash;}

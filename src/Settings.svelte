@@ -3,6 +3,9 @@
  import {onMount,tick} from 'svelte';
  import AppWizard from './AppWizard.svelte';
  import GatewaySettings from './GatewaySettings.svelte';
+ import IconPicker from './IconPicker.svelte';
+ import {pixelIcons} from '../server/pixel-icons.mjs';
+ const icons=['globe','folder','notes','media','terminal',...Object.keys(pixelIcons)];
  import {webAddress,origins} from './webapps.js';
  let {kind,user,api,onclose,onrefresh,onpassword,embedded=false}= $props();
  let error=$state(''),message=$state(''),busy=$state(false),users=$state([]),apps=$state([]),diagnostics=$state(null);
@@ -119,7 +122,7 @@
         <legend class="sr-only">App details</legend>
         <label>App label<input bind:value={editor.label} required maxlength="64"/></label>
         <label class="check"><input type="checkbox" bind:checked={editor.enabled}/>Enabled</label>
-        {#if editor.kind==='web'}{#if editor.mode==='gateway'}<label>Gateway target<select bind:value={editor.gateway.target} disabled={!gateway.enabled} required>{#if !gateway.targets.some(t=>t.id===editor.gateway.target)}<option value={editor.gateway.target}>Unavailable configured target</option>{/if}{#each gateway.targets as target}<option value={target.id}>{target.label}</option>{/each}</select></label><p class="full-width muted">Experimental gateway. End app session or Close clears private credentials. App Logout may not. {gateway.enabled?'':'Gateway is not configured; this definition is preserved.'}</p>{:else}<label>Address<input bind:value={editor.address} required/></label>{/if}<label>Icon<select bind:value={editor.icon}>{#each ['globe','folder','notes','media','terminal'] as icon}<option>{icon}</option>{/each}</select></label>
+        {#if editor.kind==='web'}{#if editor.mode==='gateway'}<label>Gateway target<select bind:value={editor.gateway.target} disabled={!gateway.enabled} required>{#if !gateway.targets.some(t=>t.id===editor.gateway.target)}<option value={editor.gateway.target}>Unavailable configured target</option>{/if}{#each gateway.targets as target}<option value={target.id}>{target.label}</option>{/each}</select></label><p class="full-width muted">Experimental gateway. End app session or Close clears private credentials. App Logout may not. {gateway.enabled?'':'Gateway is not configured; this definition is preserved.'}</p>{:else}<label>Address<input bind:value={editor.address} required/></label>{/if}<label>Icon<select bind:value={editor.icon}>{#each icons as icon}<option value={icon}>{pixelIcons[icon]?.label||icon}</option>{/each}</select></label><div class="full-width"><IconPicker choices={icons} selected={editor.icon} onchoose={id=>editor.icon=id}/></div>
          {#if editor.mode==='native'}<label>Open in<select bind:value={editor.openMode}><option value="window">Desktop window</option><option value="tab">New tab</option></select></label>{:else if editor.mode==='stream'}<label class="full-width">Additional approved origins<textarea bind:value={editor.originText} rows="3"></textarea></label>{/if}
          <p class="full-width muted">Saving closes this entry's active connections and may sign out affected users. Native embedding may be blocked. Streamed WebSockets and file transfer are unsupported.</p>
         {:else}<p class="full-width muted">Template: {editor.template} (builtin)</p>{/if}

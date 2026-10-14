@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
+import {chromium,expect} from '@playwright/test';
+import {createGateway,ROOT} from '../../server/gateway.mjs';
+import {authenticate,client,password} from '../auth-helper.mjs';
+test('unavailable personal shortcut cleanup is private, visible and never grants a launch',{timeout:20000},async()=>{
+ const runtime=await mkdtemp(ROOT+'.test-hidden-shortcut-');let g,browser;try{g=await createGateway({port:0,runtime,profile:'standalone'});const admin=client(g.origin,await authenticate(g.origin,runtime));await admin('/admin/users','POST',{username:'viewer',password});const api=client(g.origin,await authenticate(g.origin,runtime,'viewer')),d=await(await api('/desktop/bookmarks','POST',{url:'https://synthetic.invalid/',label:'Unavailable private',parentId:null})).json(),path=runtime+'/users/'+d.ownerId+'/desktop.json',state=JSON.parse(await readFile(path,'utf8'));state.bookmarks[0].url=g.origin.replace(/:\d+$/,':9443')+'/';await writeFile(path,JSON.stringify(state));
+ browser=await chromium.launch({headless:true,chromiumSandbox:true});const page=await browser.newPage({reducedMotion:'reduce'});page.setDefaultTimeout(4000);await page.goto(g.origin);await page.getByLabel('username',{exact:true}).fill('viewer');await page.getByLabel('password',{exact:true}).fill(password);await page.getByRole('button',{name:'Enter →',exact:true}).click();await expect(page.getByRole('button',{name:'Open Unavailable private',exact:true})).toHaveCount(0);await expect(page.locator('iframe')).toHaveCount(0);await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:'Unavailable shortcuts',exact:true}).click();await expect(page.getByText('Unavailable private',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Remove Unavailable private',exact:true}).click();await page.getByRole('button',{name:'Remove shortcut',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);assert.deepEqual((await(await api('/desktop')).json()).unavailablePersonalItems,[]);
+ }finally{await browser?.close();await g?.close();await rm(runtime,{recursive:true,force:true});}
+});

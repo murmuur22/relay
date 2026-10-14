@@ -14,7 +14,7 @@ for(const target of ['folder','app'])test(`new ${target} navigation cancels an o
   let entered;const started=new Promise(r=>entered=r),gate=new Promise(r=>release=r);let held=false;
   await page.route('**/api/windows/parcels',async route=>{const body=route.request().postDataJSON();if(!held&&route.request().method()==='PATCH'&&body?.focused===true&&body.maximized===undefined){held=true;const response=await route.fetch();entered();await gate;await route.fulfill({response}).catch(()=>{});}else await route.continue();});
   await page.evaluate(()=>history.go(-2));await Promise.race([started,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Expected delayed focus PATCH was not issued')),3000);})]);clearTimeout(timer);
-  if(target==='folder'){await page.getByRole('link',{name:'Desktop',exact:true}).click();await expect.poll(()=>new URL(page.url()).search).toBe('');}
+  if(target==='folder'){await page.getByRole('link',{name:'Home',exact:true}).click();await expect.poll(()=>new URL(page.url()).search).toBe('');}
   else{await button('Navigation').click();await page.locator('.quick-nav').getByRole('button').filter({hasText:'Keepsakes'}).click();await expect.poll(()=>new URL(page.url()).search).toContain('app=keepsakes--');}
   let detected;const obsolete=new Promise(r=>detected=r);page.on('request',req=>{if(req.url()===g.origin+'/api/windows/parcels'&&req.method()==='PATCH'&&req.postDataJSON()?.maximized===true)detected(true);});
   release();const bad=await Promise.race([obsolete,new Promise(r=>{timer=setTimeout(()=>r(false),1000);})]);clearTimeout(timer);

@@ -1,5 +1,17 @@
 # Personal desktop: folders, appearance and private URLs
 
+## Personal home and Native bookmarks (Unreleased local source)
+
+The only virtual root is home, displayed as `~`; canonical URLs remain `/desktop`. This is not an OS home directory or filesystem access. New accounts receive their available apps at this root. No user-created Desktop-named folder is removed or flattened. Version-1 state migrates to version 2 with the same item IDs, keys, slots, parents and appearance; only an empty owner-scoped bookmark collection and schema revision are added. Older validators cannot read version 2: source rollback needs matching protected personal state, not an in-place downgrade.
+
+Right-click blank space, use Shift+F10/ContextMenu, or Navigation → Add app to enter URL, name and a bundled icon. The resulting Native shortcut is private to the current internal user UUID, with a separate `personal-<UUID>` identity; it never enters shared registry/grants. At most 64 bookmarks and 256 total desktop items are stored. Per-owner operations are serialized/atomic and bounded to 32 pending jobs. URLs are explicit HTTP(S), capped at 2,048 characters, with credentials/fragments/control characters, prohibited network literals and management/Gateway cookie hosts/namespaces refused before any contact. Previously used Gateway hostnames/namespaces remain reserved until runtime restart. Bookmarks made unsafe by a later configuration are hidden, not destroyed. Navigation → Unavailable shortcuts lists only the owner's retained labels/IDs and provides confirmed deletion without granting launch/icon access. Gateway activation refuses an existing private shortcut that would share its new cookie hostname/namespace; candidate names are temporarily reserved while prior owner writes drain, and newly created shortcuts recheck URL policy immediately before commit. The refusal never exposes another owner's label or URL.
+
+A full desktop does not evict user content or prevent login/cleanup after new grants or role promotion. Missing shortcuts are deferred, remain available in Navigation, and fill free slots on the next reconciliation after an owner removes a folder or personal shortcut. Revision exhaustion refuses mutation without writing an invalid state.
+
+A personal app opens in the existing sandboxed Native window. Open in new tab is always an explicit `noopener noreferrer` gesture, including when an iframe appears to load. No arbitrary proxy, Gateway route, Streamed context or server-side URL/icon fetch is granted. Upload a raster later with Change icon; use Remove shortcut to delete only the personal launcher. As with managed Native destinations, direct visits/redirects cannot be comprehensively policed by Relay: use trusted sites and a dedicated authentication hostname.
+
+The searchable grouped picker includes 68 audited free Pixelarticons from npm 1.8.1. The integrity-pinned source, tarball/license/SVG/path digests and exact inventory are in `public/licenses/pixelarticons-sources.json`; the original MIT notice is `pixelarticons-MIT.txt`. `tools/bundle-pixel-icons.py` verifies input integrity and accepts only fixed filled geometric paths. A bounded useful subset avoids a full font/React pack; missing generic world and stroke-only gift were not substituted or admitted. Legacy icons remain selectable for compatibility. No CDN, paid Pro assets or arbitrary SVG markup is loaded. The generated catalog lives under server so standalone packaging includes backend validation data, while Vite imports the same fixed catalog.
+
 ## What belongs to the user
 
 Each account has its own folders, app display-name/icon overrides and grid positions. These are virtual desktop organization, not filesystem directories containing upstream app data. Renaming a shortcut does not rename the global app; moving it does not grant or revoke access.
@@ -33,7 +45,7 @@ Root is `/desktop`. Folder segments and selected apps combine a readable name wi
 
 These are illustrative shapes; `<key>` stands for the account's actual stable key. Names are decoration, not authorization or disk paths. Keys are resolved only in the signed-in user's visible desktop. Current labels and folder ancestry produce canonical links after rename/move; invalid, foreign and revoked entries produce an unavailable view rather than exposing another user's data. The server serves only the generic login shell at deep desktop paths; APIs, icons, native content and WebSockets remain protected.
 
-Home, Desktop and folder breadcrumb segments are real links. Normal clicks navigate within the app; modified clicks retain normal browser behavior. Reload and login preserve the private route; browser Back/Forward reconcile it. Unknown URL parameters never become upstream navigation or redirects.
+Root home (`~`) and folder breadcrumb segments are real links. Normal clicks navigate within the app; modified clicks retain normal browser behavior. Reload and login preserve the private route; browser Back/Forward reconcile it. Unknown URL parameters never become upstream navigation or redirects.
 
 ## App windows and maximize
 

@@ -6,7 +6,7 @@ import {createGateway,ROOT} from '../../server/gateway.mjs';
 import {mkdtemp,readFile,rm,mkdir} from 'node:fs/promises';
 import path from 'node:path';
 
-test('breadcrumb icon and text share a vertical center at desktop and mobile sizes',async()=>{
+test('single home root and folder breadcrumbs share a vertical center at desktop and mobile sizes',async()=>{
  const runtime=await mkdtemp(path.join(ROOT,'.test-header-'));
  const g=await createGateway({port:0,runtime});
  const browser=await chromium.launch({headless:true,chromiumSandbox:true});
@@ -15,6 +15,8 @@ test('breadcrumb icon and text share a vertical center at desktop and mobile siz
   await browserLogin(page,g.origin,runtime);
   await page.getByRole('button',{name:'Open Parcels',exact:true}).waitFor();
   await page.evaluate(()=>document.fonts.ready);
+  assert.equal(await page.locator('.path a').count(),1);assert.equal(await page.getByRole('link',{name:'Home',exact:true}).textContent(),'~');
+  await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:'New folder',exact:true}).click();await page.getByLabel('Folder name',{exact:true}).fill('Header folder');await page.getByRole('button',{name:'Create folder',exact:true}).click();await page.getByRole('button',{name:'Open Header folder',exact:true}).click();
   for(const width of [1440,390]){
    await page.setViewportSize({width,height:900});
    const centers=await page.locator('.path').evaluate(node=>Array.from(node.childNodes).filter(n=>n.nodeType===1||(n.nodeType===3&&n.textContent.trim())).map(n=>{const range=document.createRange();range.selectNodeContents(n);const r=range.getBoundingClientRect();return r.y+r.height/2;}));

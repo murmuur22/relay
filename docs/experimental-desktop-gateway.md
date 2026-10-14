@@ -2,6 +2,12 @@
 
 For the 0.6.0 installed opt-in configuration path, see [gateway deployment](gateway-deployment.md). It adds configurable names/listeners and fixed LAN/VPN upstreams; it does not provision DNS/trust or qualify every browser/service. The original local-only implementation and evidence below are retained as historical context.
 
+## Unreleased scoped follow-up
+
+The redundant Add Jellyfin target button is removed, not the configured service/target or its default options. Numbered target headings and generic target creation retain in-memory drafts, normal selection and administrator ACLs. Gateway status exposes passive real HTTP response observations only for the calling live session/app route, without disclosing fixed upstream addresses or generating new probes. HTTP challenges/errors mean Reached with readiness unknown; no observed traffic remains Unknown with an explicit explanation.
+
+Experimental branding remains. Scoped source regression/review evidence cannot establish ordinary Safari trust, public DNS/TLS, all upstream apps or long-running media/load compatibility; the limitations below remain accessible. No production target was deleted or edited.
+
 ## Original local interface and verification (unreleased work on source 0.5.0)
 
 Disabled by default. `npm start` does not enable this feature. No deployment runner, environment configuration, account-state migration, trust installation or hosts/DNS changes are provided. This is not production qualification.

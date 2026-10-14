@@ -1,4 +1,5 @@
-<script>let {name}= $props();</script>
+<script>import {pixelIcons} from '../server/pixel-icons.mjs';let {name}= $props();let pixel=$derived(pixelIcons[name]);</script>
+{#if pixel}<svg data-icon={name} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">{#each pixel.paths as d}<path {d}/>{/each}</svg>{:else}
 <svg data-icon={name} viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="miter" aria-hidden="true">
 {#if name==='parcels'}<path d="m6 13 18-8 18 8v23l-18 8-18-8Z M6 13l18 8 18-8 M24 21v23 M15 9l18 8v9l-7 3v-9"/><path d="m10 30 7 3m-7 1 5 2"/>
 {:else if name==='keepsakes'}<path d="M8 8h28v32H8Z M12 4h28v32 M8 31l9-10 7 7 5-5 7 8"/><circle cx="27" cy="17" r="3"/>
@@ -16,4 +17,4 @@
 {:else if name==='star'}<path d="m24 3 6 14 15 2-11 11 3 15-13-8-13 8 3-15L3 19l15-2Z"/>
 {:else if name==='tools'}<path d="m28 5 1 11 8 5 9-7c1 12-7 18-17 13L12 44l-8-8 18-17C18 10 22 6 28 5Z"/>
 {:else}<path d="M4 8h40v29H4Z M16 44h16 M24 37v7 M8 25h7l4-10 7 16 5-12 4 6h5"/>{/if}
-</svg>
+</svg>{/if}

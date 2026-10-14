@@ -106,7 +106,7 @@ New installations guide the initial administrator from password creation into ad
 
 Each account can create/nest folders, drag shortcuts into folders or snapped grid positions, and change its own shortcut names/icons. Right-click menus have keyboard and touch alternatives; custom PNG/JPEG/WebP icons are normalized and served privately. These are personal presentation overrides, not global app or permission changes.
 
-Home/Desktop/folder breadcrumbs are clickable links. Readable `/desktop/...` paths use stable short keys, and selected/maximized apps are represented in the query string. Reload, login and Back/Forward preserve the private destination; normal/maximized transitions retain native iframe state. These URLs do not publish an app or grant access to another account.
+Home (`~`)/folder breadcrumbs are clickable links. Readable `/desktop/...` paths use stable short keys, and selected/maximized apps are represented in the query string. Reload, login and Back/Forward preserve the private destination; normal/maximized transitions retain native iframe state. These URLs do not publish an app or grant access to another account.
 
 See [personal desktop behavior](docs/personal-desktop.md) for limits and [public sharing proposal](docs/public-sharing-plan.md) for the separate, unimplemented publication layer.
 

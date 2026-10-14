@@ -16,6 +16,10 @@ Node and Python dependency versions are recorded in lockfiles. Installed package
 
 Gateway hostname validation uses the pinned MIT-licensed `tldts` and `tldts-core` packages and their bundled Public Suffix List data. Their upstream license notices remain in the runtime's packaged `node_modules`; the dependency lockfile records exact versions. This distinguishes private hosting-provider suffixes from an administrator's own delegated namespace without maintaining a Relay-specific suffix blacklist.
 
+## Bundled icon library
+
+The runtime and desktop bundle include a bounded subset of the free Pixelarticons 1.8.1 npm input from https://github.com/halfmage/pixelarticons. Copyright (c) 2019 Gerrit Halfmann, MIT. The exact original permission notice is retained in `public/licenses/pixelarticons-MIT.txt` and copied by Vite into the runtime distribution's `dist/licenses/`. `public/licenses/pixelarticons-sources.json` records npm SHA-512 integrity, tarball/license SHA-256, audited SVG/path digests and the actual 68-icon inventory. Only fixed geometric data is bundled; no paid Pro assets, icon font/React dependencies, arbitrary SVG execution or CDN requests. Source rebuilding uses `tools/bundle-pixel-icons.py` against the pinned input.
+
 ## Fonts and local artifacts
 
 Private reference font binaries remain excluded; the rest of the desktop still uses system fallbacks in fresh checkouts. Only updater surfaces bundle **Silkscreen Bold** (Copyright 2001 The Silkscreen Project Authors) and **Share Tech Mono Regular** (Copyright 2012 Carrois Type Design), both under **SIL Open Font License 1.1**. Original upstream licenses are preserved byte-for-byte as `silkscreen-OFL.txt` and `sharetechmono-OFL.txt` in both public license directories and built bundles. `updater/ui/src/assets/font-sources.json` records the pinned google/fonts commit, original TTF/license URLs and SHA-256 values, full-font WOFF2 conversion tooling and output hashes; the same record ships as `licenses/updater-font-sources.json`. These are freely redistributable upstream fonts, not the historical proprietary/local reference assets. No external font request is made at runtime.

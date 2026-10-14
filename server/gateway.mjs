@@ -53,15 +53,33 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  // Refuse before listeners, session publication or native startup; never rewrite accounts.
  // Retain every started authentication hostname until restart invalidates all sessions.
  // Retired HTTPS cookies can still identify live sessions and are not port isolated.
- const authHostnames=new Set([hostname]);
+ const authHostnames=new Set([hostname]),pendingAuthHosts=new Set(),pendingAuthNamespaces=new Set(),authNamespaces=new Set(gatewaySettings?[gatewaySettings.deployment?.appBaseDomain??'relay.test']:[]);
  if(gatewaySettings)authHostnames.add(gatewaySettings.deployment?.desktopHostname??'desktop.relay.test');
  for(const service of accounts.state.services)if(service.kind==='web'&&service.mode==='native'&&authHostnames.has(new URL(service.address).hostname))throw Error('Native apps must use a different hostname from Relay; cookies are not port isolated. Startup refused; existing account data is unchanged.');
  const app=express(),server=http.createServer(app),sessions=new Map();
+ // Include sockets that have not yet produced a request (partial HTTP headers).
+ // Session revocation below still owns operation/browser/HTTP/WS cancellation.
+ const connections=new Set();server.on('connection',socket=>{connections.add(socket);socket.once('close',()=>connections.delete(socket));});
  let setup=accounts.state.users.length?null:token();const authCsrf=token(),runtimeInstance=token();
  const wss=new WebSocketServer({noServer:true,maxPayload:8192,perMessageDeflate:false});
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,bind,resolve);});
  const origin=`http://${hostname}:${server.address().port}`;
  const transport=new Transport({gatewayOrigin:origin});
+ const validatePersonalURL=value=>{if(typeof value!=='string'||/[\x00-\x20\x7f\\]/.test(value))throw fail(400,'Invalid personal HTTP(S) address');const u=transport.registration(value);const h=u.hostname.replace(/\.$/,'');if([...authHostnames,...pendingAuthHosts].some(x=>x.replace(/\.$/,'')===h)||[...authNamespaces,...pendingAuthNamespaces].some(base=>h===base||h.endsWith('.'+base)))throw fail(400,'Native apps must use a different hostname from Relay; cookies are not port isolated.');return u.href;};
+ const desktop=new Desktop(runtime,()=>[...accounts.state.services,...SYSTEM_APPS],validatePersonalURL);
+ const userApps=(user,state)=>desktop.allowed(state,()=>Object.assign(accounts.apps(user),{personalAllowed:!user.disabled&&!user.mustChange}));
+ // Block candidate cookie destinations while draining prior owner writes. Never
+ // activate a hostname already used by an existing personal frame, even on another
+ // port; filtering the next poll alone would leave retained documents exposed.
+ const startPersonalSafeEdge=async config=>{
+  const host=config.deployment?.desktopHostname??'desktop.relay.test',base=config.deployment?.appBaseDomain??'relay.test';
+  pendingAuthHosts.add(host);pendingAuthNamespaces.add(base);
+  try{
+   for(const user of accounts.state.users){await desktop.queues.get(user.id)?.catch(()=>{});const state=await desktop.load(user.id);if((state.bookmarks||[]).some(b=>{const h=new URL(b.url).hostname.replace(/\.$/,'');return h===host||h===base||h.endsWith('.'+base);}))throw fail(409,'Gateway cookie hostname conflicts with a private Native shortcut. The owner must change or remove that shortcut first.');}
+   const edge=await startExperimentalGateway({config,relayOrigin:origin,accounts,sessions,admit,ended:gatewayEnded});
+   authHostnames.add(host);authNamespaces.add(base);return edge;
+  }finally{pendingAuthHosts.delete(host);pendingAuthNamespaces.delete(base);}
+ };
  // Registration is not a reachability test: client-only DNS and offline apps are valid.
  // Every actual Relay connection still resolves, vets and pins its destination.
  const validateDraft=async body=>{const config=webConfig(body);if(config.mode==='gateway'){if(!experimental)throw fail(503,'Experimental gateway is not configured');experimental.validateDefinition(config);return config;}if(config.mode==='native'&&authHostnames.has(new URL(config.address).hostname))throw fail(400,'Native apps must use a different hostname from Relay; cookies are not port isolated.');transport.registration(config.address,config);for(const extra of config.allowedOrigins)transport.registration(extra,config);return config;};
@@ -85,7 +103,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   await revoke(getSession(req));
   if(sessions.size>=16||[...sessions.values()].filter(s=>s.userId===user.id).length>=4)throw fail(429,'Session limit reached. Sign out of another browser.');
   const id=token(),dir=runtime+'/users/'+user.id;await mkdir(dir,{recursive:true,mode:0o700});await chmod(dir,0o700);
-  const manager=new Manager(dir,accounts.apps(user));manager.transport=transport;
+  const manager=new Manager(dir,userApps(user,await desktop.load(user.id)));manager.transport=transport;
   if(!layouts.has(user.id))layouts.set(user.id,{queue:Promise.resolve()});manager.persistence=layouts.get(user.id);
   await manager.init();
   if(accounts.state.users.find(u=>u.id===user.id)!==user)throw fail(401,'Account changed. Sign in again.');
@@ -117,12 +135,13 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   const s=getSession(req);if(!s)return res.status(401).json({error:'Authentication required'});req.session=s;next();
  });
  app.use('/api',(req,res,next)=>{if(!['GET','HEAD'].includes(req.method)&&(req.headers.origin!==origin||req.headers['x-csrf-token']!==req.session.csrf))return res.status(403).json({error:'Origin and CSRF required'});next();});
- app.get('/api/session',(req,res)=>{const s=req.session;res.json({csrf:s.csrf,user:publicUser(s.user),apps:[...accounts.apps(s.user).map(publicApp),...systemApps(s.user)],windows:[...s.manager.windows.values()],limits:{maxStreams:2}});});
+ app.get('/api/session',wrap(async(req,res)=>{const s=req.session,apps=await personalFor(req);res.json({csrf:s.csrf,user:publicUser(s.user),apps:[...apps.map(a=>({...publicApp(a),...(a.personal?{personal:true}:{})})),...systemApps(s.user)],windows:[...s.manager.windows.values()].filter(w=>apps.some(a=>a.id===w.appId)),limits:{maxStreams:2}});}));
  updaterRoutes(app,{config:updaterSettings,wrap,getSession,admit});
  app.get('/api/gateway/config',(req,res)=>res.json(experimental?.available()??{enabled:false,targets:[]}));
  for(const action of ['launch','end'])app.post('/api/gateway/'+action,wrap(async(req,res)=>{if(!experimental)throw fail(503,'Experimental gateway is not configured');res.json(experimental[action](req.session,req.body));},{queued:false}));
- const desktop=new Desktop(runtime,()=>[...accounts.state.services,...SYSTEM_APPS]);
- const desktopAuthority=req=>()=>{admit();const s=getSession(req);if(!s||s!==req.session)throw fail(401,'Authentication required');return [...accounts.apps(s.user),...systemApps(s.user)];};
+ const desktopAuthority=req=>()=>{admit();const s=getSession(req);if(!s||s!==req.session)throw fail(401,'Authentication required');return Object.assign([...accounts.apps(s.user),...systemApps(s.user)],{personalAllowed:!s.user.disabled&&!s.user.mustChange});};
+ app.post('/api/desktop/bookmarks',wrap(async(req,res)=>{if(req.session.user.mustChange)throw fail(403,'Password change required');res.json(await desktop.run(req.session.userId,desktopAuthority(req),s=>desktop.bookmark(s,req.body)));},{queued:false}));
+ const personalFor=async req=>{const s=req.session,state=await desktop.load(s.userId);desktopAuthority(req)();const apps=userApps(s.user,state);s.manager.apps=apps;return apps;};
  app.get('/api/desktop',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req)))));
  app.post('/api/desktop/folders',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s)=>desktop.folder(s,req.body)))));
  app.patch('/api/desktop/items/:id',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.patch(s,apps,req.params.id,req.body)))));
@@ -130,13 +149,13 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  app.get('/api/desktop/icons/:id',wrap(async(req,res)=>{const bytes=await desktop.readIcon(req.session.userId,desktopAuthority(req),req.params.id);res.set({'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}).send(bytes);}));
  const commitIcon=wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.upload(req.session.userId,s,apps,req.params.id,req.normalizedIcon))));
  app.post('/api/desktop/items/:id/icon',express.raw({type:()=>true,limit:'1mb'}),wrap(async(req,res)=>{
-  const authority=desktopAuthority(req),state=await desktop.load(req.session.userId);desktop.item(state,req.params.id,authority());
+  const authority=desktopAuthority(req),state=await desktop.load(req.session.userId);desktop.item(state,req.params.id,desktop.allowed(state,authority));
   req.normalizedIcon=await normalizeIcon(req.body,req.headers['content-type']);authority();await commitIcon(req,res,error=>{throw error;});
  },{queued:false}));
  const revokeUser=async id=>{await Promise.all([...sessions.values()].filter(s=>s.userId===id).map(revoke));};
  app.patch('/api/profile',wrap(async(req,res)=>{const user=await accounts.profile(req.session.userId,req.body||{});if('password' in req.body)await revokeUser(user.id);res.json(user);}));
  app.use('/api/admin',(req,res,next)=>{if(req.session.user.role!=='admin'||req.session.user.mustChange)return res.status(403).json({error:'Admin access required'});next();});
- gatewayManagementRoutes(app,{runtime,startup,getEdge:()=>experimental,setEdge:value=>{experimental=value;},startEdge:async config=>{const edge=await startExperimentalGateway({config,relayOrigin:origin,accounts,sessions,admit,ended:gatewayEnded});authHostnames.add(new URL(edge.desktopOrigin).hostname);return edge;},wrap,getSession,admit,accounts,sessions,managementPort:server.address().port,updaterPort:updaterSettings?Number(new URL(updaterSettings.uiOrigin).port||80):null,hostname});
+ gatewayManagementRoutes(app,{runtime,startup,getEdge:()=>experimental,setEdge:value=>{experimental=value;},startEdge:startPersonalSafeEdge,wrap,getSession,admit,accounts,sessions,managementPort:server.address().port,updaterPort:updaterSettings?Number(new URL(updaterSettings.uiOrigin).port||80):null,hostname});
  app.get('/api/admin/users',(req,res)=>res.json(accounts.state.users.map(publicUser)));
  app.post('/api/admin/users',wrap(async(req,res)=>res.json(await accounts.createUser(req.body||{}))));
  app.patch('/api/admin/users/:id',wrap(async(req,res)=>{const user=await accounts.updateUser(req.params.id,req.body||{});await revokeUser(user.id);res.json(user);}));
@@ -192,28 +211,34 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  app.get('/api/admin/diagnostics',(req,res)=>res.json({version:VERSION,uptimeSeconds:Math.floor(process.uptime()),sessions:sessions.size,users:accounts.state.users.length,services:accounts.state.services.length,streams:[...sessions.values()].reduce((n,s)=>n+s.manager.resources.size,0),memory:process.memoryUsage(),limits:{sessionsPerUser:4,sessionsGlobal:16,streamsPerUser:2,streamsGlobal:8},externalConnections:'HTTP(S) web apps with approved origins; WebSockets and streamed file transfers unsupported'}));
  app.post('/api/logout',wrap(async(req,res)=>{await revoke(req.session);res.clearCookie('relay_session',{path:'/',httpOnly:true,sameSite:'strict'});res.json({ok:true});}));
  const operation=fn=>wrap(async(req,res)=>{try{res.json(await fn(req,req.session.manager));}catch(e){throw fail(e.status||400,e.status?e.message:'Invalid window operation');}});
- const permit=(req,id)=>{if(!accounts.allowed(req.session.user,accounts.state.services.find(a=>a.id===id)))throw fail(403,'Service access denied');};
- app.post('/api/windows',operation((req,m)=>{permit(req,req.body?.appId);if(accounts.state.services.find(a=>a.id===req.body.appId)?.mode==='gateway'&&!experimental)throw fail(503,'Experimental gateway is not configured');return m.open(req.body.appId);}));
+ const permit=async(req,id)=>{if(!(await personalFor(req)).some(a=>a.id===id))throw fail(403,'Service access denied');};
+ app.post('/api/windows',operation(async(req,m)=>{await permit(req,req.body?.appId);if(accounts.state.services.find(a=>a.id===req.body.appId)?.mode==='gateway'&&!experimental)throw fail(503,'Experimental gateway is not configured');return m.open(req.body.appId);}));
  for(const action of ['navigate','reload'])app.post('/api/windows/:id/'+action,wrap(async(req,res)=>{
-  permit(req,req.params.id);
+  await permit(req,req.params.id);
   if(action==='navigate'&&(!req.body||Object.keys(req.body).length!==1||!['back','forward'].includes(req.body.direction)))throw fail(400,'Expected a back or forward direction only');
   if(action==='reload'&&req.body!==undefined&&(!req.body||typeof req.body!=='object'||Array.isArray(req.body)||Object.keys(req.body).length))throw fail(400,'Expected empty reload body');
   const result=action==='navigate'?await req.session.manager.navigate(req.params.id,req.body.direction):await req.session.manager.reload(req.params.id);
   if(getSession(req)!==req.session)throw fail(401,'Authentication required');
-  permit(req,req.params.id);res.json(result);
+  await permit(req,req.params.id);res.json(result);
  },{queued:false}));
- for(const method of ['patch','delete'])app[method]('/api/windows/:id',operation(async(req,m)=>{permit(req,req.params.id);if(method==='patch')return m.patch(req.params.id,req.body||{});if(!m.windows.has(req.params.id))throw Error();experimental?.closeWindow(req.session,req.params.id);await m.remove(req.params.id);return {closed:true};}));
+ for(const method of ['patch','delete'])app[method]('/api/windows/:id',operation(async(req,m)=>{await permit(req,req.params.id);if(method==='patch')return m.patch(req.params.id,req.body||{});if(!m.windows.has(req.params.id))throw Error();experimental?.closeWindow(req.session,req.params.id);await m.remove(req.params.id);return {closed:true};}));
  let health={checkedAt:0,keepsakes:false,parcels:false},probing;
  const webHealth=new HealthProbes({gatewayOrigin:origin});
  const appHealth=a=>webHealth.probe(a);
  app.get('/api/status',wrap(async(req,res)=>{
+  if(req.session.user.preferences?.showAppStatus===false)return res.json({});
+  const session=req.session;
   if(Date.now()-health.checkedAt>5000){probing??=(async()=>{let parcels=false;try{await access(ROOT+'integrations/parcels/dist/index.html');parcels=!!nativeService;}catch{}health={checkedAt:Date.now(),parcels,keepsakes:await nativeService?.probe()||false};})().finally(()=>probing=null);await probing;}
-  const status={};await Promise.all(accounts.apps(req.session.user).map(async a=>{
-   if(a.mode==='gateway'){status[a.id]={state:'Unknown',source:'relay',checkedAt:Date.now(),detail:experimental?'Experimental gateway; upstream health not measured':'Experimental gateway unavailable'};return;}
-   if(a.kind==='web'){status[a.id]=await appHealth(a);return;}
+  if(getSession(req)!==session)throw fail(401,'Authentication required');if(session.user.preferences?.showAppStatus===false)return res.json({});
+  const status={},definitions=new Map();await Promise.all(accounts.apps(session.user).map(async a=>{
+   definitions.set(a.id,JSON.stringify(a));
+   if(a.mode==='gateway')return;
+   if(a.kind==='web'){status[a.id]=await webHealth.probe(a,()=>getSession(req)===session&&session.user.preferences?.showAppStatus!==false&&JSON.stringify(accounts.state.services.find(current=>current.id===a.id))===definitions.get(a.id)&&accounts.allowed(session.user,a));return;}
    const r=req.session.manager.resources.get(a.id);
    status[a.id]=a.mode==='native'?{state:health[a.template]?'Online':'Offline',source:'relay',checkedAt:health.checkedAt,detail:'Native runtime readiness'}:{state:r?(r.page.isClosed()||r.failed?'Offline':'Online'):'Unknown',source:'relay',checkedAt:Date.now(),detail:r?'Synthetic browser readiness':'Synthetic template; no running page. Upstream health not measured.'};
-  }));res.json(status);
+  }));if(getSession(req)!==session)throw fail(401,'Authentication required');if(session.user.preferences?.showAppStatus===false)return res.json({});
+  const current=accounts.apps(session.user);for(const a of current)if(a.mode==='gateway'){try{status[a.id]=experimental?experimental.status(session,a.id):{state:'Unknown',source:'relay',checkedAt:0,detail:'Gateway unavailable; upstream not observed'};}catch(e){if(e.status!==400)throw e;status[a.id]={state:'Unknown',source:'relay',checkedAt:0,detail:'Configured Gateway target unavailable; upstream not observed'};}}
+  const allowed=new Set(current.filter(a=>JSON.stringify(a)===definitions.get(a.id)).map(a=>a.id));res.json(Object.fromEntries(Object.entries(status).filter(([id])=>allowed.has(id))));
  }));
  app.get('/api/metrics',operation((req,m)=>m.metrics()));
  server.on('upgrade',(req,socket,head)=>{
@@ -230,6 +255,6 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  await rm(runtime+'/bootstrap-url.txt',{force:true});
  if(setup){await writeFile(runtime+'/setup-url.txt',origin+'/#'+setup,{mode:0o600});await chmod(runtime+'/setup-url.txt',0o600);}
  await writeFile(runtime+'/open-url.txt',origin+'/',{mode:0o600});await chmod(runtime+'/open-url.txt',0o600);
- if(gatewaySettings)try{experimental=await startExperimentalGateway({config:gatewaySettings,relayOrigin:origin,accounts,sessions,admit,ended:gatewayEnded});}catch(e){await nativeService?.close();await webHealth.close();await transport.close();await new Promise(r=>server.close(r));throw e;}
- return {origin,app,server,accounts,sessions,get experimentalGateway(){return experimental;},get manager(){return [...sessions.values()][0]?.manager;},nativeService,authorized:req=>!!getSession(req),close:async()=>{await experimental?.close();await webHealth.close();await transport.close();for(const s of [...sessions.values()])await revoke(s);await nativeService?.close();await new Promise(r=>server.close(r));}};
+ if(gatewaySettings)try{experimental=await startPersonalSafeEdge(gatewaySettings);}catch(e){await nativeService?.close();await webHealth.close();await transport.close();await new Promise(r=>server.close(r));throw e;}
+ return {origin,app,server,accounts,sessions,get experimentalGateway(){return experimental;},get manager(){return [...sessions.values()][0]?.manager;},nativeService,authorized:req=>!!getSession(req),close:async()=>{await experimental?.close();await webHealth.close();await transport.close();for(const s of [...sessions.values()])await revoke(s);await nativeService?.close();await new Promise(r=>{server.close(r);for(const socket of connections)socket.destroy();});}};
 }
