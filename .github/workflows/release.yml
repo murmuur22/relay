@@ -8,6 +8,11 @@ on:
         description: 'Existing public prerelease tag to qualify; does not publish or promote'
         required: true
         type: string
+      mixed-control:
+        description: 'TEST ONLY exact installed mixed control runtime-only v064 to v066 gate; no publication or bootstrap'
+        required: false
+        default: false
+        type: boolean
       upgrade-from:
         description: 'OPTIONAL: v0.4.2 (off), v0.6.1 (Direct to v2), v0.6.2 (v2 to v3), v0.6.3/v0.6.4 (signed runtime upgrade/rollback plus web-only delivery bootstrap)'
         required: false
@@ -136,7 +141,7 @@ jobs:
           gh release create "$RELEASE_TAG" --repo murmuur22/relay --verify-tag --draft --prerelease --latest=false --title "$RELEASE_TAG — Linux x64 qualification prerelease" --generate-notes "$RUNNER_TEMP/relay-release/relay-release.json" "$RUNNER_TEMP/relay-release/relay-release.attestation.json" "$RUNNER_TEMP/relay-release/relay-linux-x64.tar.gz" "$RUNNER_TEMP/relay-release/relay-updater-linux-x64.tar.gz"
           gh release edit "$RELEASE_TAG" --repo murmuur22/relay --draft=false --prerelease --latest=false
   qualify:
-    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch'
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && !inputs['mixed-control']
     strategy:
       fail-fast: false
       matrix:
@@ -197,7 +202,7 @@ jobs:
           sudo journalctl -u relay.service -u relay-updater-web.service -u relay-updater-broker.service --no-pager -n 100
       # This job deliberately has no release-write permission or promotion step.
   qualify-upgrade:
-    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && inputs['upgrade-from'] != ''
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && !inputs['mixed-control'] && inputs['upgrade-from'] != ''
     strategy:
       fail-fast: false
       matrix:
@@ -257,3 +262,57 @@ jobs:
         run: |
           sudo journalctl -u relay.service -u relay-updater-web.service -u relay-updater-broker.service -u relay-qualification-upgrade.service --no-pager -n 100
       # No SSH, credentials, release promotion, receipt fabrication or state uploads.
+  mixed-runtime:
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && inputs['mixed-control'] && inputs.version == 'v0.6.6'
+    strategy:
+      fail-fast: false
+      matrix:
+        network-mode: [loopback, private-lan]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26.8.1'
+      - name: Exact source and original regression prerequisites
+        run: |
+          git diff 23fd1dfe506d691452ce6e3c5754ba8448a98ede --exit-code -- deploy updater server package.json package-lock.json
+          python3 -m unittest updater.tests.test_deployment updater.tests.test_private_lan updater.tests.test_upgrade_qualification -v
+          npm ci --ignore-scripts
+          node node_modules/playwright/cli.js install-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+          sudo install -m 0755 "$(command -v node)" /usr/bin/node
+          sudo chmod 0755 /opt
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Anonymous original signed inputs
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/mixed-public"
+          for tag in v0.4.2 v0.6.3 v0.6.4; do
+            mkdir -m 700 "$RUNNER_TEMP/mixed-public/$tag"
+            for asset in relay-release.json relay-release.attestation.json relay-updater-linux-x64.tar.gz; do
+              env -i PATH="$PATH" curl -q --fail --location --proto '=https' --proto-redir '=https' --max-time 180 --max-filesize 1048576 --output "$RUNNER_TEMP/mixed-public/$tag/$asset" "https://github.com/murmuur22/relay/releases/download/$tag/$asset"
+            done
+          done
+          env -i PATH="$PATH" curl -q --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --max-filesize 1073741824 --output "$RUNNER_TEMP/mixed-public/v0.6.4/relay-linux-x64.tar.gz" https://github.com/murmuur22/relay/releases/download/v0.6.4/relay-linux-x64.tar.gz
+      - name: Actual unchanged mixed Engine signed v064 to v066 and matching-state rollback
+        env:
+          NETWORK_MODE: ${{ matrix.network-mode }}
+        run: |
+          network_args=()
+          if [ "$NETWORK_MODE" = private-lan ]; then
+            PRIVATE_IP="$(node --input-type=module -e "import {networkInterfaces} from 'node:os'; import {privateIPv4} from './updater/web/broker-client.mjs'; const ip=Object.values(networkInterfaces()).flat().find(n=>n.family==='IPv4'&&!n.internal&&privateIPv4(n.address))?.address; if(!ip)process.exit(1); console.log(ip)")"
+            network_args=(--private-lan "$PRIVATE_IP")
+          fi
+          set -o pipefail
+          sudo env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME=/nonexistent GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted MIXED_PUBLIC="$RUNNER_TEMP/mixed-public" RELAY_DISPOSABLE_SYSTEMD=I_ACCEPT_DISPOSABLE_HOST_MUTATION RELAY_DISPOSABLE_SIGNED_UPGRADE=I_ACCEPT_FRESH_HOST_SIGNED_UPGRADE_AND_ROLLBACK /usr/bin/python3 tests/mixed-runtime-only/qualify-mixed.py --release-dir "$RUNNER_TEMP/mixed-public/v0.6.4" --upgrade-from v0.6.4 --version v0.6.6 --apply "${network_args[@]}" | tee "$RUNNER_TEMP/mixed-result.jsonl"
+      - name: Sanitized diagnostics on failure
+        if: failure()
+        run: |
+          sudo systemctl show relay.service relay-updater-web.service relay-updater-broker.service relay-qualification-upgrade.service --property=ActiveState,SubState,Result,ExecMainStatus
+          sudo journalctl -u relay-qualification-upgrade.service --no-pager -n 40

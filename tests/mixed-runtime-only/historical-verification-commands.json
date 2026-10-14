@@ -1,0 +1,128 @@
+{
+  "v0.4.2": {
+    "command": [
+      "/Users/angel/.local/bin/gh",
+      "attestation",
+      "verify",
+      "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/release-inputs/v0.4.2/relay-release.json",
+      "--bundle",
+      "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/release-inputs/v0.4.2/relay-release.attestation.json",
+      "--repo",
+      "murmuur22/relay",
+      "--signer-workflow",
+      "murmuur22/relay/.github/workflows/release.yml",
+      "--source-ref",
+      "refs/tags/v0.4.2",
+      "--source-digest",
+      "5466bd50b3a756955ae9dbd6ceb3f5fde29e7af1",
+      "--signer-digest",
+      "5466bd50b3a756955ae9dbd6ceb3f5fde29e7af1",
+      "--deny-self-hosted-runners",
+      "--format",
+      "json"
+    ],
+    "exit": 0,
+    "stdout": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/evidence/v0.4.2-attestation-current.stdout",
+    "stderr": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/evidence/v0.4.2-attestation-current.stderr",
+    "stdoutPin": {
+      "sha256": "dd329a85e70724417ebd370bd56aa669f502cc8bf3944788f63812cb9274e56a",
+      "size": 13575
+    },
+    "stderrPin": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "anonymousEnvironment": {
+      "PATH": "/usr/bin:/bin",
+      "HOME": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/anonymous-home",
+      "GH_CONFIG_DIR": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/anonymous-home/absent-gh",
+      "GH_PROMPT_DISABLED": "1",
+      "TMPDIR": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/anonymous-home",
+      "LC_ALL": "C"
+    }
+  },
+  "v0.6.3": {
+    "command": [
+      "/Users/angel/.local/bin/gh",
+      "attestation",
+      "verify",
+      "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/release-inputs/v0.6.3/relay-release.json",
+      "--bundle",
+      "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/release-inputs/v0.6.3/relay-release.attestation.json",
+      "--repo",
+      "murmuur22/relay",
+      "--signer-workflow",
+      "murmuur22/relay/.github/workflows/release.yml",
+      "--source-ref",
+      "refs/tags/v0.6.3",
+      "--source-digest",
+      "220553aa557d0d6b4a442a11f2f1ee7ed88625ab",
+      "--signer-digest",
+      "220553aa557d0d6b4a442a11f2f1ee7ed88625ab",
+      "--deny-self-hosted-runners",
+      "--format",
+      "json"
+    ],
+    "exit": 0,
+    "stdout": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/evidence/v0.6.3-attestation-current.stdout",
+    "stderr": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/evidence/v0.6.3-attestation-current.stderr",
+    "stdoutPin": {
+      "sha256": "5675ea5e314b966369147000abf2978188ffe9a5809694a7b8cd45c63a375567",
+      "size": 13728
+    },
+    "stderrPin": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "anonymousEnvironment": {
+      "PATH": "/usr/bin:/bin",
+      "HOME": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/anonymous-home",
+      "GH_CONFIG_DIR": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/anonymous-home/absent-gh",
+      "GH_PROMPT_DISABLED": "1",
+      "TMPDIR": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/anonymous-home",
+      "LC_ALL": "C"
+    }
+  },
+  "v0.6.4": {
+    "command": [
+      "/Users/angel/.local/bin/gh",
+      "attestation",
+      "verify",
+      "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/release-inputs/v0.6.4/relay-release.json",
+      "--bundle",
+      "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/release-inputs/v0.6.4/relay-release.attestation.json",
+      "--repo",
+      "murmuur22/relay",
+      "--signer-workflow",
+      "murmuur22/relay/.github/workflows/release.yml",
+      "--source-ref",
+      "refs/tags/v0.6.4",
+      "--source-digest",
+      "0bf423eae6709b28fd5ace2a4b97e74924626fc8",
+      "--signer-digest",
+      "0bf423eae6709b28fd5ace2a4b97e74924626fc8",
+      "--deny-self-hosted-runners",
+      "--format",
+      "json"
+    ],
+    "exit": 0,
+    "stdout": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/evidence/v0.6.4-attestation-current.stdout",
+    "stderr": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/evidence/v0.6.4-attestation-current.stderr",
+    "stdoutPin": {
+      "sha256": "c17c0f81932fbc50d7228a1cf1649c41a9a4350b1bdeba7b4f4f3aa0903aa4fe",
+      "size": 13651
+    },
+    "stderrPin": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "anonymousEnvironment": {
+      "PATH": "/usr/bin:/bin",
+      "HOME": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/anonymous-home",
+      "GH_CONFIG_DIR": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/anonymous-home/absent-gh",
+      "GH_PROMPT_DISABLED": "1",
+      "TMPDIR": "/Users/angel/.hermes/cache/scratch/relay-updater-ui-completion/fresh-inputs/anonymous-home",
+      "LC_ALL": "C"
+    }
+  }
+}
