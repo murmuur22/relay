@@ -11,7 +11,7 @@ import {Desktop} from './desktop.mjs';
 import {normalizeIcon,iconPython} from './icons.mjs';
 import express from 'express';
 import {publicApp,webConfig} from './webapps.mjs';
-import {Transport} from './transport.mjs';
+import {Transport,uniqueAuthority} from './transport.mjs';
 import {HealthProbes} from './health.mjs';
 import {previewWeb} from './web-browser.mjs';
 import {WebSocketServer} from 'ws';
@@ -56,7 +56,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  const authHostnames=new Set([hostname]),pendingAuthHosts=new Set(),pendingAuthNamespaces=new Set(),authNamespaces=new Set(gatewaySettings?[gatewaySettings.deployment?.appBaseDomain??'relay.test']:[]);
  if(gatewaySettings)authHostnames.add(gatewaySettings.deployment?.desktopHostname??'desktop.relay.test');
  for(const service of accounts.state.services)if(service.kind==='web'&&service.mode==='native'&&authHostnames.has(new URL(service.address).hostname))throw Error('Native apps must use a different hostname from Relay; cookies are not port isolated. Startup refused; existing account data is unchanged.');
- const app=express(),server=http.createServer(app),sessions=new Map();
+ const app=express(),server=http.createServer(app),sessions=new Map(),definitionEpochs=new Map();
  // Include sockets that have not yet produced a request (partial HTTP headers).
  // Session revocation below still owns operation/browser/HTTP/WS cancellation.
  const connections=new Set();server.on('connection',socket=>{connections.add(socket);socket.once('close',()=>connections.delete(socket));});
@@ -115,7 +115,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   res.cookie('relay_session',id,{httpOnly:true,sameSite:'strict',path:'/',maxAge:sessionMs});res.json({user:publicUser(user)});
  };
  app.disable('x-powered-by');
- app.use((req,res,next)=>{res.set({'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Relay-Runtime-Instance':runtimeInstance});if(req.headers.host!==new URL(origin).host||(req.headers.origin&&req.headers.origin!==origin))return res.status(403).json({error:'Invalid Host or Origin'});next();});
+ app.use((req,res,next)=>{res.set({'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Relay-Runtime-Instance':runtimeInstance});if(!uniqueAuthority(req)||req.headers.host!==new URL(origin).host||(req.headers.origin&&req.headers.origin!==origin))return res.status(403).json({error:'Invalid Host or Origin'});next();});
  app.get('/health/ready',(req,res)=>res.json({status:'ready',version:VERSION,maintenance:maintenance()}));
  app.use((req,res,next)=>{if(maintenance()&&!(['GET','HEAD'].includes(req.method)&&(req.path==='/'||/^\/desktop(?:\/|$)/.test(req.path)||req.path.startsWith('/assets/')||req.path.startsWith('/fonts/'))))return res.status(503).json({error:'Relay is in maintenance. Try again after the update.'});next();});
  app.use('/api',express.json({limit:'16kb'}));
@@ -144,6 +144,8 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  const personalFor=async req=>{const s=req.session,state=await desktop.load(s.userId);desktopAuthority(req)();const apps=userApps(s.user,state);s.manager.apps=apps;return apps;};
  app.get('/api/desktop',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req)))));
  app.post('/api/desktop/folders',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s)=>desktop.folder(s,req.body)))));
+ app.post('/api/desktop/move',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.batch(s,apps,req.body))),{queued:false}));
+ app.post('/api/desktop/sort',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.sort(s,apps,req.body))),{queued:false}));
  app.patch('/api/desktop/items/:id',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.patch(s,apps,req.params.id,req.body)))));
  app.delete('/api/desktop/items/:id',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.remove(s,apps,req.params.id)))));
  app.get('/api/desktop/icons/:id',wrap(async(req,res)=>{const bytes=await desktop.readIcon(req.session.userId,desktopAuthority(req),req.params.id);res.set({'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}).send(bytes);}));
@@ -203,6 +205,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   if(method==='patch'&&service?.kind==='web')await validateDraft({...service,...req.body});
   const affected=[...sessions.values()].filter(s=>s.user.role!=='admin'&&accounts.allowed(accounts.state.users.find(u=>u.id===s.userId),service));
   const result=await accounts.service(req.params.id,req.body||{},method==='delete');
+  if(method==='delete')definitionEpochs.delete(req.params.id);else definitionEpochs.set(req.params.id,token());
   experimental?.endApp(req.params.id);
   await Promise.all(affected.map(revoke));
   for(const s of sessions.values()){for(const response of s.responses)if(response.serviceId===req.params.id)response.destroy();s.manager.apps=accounts.apps(accounts.state.users.find(u=>u.id===s.userId));await s.manager.remove(req.params.id);}
@@ -230,21 +233,22 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   const session=req.session;
   if(Date.now()-health.checkedAt>5000){probing??=(async()=>{let parcels=false;try{await access(ROOT+'integrations/parcels/dist/index.html');parcels=!!nativeService;}catch{}health={checkedAt:Date.now(),parcels,keepsakes:await nativeService?.probe()||false};})().finally(()=>probing=null);await probing;}
   if(getSession(req)!==session)throw fail(401,'Authentication required');if(session.user.preferences?.showAppStatus===false)return res.json({});
-  const status={},definitions=new Map();await Promise.all(accounts.apps(session.user).map(async a=>{
-   definitions.set(a.id,JSON.stringify(a));
+  const status={},definitions=new Map(),epochs=new Map();await Promise.all(accounts.apps(session.user).map(async a=>{
+   definitions.set(a.id,JSON.stringify(a));epochs.set(a.id,definitionEpochs.get(a.id)??0);
    if(a.mode==='gateway')return;
-   if(a.kind==='web'){status[a.id]=await webHealth.probe(a,()=>getSession(req)===session&&session.user.preferences?.showAppStatus!==false&&JSON.stringify(accounts.state.services.find(current=>current.id===a.id))===definitions.get(a.id)&&accounts.allowed(session.user,a));return;}
+   if(a.kind==='web'){status[a.id]=await webHealth.probe({...a,observationEpoch:epochs.get(a.id)},()=>getSession(req)===session&&session.user.preferences?.showAppStatus!==false&&(definitionEpochs.get(a.id)??0)===epochs.get(a.id)&&JSON.stringify(accounts.state.services.find(current=>current.id===a.id))===definitions.get(a.id)&&accounts.allowed(session.user,a));return;}
    const r=req.session.manager.resources.get(a.id);
    status[a.id]=a.mode==='native'?{state:health[a.template]?'Online':'Offline',source:'relay',checkedAt:health.checkedAt,detail:'Native runtime readiness'}:{state:r?(r.page.isClosed()||r.failed?'Offline':'Online'):'Unknown',source:'relay',checkedAt:Date.now(),detail:r?'Synthetic browser readiness':'Synthetic template; no running page. Upstream health not measured.'};
   }));if(getSession(req)!==session)throw fail(401,'Authentication required');if(session.user.preferences?.showAppStatus===false)return res.json({});
-  const current=accounts.apps(session.user);for(const a of current)if(a.mode==='gateway'){try{status[a.id]=experimental?experimental.status(session,a.id):{state:'Unknown',source:'relay',checkedAt:0,detail:'Gateway unavailable; upstream not observed'};}catch(e){if(e.status!==400)throw e;status[a.id]={state:'Unknown',source:'relay',checkedAt:0,detail:'Configured Gateway target unavailable; upstream not observed'};}}
-  const allowed=new Set(current.filter(a=>JSON.stringify(a)===definitions.get(a.id)).map(a=>a.id));res.json(Object.fromEntries(Object.entries(status).filter(([id])=>allowed.has(id))));
+  const current=accounts.apps(session.user);for(const a of current)if(a.mode==='gateway'){try{status[a.id]=experimental?await experimental.status(session,a.id,()=>getSession(req)===session&&session.user.preferences?.showAppStatus!==false&&(definitionEpochs.get(a.id)??0)===epochs.get(a.id)&&JSON.stringify(accounts.state.services.find(current=>current.id===a.id))===definitions.get(a.id),epochs.get(a.id)):{state:'Unknown',reachability:'not-monitored',reason:'gateway-unavailable',source:'relay',checkedAt:0,detail:'Gateway unavailable; upstream not observed'};}catch(e){if(e.status!==400)throw e;status[a.id]={state:'Unknown',source:'relay',checkedAt:0,detail:'Configured Gateway target unavailable; upstream not observed'};}}
+  if(getSession(req)!==session)throw fail(401,'Authentication required');if(session.user.preferences?.showAppStatus===false)return res.json({});
+  const allowed=new Set(accounts.apps(session.user).filter(a=>(definitionEpochs.get(a.id)??0)===epochs.get(a.id)&&JSON.stringify(a)===definitions.get(a.id)).map(a=>a.id));res.json(Object.fromEntries(Object.entries(status).filter(([id])=>allowed.has(id))));
  }));
  app.get('/api/metrics',operation((req,m)=>m.metrics()));
  server.on('upgrade',(req,socket,head)=>{
   if(maintenance()){socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');return;}
   const s=getSession(req),match=/^\/ws\/stream\/([a-z0-9-]+)$/.exec(req.url);
-  if(req.headers.host!==new URL(origin).host||req.headers.origin!==origin||!s||!match||!accounts.allowed(s.user,accounts.state.services.find(a=>a.id===match[1]))||s.manager.windows.get(match[1])?.mode!=='stream'){socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return;}
+  if(!uniqueAuthority(req)||req.headers.host!==new URL(origin).host||req.headers.origin!==origin||!s||!match||!accounts.allowed(s.user,accounts.state.services.find(a=>a.id===match[1]))||s.manager.windows.get(match[1])?.mode!=='stream'){socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return;}
   wss.handleUpgrade(req,socket,head,ws=>{ws.on('error',()=>{});s.sockets.add(ws);ws.once('close',()=>s.sockets.delete(ws));s.manager.attach(match[1],ws);});
  });
  if(profile==='development')app.use('/native/:service',(req,res,next)=>{const s=req.session;const service=accounts.state.services.find(a=>a.template===req.params.service&&a.mode==='native'&&accounts.allowed(s.user,a));if(!service)return res.status(403).json({error:'Service access denied'});res.serviceId=service.id;s.responses.add(res);res.once('close',()=>s.responses.delete(res));next();});

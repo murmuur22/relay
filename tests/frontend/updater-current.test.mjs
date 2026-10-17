@@ -16,7 +16,7 @@ test('desktop updater does not offer to install the current release', {timeout:2
  await page.route('**/api/updater/check',route=>route.fulfill({json:snapshot}));
  await page.route('**/api/updater/state',route=>route.fulfill({json:snapshot}));
  await browserLogin(page,gateway.origin,runtime);
- await page.getByRole('button',{name:'Open Updater',exact:true}).click();
+ await page.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
  const win=page.locator('[data-window-id="system-updater"]');
  await expect(win.getByLabel('Available release')).toHaveValue('v1.2.3');
  await expect(win.getByRole('button',{name:'Start update',exact:true})).toBeDisabled();

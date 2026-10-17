@@ -1,12 +1,13 @@
 import {Transport} from './transport.mjs';
-const unknown=detail=>({state:'Unknown',source:'relay',checkedAt:Date.now(),detail});
+const unknown=detail=>({state:'Unknown',reachability:'unknown',reason:'policy-or-admission-denied',authRequired:false,source:'relay',checkedAt:Date.now(),detail});
 // Health has independent network capacity. FIFO admission prevents registry tail
 // starvation, while stable signatures coalesce observations across account writes.
 export class HealthProbes {
  constructor(options){this.transport=new Transport(options);this.cache=new Map();this.queue=[];this.active=new Set();this.closed=false;}
  probe(config,authorized=()=>true){
   if(this.closed)return Promise.resolve(unknown('Relay health checks stopped.'));
-  const key=JSON.stringify([config.address,[...(config.allowedOrigins||[])].sort()]);
+  try{if(authorized()!==true)return Promise.resolve(unknown('No live status observer; no read or check admitted.'));}catch{return Promise.resolve(unknown('No live status observer; no read or check admitted.'));}
+  const key=JSON.stringify(config);
   const cached=this.cache.get(key);
   if(cached&&(!cached.completed||Date.now()-cached.completed<5000)){if(!cached.completed){if(cached.waiters.size>=32)return Promise.resolve(unknown('Relay health observer limit; no new check admitted.'));cached.waiters.add(authorized);}return cached.promise;}
   for(const [k,v] of this.cache)if(v.completed&&Date.now()-v.completed>=5000)this.cache.delete(k);

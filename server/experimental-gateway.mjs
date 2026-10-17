@@ -11,7 +11,8 @@ import {createTransport,validateApp} from './experimental-gateway-transport.mjs'
 import {forgetCredential} from './experimental-gateway-profile.mjs';
 import {fail} from './accounts.mjs';
 import {isIP} from 'node:net';
-import {safeIP} from './transport.mjs';
+import {safeIP,uniqueAuthority} from './transport.mjs';
+import {HealthProbes} from './health.mjs';
 import {validateDeployment} from './experimental-gateway-config.mjs';
 import {gatewayHTTPSOrigin,gatewayLaunchOrigin} from './experimental-gateway-domains.mjs';
 const secret=()=>randomBytes(32).toString('hex');
@@ -44,7 +45,7 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
  const relay=new URL(relayOrigin);if(relay.protocol!=='http:'||(!config.deployment&&relay.hostname!=='127.0.0.1'))throw Error('Experimental gateway requires private management HTTP');
  const routes=new Map(),tickets=new Map(),caps=new Map(),active=new Set(),bridgeSockets=new Set();
  let desktopOrigin,transport,closed=false;
- const managementSockets=new Set();
+ const managementSockets=new Set(),health=new HealthProbes({gatewayOrigin:relayOrigin});
  const available=()=>({enabled:true,desktopOrigin,appBaseDomain:config.deployment?.appBaseDomain??'relay.test',targets:config.targets.map(({id,label})=>({id,label}))});
  function validateDefinition(app){if(!config.targets.some(t=>t.id===app.gateway?.target))throw fail(400,'Unknown configured gateway target');}
  function authority(session,appId){
@@ -89,7 +90,12 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
   for(const route of [...routes.values()])if(route.session===session&&route.appId===data.appId&&route.launchId===data.launchId)retire(route);
   return {ended:true};
  }
- function status(session,appId){authority(session,appId);const route=[...routes.values()].find(r=>r.session===session&&r.appId===appId);if(route){current(route);if(route.observation)return {...route.observation};}return {state:'Unknown',source:'relay',checkedAt:0,detail:'Gateway configured; No upstream response observed for this session. Open the app to measure transport; listener availability is not upstream health.'};}
+ async function status(session,appId,observer=()=>true,epoch=0){
+  const app=authority(session,appId),definition=JSON.stringify(app),target=config.targets.find(t=>t.id===app.gateway.target);
+  const authorized=()=>{try{return !closed&&observer()===true&&JSON.stringify(authority(session,appId))===definition;}catch{return false;}};
+  const result=await health.probe({address:target.upstream+target.entryPath,allowedOrigins:[],tls:target.tls,definition,epoch},authorized);
+  if(!authorized())return {state:'Unknown',reachability:'unknown',reason:'observer-expired',source:'relay',checkedAt:0,detail:'No current authorised status observer.'};return result;
+ }
  function closeWindow(session,appId){for(const route of [...routes.values()])if(route.session===session&&route.appId===appId)retire(route);}
  function getCap(req,route){const c=caps.get(cookie(req,'__Host-relay_cap'));if(!c||c.route!==route||c.expires<=Date.now())throw denied();current(route);return c;}
  function bridgeHeaders(req){
@@ -112,7 +118,7 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
   });up.on('error',()=>res.destroy());up.setTimeout(30000,()=>up.destroy());res.on('close',()=>up.destroy());req.on('error',()=>up.destroy());req.pipe(up);
  }
  async function handle(req,res){
-  if(closed)throw denied();
+  if(closed||!uniqueAuthority(req))throw denied();
   if(config.proxy)validateProxyRequest(req,config.proxy);
   res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Content-Type-Options','nosniff');
   const main=req.headers.host===new URL(desktopOrigin).host,route=routes.get(req.headers.host);
@@ -148,7 +154,7 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
  server.on('upgrade',(req,socket,head)=>{
   socket.on('error',()=>{});
   try{
-   if(closed)throw denied();
+   if(closed||!uniqueAuthority(req))throw denied();
    if(config.proxy)validateProxyRequest(req,config.proxy);
    if(req.headers.host===new URL(desktopOrigin).host){
     if(req.headers.origin!==desktopOrigin||!/^\/ws\/stream\/[a-z0-9-]+$/.test(req.url))throw denied();
@@ -172,7 +178,7 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
    if(state.ids.size>=512&&!state.ids.has(r.launchId))state.cooldownUntil=Date.now()+60000;
    else state.ids.set(r.launchId,Date.now()+60000);
    retire(r);
-  }transport.close();
+  }transport.close();await health.close();
   for(const socket of bridgeSockets)if(preserveManagement&&managementSockets.has(socket.remoteAddress+':'+socket.remotePort))setTimeout(()=>socket.destroy(),5000).unref();else socket.destroy();
   const done=new Promise(r=>server.close(r));
   if(!preserveManagement||!managementSockets.size)await done;

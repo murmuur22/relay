@@ -8,7 +8,7 @@ import {browserLogin,authenticate,client,password} from '../auth-helper.mjs';
 import {itemToken} from '../../src/desktop.js';
 test('compiled desktop updater opens one native protected window, including private deep links, without a popup or manager',{timeout:30000},async t=>{
  const runtime=await mkdtemp(tmpdir()+'/relay-updater-ui-'),g=await createGateway({port:0,runtime,profile:'development'}),browser=await chromium.launch({headless:true,chromiumSandbox:true});let stage='initialization';const mark=name=>{stage=name;console.log('Updater desktop qualification:',name);};t.after(async()=>{console.log('Updater desktop cleanup after:',stage);await browser.close();console.log('Updater desktop cleanup: client closed');await g.close();console.log('Updater desktop cleanup: gateway closed');await rm(runtime,{recursive:true,force:true});},{timeout:10000});const context=await browser.newContext(),page=await context.newPage();page.setDefaultTimeout(5000);page.setDefaultNavigationTimeout(10000);mark('login');await browserLogin(page,g.origin,runtime);mark('open unavailable updater');
- await page.getByRole('button',{name:'Open Updater',exact:true}).click();
+ await page.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
  const win=page.getByRole('region',{name:'Updater window'}).or(page.locator('[data-window-id="system-updater"]'));
  await expect(win).toBeVisible();assert.equal(context.pages().length,1);
  await expect(win.getByRole('alert')).toContainText('Updater unavailable');
@@ -28,6 +28,6 @@ test('compiled desktop updater opens one native protected window, including priv
  mark('logout and administrator demotion');await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:'Sign out',exact:true}).click();await expect(win).toHaveCount(0);
  const admin=await authenticate(g.origin,runtime),adminApi=client(g.origin,admin);assert.equal((await adminApi('/admin/users','POST',{username:'operator',role:'admin',password})).status,200);
  const operator=client(g.origin,await authenticate(g.origin,runtime,'operator'));
- await browserLogin(page,g.origin,runtime);await page.getByRole('button',{name:'Open Updater',exact:true}).click();await expect(win).toBeVisible();
+ await browserLogin(page,g.origin,runtime);await page.getByRole('button',{name:'Open Updater',exact:true}).dblclick();await expect(win).toBeVisible();
  assert.equal((await operator('/admin/users/'+admin.s.user.id,'PATCH',{role:'user'})).status,200);await expect(win).toHaveCount(0,{timeout:7000});
 });

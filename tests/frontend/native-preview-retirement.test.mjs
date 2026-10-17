@@ -50,7 +50,7 @@ async function fixture(t){
  const control=await context.newPage();await control.goto(retired+'control');await expect(control.getByRole('heading')).toHaveText('Synthetic native preview');await control.close();
  assert.ok(hits.some(h=>h.path==='/control'&&h.hasCookie));hits.length=0;
  const requests=[];context.on('request',r=>{if(r.url().startsWith(retired))requests.push(r.url());});
- await page.getByRole('button',{name:'Open Control Panel',exact:true}).click();await page.getByRole('tab',{name:'Apps',exact:true}).click();
+ await page.getByRole('button',{name:'Open Control Panel',exact:true}).dblclick();await page.getByRole('tab',{name:'Apps',exact:true}).click();
  async function wizard(address,mode='window'){
   await page.getByRole('button',{name:'Add app',exact:true}).click();await page.getByLabel('Native',{exact:true}).check();
   await page.getByRole('button',{name:'Next',exact:true}).click();await page.getByLabel('App name',{exact:true}).fill('Synthetic native');await page.getByLabel('Address',{exact:true}).fill(address);await page.getByRole('button',{name:'Next',exact:true}).click();

@@ -21,7 +21,7 @@ test('real admin embedded launch has no popup, survives stop/restart/sign-in and
  g=await createGateway(options);web=await createUpdaterWeb({uiOrigin,relayOrigin:g.origin,socketPath:config.socketPath});
  browser=await chromium.launch({headless:true,chromiumSandbox:true});const context=await browser.newContext({viewport:{width:1440,height:1050}}),page=await context.newPage();let installs=0;context.on('request',r=>{if(new URL(r.url()).pathname==='/updater/api/install')installs++;});const errors=[];page.on('pageerror',e=>errors.push(e.message));await browserLogin(page,g.origin,options.runtime);
  await page.evaluate(async()=>{const s=await(await fetch('/api/session')).json();await fetch('/api/preferences',{method:'PATCH',headers:{'Content-Type':'application/json','X-CSRF-Token':s.csrf},body:JSON.stringify({interfaceAnimations:true})});});
- await page.getByRole('button',{name:'Open Updater',exact:true}).click();const browse=page.locator('[data-window-id="system-updater"]');
+ await page.getByRole('button',{name:'Open Updater',exact:true}).dblclick();const browse=page.locator('[data-window-id="system-updater"]');
  await expect(browse.getByLabel('Available release')).toHaveValue('v0.3.1');await browse.getByRole('button',{name:'Start update',exact:true}).click();
  const iframe=page.locator('iframe[title="Independent Relay updater"]');await expect(iframe).toBeVisible();assert.equal(context.pages().length,1);
  const app=page.frameLocator('iframe[title="Independent Relay updater"]');await expect(app.locator('#current-version')).not.toHaveText('—');assert.equal((await iframe.getAttribute('src'))===null,true,'A consumed ticket must not remain in the host DOM');

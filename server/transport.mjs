@@ -18,6 +18,7 @@ export function safeIP(address){
  // translation/tunnel, link-local, multicast and unspecified ranges fail closed.
  return a==='::1'||/^[23][0-9a-f]{3}:/.test(a)&&!/^2001:(?:0:|:)/.test(a)&&!a.startsWith('2002:')||/^f[cd][0-9a-f]{2}:/.test(a);
 }
+export function uniqueAuthority(req){let hosts=0,origins=0;for(let i=0;i<req.rawHeaders.length;i+=2){const name=req.rawHeaders[i].toLowerCase();if(name==='host')hosts++;if(name==='origin')origins++;}return hosts===1&&origins<=1;}
 export function cleanHeaders(headers){const banned=new Set(['connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailer','transfer-encoding','upgrade','host','content-length']);for(const key of String(headers.connection||'').split(','))banned.add(key.trim().toLowerCase());return Object.fromEntries(Object.entries(headers).filter(([k,v])=>v!==undefined&&!banned.has(k.toLowerCase())));}
 export class Transport{
  constructor({gatewayOrigin,lookup:resolve=lookup,dnsTimeout=2500}={}){this.dnsTimeout=dnsTimeout;this.gateway=gatewayOrigin?new URL(gatewayOrigin):null;this.lookup=resolve;this.active=new Set();this.pending=0;this.closed=false;this.local=new Set(['127.0.0.1','::1',...Object.values(networkInterfaces()).flat().map(i=>i.address)]);}
@@ -33,14 +34,14 @@ export class Transport{
  if(this.gateway&&Number(u.port||(u.protocol==='https:'?443:80))===Number(this.gateway.port)&&records.some(r=>this.local.has(r.address)||r.address.startsWith('127.')))throw fail(400,'Relay cannot be registered as an upstream app');
  return {u,record:records[0]};
  }
- async request(value,policy,{method='GET',headers={},body,maxBytes=4*1024*1024,timeout=5000,signal,authorize}={}){
+ async request(value,policy,{method='GET',headers={},body,maxBytes=4*1024*1024,timeout=5000,signal,authorize,tls}={}){
  signal?.throwIfAborted();if(this.closed||this.pending>=24)throw fail(429,'Transport busy');if(body&&body.length>1024*1024)throw fail(400,'Request body too large');this.pending++;
  let timer;const controller=new AbortController();const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();timer=setTimeout(abort,timeout);this.active.add(controller);
  try{
  const {u,record}=await Promise.race([this.validate(value,policy),new Promise((_,reject)=>controller.signal.addEventListener('abort',()=>reject(fail(400,'Upstream timed out')),{once:true}))]);
  if(controller.signal.aborted)throw fail(400,'Upstream timed out');
  if(authorize&&authorize()!==true)throw fail(401,'Status observation authority expired');
- return await new Promise((resolve,reject)=>{const req=(u.protocol==='https:'?https:http).request(u,{method,headers:{...cleanHeaders(headers),'accept-encoding':'identity'},agent:false,signal:controller.signal,lookup:(_hostname,options,cb)=>options.all?cb(null,[record]):cb(null,record.address,record.family),servername:isIP(host(u))?undefined:host(u),rejectUnauthorized:true},res=>{
+ return await new Promise((resolve,reject)=>{const req=(u.protocol==='https:'?https:http).request(u,{method,headers:{...cleanHeaders(headers),'accept-encoding':'identity'},agent:false,signal:controller.signal,lookup:(_hostname,options,cb)=>options.all?cb(null,[record]):cb(null,record.address,record.family),servername:tls?.serverName??(isIP(host(u))?undefined:host(u)),ca:tls?.ca,rejectUnauthorized:true},res=>{
  const chunks=[];let size=0;res.on('error',reject);res.on('aborted',()=>reject(fail(400,'Upstream response interrupted')));
  if(method==='HEAD'){resolve({status:res.statusCode,headers:cleanHeaders(res.headers),body:Buffer.alloc(0)});res.destroy();return;}
  res.on('data',chunk=>{size+=chunk.length;if(size>maxBytes){const error=fail(400,'Upstream response too large');reject(error);req.destroy(error);return;}chunks.push(chunk);});
@@ -48,6 +49,6 @@ export class Transport{
  });req.on('error',reject);req.end(body);});
  }finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);this.active.delete(controller);this.pending--;}
  }
- async probe(config,{signal,authorize}={}){try{const r=await this.request(config.address,config,{method:'HEAD',timeout:2500,signal,authorize});return {state:r.status>=200&&r.status<400?'Online':'Reached',source:'relay',checkedAt:Date.now(),detail:r.status>=300&&r.status<400?'Relay received a redirect; destination not followed.':`Relay received HTTP ${r.status}; device reachability may differ.`,httpStatus:r.status};}catch(e){return {state:e.status?'Unknown':'Offline',source:'relay',checkedAt:Date.now(),detail:e.status?e.message:'No bounded HTTP response from Relay.'};}}
+ async probe(config,{signal,authorize}={}){try{const r=await this.request(config.address,config,{method:'HEAD',timeout:2500,signal,authorize,tls:config.tls});const authRequired=r.status===401||r.status===403;return {state:r.status>=200&&r.status<400?'Online':'Reached',reachability:'responding',reason:authRequired?'auth-challenge':r.status>=500?'http-server-error':r.status>=300&&r.status<400?'http-redirect':'http-response',authRequired,source:'relay',checkedAt:Date.now(),detail:`Relay server received HTTP ${r.status}${authRequired?' (authentication required)':''}; not an app health, login or device connectivity guarantee.${r.status>=300&&r.status<400?' Redirect not followed.':''}`,httpStatus:r.status};}catch(e){const unreachable=!e.status||e.message==='Upstream timed out';return {state:unreachable?'Offline':'Unknown',reachability:unreachable?'unreachable':'unknown',reason:unreachable?'no-http-response':'policy-or-admission-denied',authRequired:false,source:'relay',checkedAt:Date.now(),detail:unreachable?'No bounded HTTP response from Relay server; device connectivity may differ.':'No observation admitted by Relay server transport policy.'};}}
  async close(){this.closed=true;for(const c of this.active)c.abort();}
 }

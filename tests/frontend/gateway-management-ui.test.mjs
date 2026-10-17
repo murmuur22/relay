@@ -17,7 +17,7 @@ test('real Control Panel enables managed gateway, adds a target app through UI, 
   const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
   await browserLogin(page,gateway.origin,runtime);
   const button=name=>page.getByRole('button',{name,exact:true});
-  await button('Open Control Panel').click();await page.getByRole('tab',{name:'Apps',exact:true}).click();await button('Add app').click();
+  await button('Open Control Panel').dblclick();await page.getByRole('tab',{name:'Apps',exact:true}).click();await button('Add app').click();
   await button('Next').click();await page.getByLabel('App name',{exact:true}).fill('Preserved Files');await page.getByLabel('Address',{exact:true}).fill('https://draft.example.test');await page.getByRole('combobox',{name:/^Icon(?! group)/}).selectOption('folder');await button('Back').click();
   await page.getByLabel('Gateway (experimental)',{exact:true}).check();await expect(button('Next')).toBeDisabled();
   await button('Set up Gateway').click();
@@ -41,9 +41,9 @@ test('real Control Panel enables managed gateway, adds a target app through UI, 
   await secure.waitForLoadState('networkidle');
   await secure.keyboard.press('Escape');await expect(secure.getByRole('button',{name:'[ESC] BYPASS INITIALIZATION',exact:true})).toHaveCount(0);
   await secure.getByLabel('username',{exact:true}).fill('admin');await secure.getByLabel('password',{exact:true}).fill(password);await secure.getByRole('button',{name:'Enter →',exact:true}).click();
-  const sb=name=>secure.getByRole('button',{name,exact:true});await sb('Open Control Panel').click();await secure.getByRole('tab',{name:'Apps',exact:true}).click();await sb('Add app').click();
+  const sb=name=>secure.getByRole('button',{name,exact:true});await sb('Open Control Panel').dblclick();await secure.getByRole('tab',{name:'Apps',exact:true}).click();await sb('Add app').click();
   await secure.getByLabel('Gateway (experimental)',{exact:true}).check();await sb('Next').click();await secure.getByLabel('App name',{exact:true}).fill('UI Files');await secure.getByRole('combobox',{name:'Gateway target',exact:true}).selectOption('files');
-  await sb('Next').click();await sb('Next').click();await sb('Next').click();await sb('Save app').click();await expect(sb('Edit app UI Files')).toBeVisible();await sb('Close Control Panel').click();await sb('Open UI Files').click();
+  await sb('Next').click();await sb('Next').click();await sb('Next').click();await sb('Save app').click();await expect(sb('Edit app UI Files')).toBeVisible();await sb('Close Control Panel').click();await sb('Open UI Files').dblclick();
   const frame=secure.frameLocator('iframe[title="UI Files"]');await expect(frame.getByRole('heading',{name:'Synthetic Files'})).toBeVisible();const origin=await frame.locator('body').evaluate(()=>location.origin);assert.match(origin,/^https:\/\/[a-f0-9]{32}\.apps\.example\.test:/);
   await button('Disable gateway').click();await page.getByLabel('Current password for gateway changes',{exact:true}).fill(password);await button('Confirm disable').click();await expect(page.getByText('Gateway is off',{exact:true})).toBeVisible();
   assert.deepEqual(JSON.parse(await readFile(runtime+'/gateway-managed.json','utf8')),{version:1,enabled:false});

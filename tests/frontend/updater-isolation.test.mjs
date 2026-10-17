@@ -27,7 +27,7 @@ async function fixture(t){
  const browser=await chromium.launch({headless:true,chromiumSandbox:true}),context=await browser.newContext({reducedMotion:'reduce'}),page=await context.newPage();page.setDefaultTimeout(5000);
  const cleanups=[];
  t.after(async()=>{for(const cleanup of cleanups)await cleanup();await browser.close();await web.close();await g.close();await new Promise(r=>broker.close(r));await rm(root,{recursive:true,force:true});});
- await browserLogin(page,g.origin,root+'/relay');await page.getByRole('button',{name:'Open Updater',exact:true}).click();
+ await browserLogin(page,g.origin,root+'/relay');await page.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
  const browse=page.locator('[data-window-id="system-updater"]');await expect(browse.getByLabel('Available release')).toHaveValue('v0.6.4');
  const start=()=>browse.getByRole('button',{name:'Start update',exact:true}).click();
  const signout=async()=>{await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:'Sign out',exact:true}).click();};

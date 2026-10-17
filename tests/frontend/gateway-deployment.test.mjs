@@ -14,7 +14,7 @@ test('compiled desktop launches gateway on configured names and refuses launch f
    await page.getByLabel('username',{exact:true}).fill('admin');await page.getByLabel('password',{exact:true}).fill(password);await page.getByRole('button',{name:'Enter →',exact:true}).click();await expect(page.getByRole('button',{name:'Navigation',exact:true})).toBeVisible();
   }
   await login(lab.relay.experimentalGateway.desktopOrigin);
-  await page.getByRole('button',{name:'Open Files',exact:true}).click();
+  await page.getByRole('button',{name:'Open Files',exact:true}).dblclick();
   const frame=page.frameLocator('iframe[title="Files"]');
   await expect(frame.getByRole('heading',{name:'Synthetic Files'})).toBeVisible();
   assert.match(await frame.locator('body').evaluate(()=>location.hostname),/^[a-f0-9]{32}\.apps\.example\.test$/);

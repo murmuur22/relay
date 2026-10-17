@@ -82,7 +82,7 @@ try{
  const errors=[];page.on('pageerror',()=>errors.push('client page error'));
  const [name,value]=auth.cookie.split('=');await page.context().addCookies([{name,value,url:gateway.origin,httpOnly:true,sameSite:'Strict'}]);
  let frames=0;page.on('websocket',ws=>ws.on('framereceived',event=>{try{const message=JSON.parse(event.payload.toString());if(message.type==='frame'&&Buffer.from(message.data,'base64').length>100)frames++;}catch{}}));
- await page.goto(gateway.origin);await page.getByRole('button',{name:'Open Qualification stream',exact:true}).click();
+ await page.goto(gateway.origin);await page.getByRole('button',{name:'Open Qualification stream',exact:true}).dblclick();
  await until(async()=>frames>0&&(await page.locator('.stream-status').textContent()).includes('live'),'No live streamed frame');
  const resource=gateway.manager.resources.get(app.id);assert.ok(resource);await sandbox(resource.context.browser());
  const surface=page.getByLabel('Qualification stream remote input');await surface.click({position:{x:80,y:80}});

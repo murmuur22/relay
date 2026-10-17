@@ -31,7 +31,7 @@ try {
  await page.getByText('Desktop locked',{exact:true}).waitFor();await mkdir(artifacts,{recursive:true});await page.screenshot({path:artifacts+'mock-locked-desktop.png'});
  assert.equal(await page.locator('iframe').count(),0);
  locked=false;await page.getByRole('button',{name:'Try again',exact:true}).click();await page.getByRole('button',{name:'Open Parcels',exact:true}).waitFor();await page.screenshot({path:artifacts+'mock-empty-desktop.png'});
- await page.getByRole('button',{name:'Open Parcels',exact:true}).click();
+ await page.getByRole('button',{name:'Open Parcels',exact:true}).dblclick();
  const native=page.locator('[data-app="parcels"]');await native.waitFor();
  const frame=page.frameLocator('iframe[title="Parcels"]');await frame.getByLabel('Fixture note',{exact:true}).fill('synthetic persistence');
  await native.getByRole('button',{name:'Minimize Parcels'}).click();
@@ -44,7 +44,7 @@ try {
  const after=await native.boundingBox();assert.ok(after.x>before.x+50);
  await native.getByRole('button',{name:'Maximize Parcels'}).click();assert.ok((await native.boundingBox()).width>1400);
  await native.getByRole('button',{name:'Restore size Parcels'}).click();
- await page.getByRole('button',{name:'Open Notes Lab',exact:true}).click();
+ await page.getByRole('button',{name:'Open Notes Lab',exact:true}).dblclick();
  const remote=page.locator('[data-app="notes-lab"]');await remote.locator('.stream-status.live').waitFor();await remote.getByLabel('Notes Lab remote input').click();await page.keyboard.type('relay');
  await page.waitForTimeout(350);assert.equal(inputs.filter(m=>m.type==='text').map(m=>m.text).join(''),'relay');
  await page.getByRole('button',{name:'Restore Parcels'}).click();assert.equal(await frame.getByLabel('Fixture note',{exact:true}).inputValue(),'synthetic persistence');
@@ -54,7 +54,7 @@ try {
  const handle=await remote.getByRole('button',{name:'Resize Notes Lab'}).boundingBox();await page.mouse.move(handle.x+10,handle.y+10);await page.mouse.down();await page.mouse.move(handle.x+60,handle.y+40,{steps:5});await page.mouse.up();assert.equal((await remote.locator('.window-content').boundingBox()).width,700);
  await remote.getByLabel('Notes Lab remote input').click();await page.mouse.wheel(0,80);await page.keyboard.down('Shift');await remote.getByRole('button',{name:'Minimize Notes Lab'}).click();await page.waitForTimeout(200);assert.ok(inputs.some(m=>m.type==='wheel'));assert.ok(inputs.some(m=>m.type==='release'));await page.keyboard.up('Shift');await page.getByRole('button',{name:'Restore Notes Lab'}).click();
  sockets.at(-1).send(JSON.stringify({type:'state',state:'failed',message:'Mock page failed'}));await page.getByText('Remote app unavailable',{exact:true}).waitFor();sockets.at(-1).close();await page.getByText('Stream disconnected',{exact:true}).waitFor();await page.keyboard.type('discarded');await remote.locator('.stream-status.live').waitFor();assert.ok(sockets.length>=2);assert.equal(inputs.filter(m=>m.type==='text').map(m=>m.text).join(''),'relay');
- gatewayError=true;await page.getByRole('button',{name:'Open Signal Lab',exact:true}).click();await page.getByText('Mock worker unavailable',{exact:true}).waitFor();gatewayError=false;await page.getByRole('button',{name:'Dismiss error'}).click();
+ gatewayError=true;await page.getByRole('button',{name:'Open Signal Lab',exact:true}).dblclick();await page.getByText('Mock worker unavailable',{exact:true}).waitFor();gatewayError=false;await page.getByRole('button',{name:'Dismiss error'}).click();
  const rt=await remote.locator('.titlebar').boundingBox();await page.mouse.move(rt.x+150,rt.y+8);await page.mouse.down();await page.mouse.move(rt.x+550,rt.y+210,{steps:6});await page.mouse.up();await page.waitForTimeout(350);
  await mkdir(artifacts,{recursive:true});await page.screenshot({path:artifacts+'mock-mixed-desktop.png'});
  await page.reload();await page.locator('[data-app="notes-lab"]').waitFor();assert.ok(writes.some(w=>w.x===after.x-8));

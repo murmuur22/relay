@@ -11,7 +11,7 @@ for(const outcome of ['held','rejected'])test(`local updater closes independentl
  let release=()=>{},releaseLaunch=()=>{};t.after(async()=>{release();releaseLaunch();await browser.close();await g.close();await rm(runtime,{recursive:true,force:true});});
  const page=await browser.newPage();await browserLogin(page,g.origin,runtime);
  await page.route('**/api/updater/check',route=>route.fulfill({json:{mode:'fixture',available:[{version:'v0.3.1',verified:true,size:100,notes:'Synthetic close regression'}],canInstall:true,job:null}}));
- await page.getByRole('button',{name:'Open Updater',exact:true}).click();
+ await page.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
  const win=page.locator('[data-window-id="system-updater"]');await expect(win).toBeVisible();
  await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:/^Notes Lab/}).click();
  let arrived;const arrival=new Promise(r=>arrived=r),gate=new Promise(r=>release=r);

@@ -77,7 +77,7 @@ async function fonts(page){
 test('compiled runtime presentation is selected with genuine standalone one-use Relay launch, exact fonts and original licenses',{timeout:65000},async t=>{
  const f=await fixture(t);
  const release=await selectedIndex(f,'v0.3.0');await verifyFiles(f,release,'v0.3.0');
- await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).click();
+ await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
  await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();
  const frame=f.desktop.frameLocator('iframe[title="Independent Relay updater"]');await expect(frame.locator('#console')).toBeVisible();
  assert.equal(f.context.pages().length,1);await fonts(await (await f.desktop.locator('iframe[title="Independent Relay updater"]').elementHandle()).contentFrame());
@@ -110,7 +110,7 @@ test('already loaded native monitor survives actual HMAC install and readiness r
  const f=await fixture(t),webIdentity=f.web.server,brokerPid=f.info.brokerPid;
  let installs=0;f.context.on('request',r=>{if(new URL(r.url()).pathname==='/updater/api/install')installs++;});
  await selectedIndex(f,'v0.3.0');
- await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).click();await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();
+ await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();
  const iframe=f.desktop.locator('iframe[title="Independent Relay updater"]'),app=f.desktop.frameLocator('iframe[title="Independent Relay updater"]');
  await expect(app.locator('#console')).toBeVisible();const frameIdentity=await iframe.elementHandle();
  await install(app,'v0.3.1');await expect(app.locator('#phase')).toHaveText('Update complete',{timeout:30000});await expect(app.locator('#current-version')).toHaveText('v0.3.1');
@@ -167,7 +167,7 @@ test('compiled browser uses exact built-in safe source for missing current, old 
   try{
    const response=await fetch(f.uiOrigin+'/updater/');assert.equal(response.status,200);assert.deepEqual(Buffer.from(await response.arrayBuffer()),builtinIndex,c.name+' must select exact fallback bytes');
    assert.equal(response.headers.get('x-relay-updater-presentation'),'builtin');
-   if(!app){await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).click();await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();app=await (await f.desktop.locator('iframe[title="Independent Relay updater"]').elementHandle()).contentFrame();}
+   if(!app){await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();app=await (await f.desktop.locator('iframe[title="Independent Relay updater"]').elementHandle()).contentFrame();}
    else await app.goto(f.uiOrigin+'/updater/');
    await expect(app.locator('#console')).toBeVisible();await expect(app.locator('#mode')).toHaveText('FIXTURE SANDBOX');await fonts(app);
    const sourceURLs=await app.evaluate(()=>[...document.querySelectorAll('script[src],link[rel="stylesheet"]')].map(el=>el.src||el.href));assert.equal(sourceURLs.every(url=>new URL(url).pathname.startsWith('/updater/assets/')),true,c.name);
@@ -184,7 +184,7 @@ test('WebKit compiled runtime source has functional no-WebGL fallback with HTTP 
  const f=await fixture(t,webkit);const release=await selectedIndex(f,'v0.3.0');await verifyFiles(f,release,'v0.3.0');
  await f.context.addInitScript(()=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(kind,...args){return /webgl/i.test(kind)?null:original.call(this,kind,...args);};});
  const fontResponses=[];f.context.on('response',r=>{if(r.url().includes('/updater/presentation/v0.3.0/')&&r.url().endsWith('.woff2'))fontResponses.push(r);});
- await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).click();await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();
+ await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();
  const app=f.desktop.frameLocator('iframe[title="Independent Relay updater"]');await expect(app.locator('#console')).toBeVisible();await expect(app.locator('#fallback')).toBeVisible();
  const frame=await (await f.desktop.locator('iframe[title="Independent Relay updater"]').elementHandle()).contentFrame();await fonts(frame);
  await expect.poll(()=>fontResponses.length).toBe(2);for(const response of fontResponses){assert.equal(response.status(),200);assert.equal((await response.body()).length>0,true);}

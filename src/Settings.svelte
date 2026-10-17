@@ -7,6 +7,7 @@
  import {pixelIcons} from '../server/pixel-icons.mjs';
  const icons=['globe','folder','notes','media','terminal',...Object.keys(pixelIcons)];
  import {webAddress,origins} from './webapps.js';
+ import {matches} from './shortcuts.js';
  let {kind,user,api,onclose,onrefresh,onpassword,embedded=false}= $props();
  let error=$state(''),message=$state(''),busy=$state(false),users=$state([]),apps=$state([]),diagnostics=$state(null);
  let gateway=$state({enabled:false,targets:[]});
@@ -23,7 +24,8 @@
  async function run(fn){if(busy)return false;busy=true;error='';message='';try{await fn();return true;}catch(e){error=e.message;return false;}finally{busy=false;}}
  onMount(()=>{
   const previous=document.activeElement;
-  const siblings=embedded?[]:[...dialog.parentElement.children].filter(el=>el!==dialog&&!el.inert);siblings.forEach(el=>el.inert=true);
+  const shell=dialog.closest('.settings-scrim')||dialog;
+  const siblings=embedded?[]:[...shell.parentElement.children].filter(el=>el!==shell&&!el.inert);siblings.forEach(el=>el.inert=true);
   displayName=user.displayName;
   dialog.focus();
   run(load).then(async()=>{await tick();if(dialog?.isConnected)dialog.querySelector(kind==='profile'?'input':'[role=tab]')?.focus();});
@@ -46,14 +48,14 @@
  }
  async function returnToApp(){switchPage('Apps');await tick();dialog?.querySelector('.app-wizard h2')?.focus();}
  function tabKey(event,index){
-  let next;if(event.key==='ArrowRight')next=(index+1)%pages.length;else if(event.key==='ArrowLeft')next=(index+pages.length-1)%pages.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=pages.length-1;else return;
+  let next;if(matches('tabNext',event,'settings-tabs'))next=(index+1)%pages.length;else if(matches('tabPrevious',event,'settings-tabs'))next=(index+pages.length-1)%pages.length;else if(matches('tabFirst',event,'settings-tabs'))next=0;else if(matches('tabLast',event,'settings-tabs'))next=pages.length-1;else return;
   event.preventDefault();switchPage(pages[next]);document.getElementById('tab-'+pages[next])?.focus();
  }
  async function askRemove(){confirmRemove=true;await tick();confirmation?.querySelector('button')?.focus();}
  async function cancelRemove(){if(busy)return;confirmRemove=false;await tick();document.getElementById('remove-app')?.focus();}
  function keydown(event){
-  if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(busy)return;if(confirmRemove)cancelRemove();else if(editor)back();else onclose();}
-  if(event.key==='Tab'&&(!embedded||confirmRemove)){
+  if(matches('dismiss',event,'modal')){event.preventDefault();event.stopPropagation();if(busy)return;if(confirmRemove)cancelRemove();else if(editor)back();else onclose();}
+  if(matches('tab',event,'modal')&&(!embedded||confirmRemove)){
    const scope=confirmRemove?confirmation:dialog;
    const controls=[...scope.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')].filter(el=>el.getClientRects().length);
    const first=controls[0],last=controls.at(-1);
@@ -73,6 +75,7 @@
  async function preference(event,key='showAppStatus'){const target=event.currentTarget,value=target.checked;const ok=await run(async()=>{await api('/preferences','PATCH',{[key]:value});await onrefresh();message=key==='showAppStatus'?'Status preference saved.':'Motion preference saved.';});if(!ok)target.checked=user.preferences?.[key]!==false;}
  const mib=value=>`${(value/1024/1024).toFixed(1)} MiB`;
 </script>
+<div class:settings-scrim={!embedded} style:display={embedded?'contents':undefined} role="presentation" onpointerdown={e=>{if(!embedded&&e.target===e.currentTarget){e.preventDefault();dialog?.focus();}}}>
 <div class={embedded?'settings-embedded':'settings-window'} bind:this={dialog} role={embedded?'region':'dialog'} tabindex="-1" aria-modal={embedded?undefined:'true'} aria-label={kind==='admin'?'Control Panel':'Profile settings'} onkeydown={keydown}>
  {#if !embedded}<div class="panel-heading"><h1>{kind==='admin'?'Control Panel':'Profile settings'}</h1><button aria-label="Close settings" disabled={busy||confirmRemove} onclick={onclose}>×</button></div>{/if}
  <div class="settings-body" aria-busy={busy}>
@@ -174,7 +177,9 @@
   {/if}
  </div>
 </div>
+</div>
 <style>
+ .settings-scrim{position:fixed;inset:0;background:#0009;z-index:1500}
  .settings-embedded{height:100%;width:100%;min-width:0;overflow:hidden;background:#0c0a09;color:#fafaf9;accent-color:#d6d3d1;display:flex;flex-direction:column}
  .settings-embedded .settings-body{min-width:0;min-height:0;max-height:none;flex:1;overflow:auto;padding:20px}
  .settings-embedded .settings-tabs{overflow-x:auto;flex-wrap:nowrap}

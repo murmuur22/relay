@@ -5,9 +5,22 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
-Target source version: **0.6.6**.
+Target source version: **0.6.7**. Local candidate; not published.
 
-- Prepare source candidate 0.6.6; published v0.6.5 source, signatures and artifacts remain immutable. Publication, signed Linux qualification and production maintenance are separate gates.
+- Use audited pixel defaults for newly created folders and system shortcuts without rewriting explicit legacy/custom appearance metadata.
+- Select apps and folders with modifier clicks or marquee; move mixed selections atomically with revision/owner checks. Selected items use deterministic consecutive slots; sparse relative geometry is not retained.
+- Add a context-aware Navigation Hotkeys catalog shared with implemented handlers and generated documentation, preserving app/modal text input.
+- Sort the current folder by Name or Type through keyboard/touch-accessible context submenus, without changing grants or appearance overrides.
+- Give Profile the neutral 60% modal scrim, contained focus and authenticated teardown behavior.
+- Report bounded server responses for managed Native, Streamed and configured Gateway targets, with source/time and honest authentication/error states; personal URLs remain Not monitored and hidden status suppresses reads/probes.
+- Harden duplicate HTTP/WebSocket authority rejection and qualify generic allowlisted form-header forwarding against read-only Exterminator v0.2.0. Operators must configure `x-exterminator`, exact embedding origin and separate submission/admin grants; this is not proof of an unknown deployed failure or universal website compatibility.
+- Publication, full qualification and production maintenance remain separate gates. The optional updater bridge/bootstrap/control plane is unchanged.
+
+## [0.6.6] — 2026-10-14
+
+Published stable/latest as [v0.6.6](https://github.com/murmuur22/relay/releases/tag/v0.6.6); GitHub records publication at 2026-10-14T20:54:35Z. This supersedes the earlier local-candidate status, not its retained failed qualification evidence. Publication is not deployment.
+
+- Prepare source 0.6.6; published v0.6.5 source, signatures and artifacts remain immutable.
 - Close runtime-owned management TCP sockets after normal session/operation/browser/native cleanup and listener closure. Incomplete HTTP headers and unfinished request bodies can no longer hold shutdown beyond the unchanged updater driver deadline. Preserve live HTTP/WebSocket revocation and ordinary rejection/body-drain behavior; this reproduced defect is not attributed to a historical Linux rollback.
 - Refresh only supported transitive patches: devalue 5.9.2 → 5.9.4 through Svelte and source-map-js 1.2.1 → 1.2.2 through Vite/PostCSS in both build packages. Retain pinned direct dependencies, integrity-locked artifacts and behavioral security regressions; no major upgrade or audit suppression.
 

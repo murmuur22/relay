@@ -79,7 +79,7 @@ for(const remote of [false,true])for(const defaultPort of [true,false])test(`rea
   const bypass=page.getByRole('button',{name:'[ESC] BYPASS INITIALIZATION',exact:true});if(await bypass.count())await bypass.click();
   await page.getByLabel('username',{exact:true}).fill('admin');await page.getByLabel('password',{exact:true}).fill(password);await page.getByRole('button',{name:'Enter →',exact:true}).click();
   await page.getByRole('button',{name:'Close Files',exact:true}).click();
-  await page.getByRole('button',{name:'Open Files',exact:true}).click();const frame=page.frameLocator('iframe[title="Files"]');await expect(frame.getByRole('heading',{name:'Synthetic app',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Open Files',exact:true}).dblclick();const frame=page.frameLocator('iframe[title="Files"]');await expect(frame.getByRole('heading',{name:'Synthetic app',exact:true})).toBeVisible();
   const downloading=page.waitForEvent('download');await frame.getByRole('link',{name:'Download',exact:true}).click();const download=await downloading;assert.deepEqual(await readFile(await download.path()),bytes);
   await page.getByRole('button',{name:'End app session',exact:true}).click();await expect(page.locator('iframe[title="Files"]')).toHaveCount(0);
   await browser.close();browser=undefined;

@@ -30,7 +30,7 @@ test('real disposable fixture success and rollback appear in the compiled transf
   browser = await chromium.launch({ chromiumSandbox: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
   const desktop = await context.newPage(); await browserLogin(desktop, gateway.origin, root + '/visual-relay');
-  await desktop.getByRole('button', { name: 'Open Updater', exact: true }).click();
+  await desktop.getByRole('button', { name: 'Open Updater', exact: true }).dblclick();
   await expect(desktop.getByLabel('Available release')).toHaveValue('v0.3.1');assert.equal(context.pages().length,1);
   await desktop.getByRole('button',{name:'Maximize Updater',exact:true}).click();
   await desktop.screenshot({path:ROOT+'/screenshots/updater-desktop-browse-fixture.png',fullPage:true});

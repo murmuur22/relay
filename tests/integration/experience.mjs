@@ -26,7 +26,7 @@ try{
  assert.equal(locked.status,200);assert.equal((await fetch(g.origin+'/api/session')).status,401);
  await expect(page.getByRole('button',{name:'Open Parcels',exact:true})).toBeVisible();
  await page.screenshot({path:path.join(ROOT,'screenshots/desktop.png')});
- await page.getByRole('button',{name:'Open Parcels',exact:true}).click();
+ await page.getByRole('button',{name:'Open Parcels',exact:true}).dblclick();
  await page.getByRole('button',{name:'Maximize Parcels',exact:true}).click();
  const parcel=page.frameLocator('iframe[title="Parcels"]');
  const payload=randomBytes(512*1024);
@@ -40,7 +40,7 @@ try{
  assert.equal(hash,createHash('sha256').update(payload).digest('hex'));
  await page.screenshot({path:path.join(ROOT,'screenshots/native-parcels.png')});
  await page.getByRole('button',{name:'Minimize Parcels',exact:true}).click();
- await page.getByRole('button',{name:'Open Keepsakes',exact:true}).click();
+ await page.getByRole('button',{name:'Open Keepsakes',exact:true}).dblclick();
  await page.getByRole('button',{name:'Maximize Keepsakes',exact:true}).click();
  const keeps=page.frameLocator('iframe[title="Keepsakes"]');
  await keeps.getByRole('button',{name:'Add clipping',exact:true}).click();
@@ -58,7 +58,7 @@ try{
  await page.screenshot({path:path.join(ROOT,'screenshots/native-keepsakes.png')});
  await keeps.getByRole('button',{name:'Close clipping'}).click();
  await page.getByRole('button',{name:'Minimize Keepsakes',exact:true}).click();
- await page.getByRole('button',{name:'Open Notes Lab',exact:true}).click();
+ await page.getByRole('button',{name:'Open Notes Lab',exact:true}).dblclick();
  await page.getByRole('button',{name:'Navigation',exact:true}).click();
  await page.locator('.quick-nav').getByRole('button',{name:/Signal Lab/}).click();
  const session=await page.evaluate(async()=>await(await fetch('/api/session')).json());

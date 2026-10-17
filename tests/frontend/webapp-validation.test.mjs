@@ -11,5 +11,5 @@ test('health copy scopes each observation',()=>{
  assert.equal(statusLabel({state:'Online',source:'relay'}),'Reachable from Relay');
  assert.equal(statusLabel({state:'Offline',source:'relay'}),'Not responding from Relay');
  assert.equal(statusLabel({state:'Online',source:'device'}),'Reachable from this device');
- assert.equal(statusLabel(), 'Unknown');
+ assert.equal(statusLabel(), 'Not monitored');
 });

@@ -9,7 +9,7 @@ import {browserLogin} from '../auth-helper.mjs';
 test('unavailable private locations are visible without destroying existing windows',{timeout:15000},async()=>{
  const runtime=await mkdtemp(tmpdir()+'/relay-desktop-unavailable-');const g=await createGateway({port:0,runtime});const browser=await chromium.launch({headless:true,chromiumSandbox:true});
  try{
-  const page=await browser.newPage({viewport:{width:1280,height:900}});await browserLogin(page,g.origin,runtime);await page.getByRole('button',{name:'Open Parcels',exact:true}).click();await page.getByRole('button',{name:'Maximize Parcels',exact:true}).click();await expect.poll(()=>new URL(page.url()).search).toContain('view=maximized');
+  const page=await browser.newPage({viewport:{width:1280,height:900}});await browserLogin(page,g.origin,runtime);await page.getByRole('button',{name:'Open Parcels',exact:true}).dblclick();await page.getByRole('button',{name:'Maximize Parcels',exact:true}).click();await expect.poll(()=>new URL(page.url()).search).toContain('view=maximized');
   const frame=await page.locator('[data-app="parcels"] iframe').elementHandle();
   await page.evaluate(()=>{history.pushState(null,'','/desktop/missing--deadbeef');dispatchEvent(new PopStateEvent('popstate'));});
   const message=page.getByText('This location is unavailable.',{exact:true});await expect(message).toBeVisible();

@@ -26,7 +26,7 @@ test('protected enrollment to real first app retries completion without duplicat
   await button('Next').click();await button('Next').click();let saves=0;page.on('request',req=>{if(req.url()===g.origin+'/api/onboarding/app'&&req.method()==='POST')saves++;});
   await page.route('**/api/onboarding/complete',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Synthetic completion interruption'})}),{times:1});
   await button('Save app').click();await expect(page.getByRole('alert')).toHaveText('Synthetic completion interruption');await expect(button('Save app')).toHaveCount(0);await page.reload();await expect(button('Enter desktop')).toBeVisible();await button('Enter desktop').click();await expect(button('Open First synthetic app')).toBeVisible();assert.equal(saves,1);
-  await button('Open First synthetic app').click();const frame=page.frameLocator('iframe[title="First synthetic app"]');await expect(frame.getByLabel('Fixture note')).toHaveValue('Synthetic first app');await frame.getByLabel('Fixture note').fill('Retained form');await button('Minimize First synthetic app').click();await button('Restore First synthetic app').click();await expect(frame.getByLabel('Fixture note')).toHaveValue('Retained form');
+  await button('Open First synthetic app').dblclick();const frame=page.frameLocator('iframe[title="First synthetic app"]');await expect(frame.getByLabel('Fixture note')).toHaveValue('Synthetic first app');await frame.getByLabel('Fixture note').fill('Retained form');await button('Minimize First synthetic app').click();await button('Restore First synthetic app').click();await expect(frame.getByLabel('Fixture note')).toHaveValue('Retained form');
   await button('Navigation').click();await button('Sign out').click();await expect(page.locator('iframe,.onboarding,.shortcut')).toHaveCount(0);assert.deepEqual(errors,[]);
  }finally{await browser.close();await g.close();await rm(runtime,{recursive:true,force:true});await new Promise(r=>fixture.close(r));}
 });
@@ -37,7 +37,7 @@ test('real window and navigation motion respects live reduced motion and preserv
   await browserLogin(page,g.origin,runtime);
   await page.evaluate(async()=>{const s=await(await fetch('/api/session')).json();await fetch('/api/preferences',{method:'PATCH',headers:{'Content-Type':'application/json','X-CSRF-Token':s.csrf},body:JSON.stringify({interfaceAnimations:true})});});await page.reload();
   await page.evaluate(()=>{window.motionEvents=[];const animate=Element.prototype.animate;Element.prototype.animate=function(...args){window.motionEvents.push({className:this.className,frames:args[0]});return animate.apply(this,args);};});
-  await page.getByRole('button',{name:'Open Parcels',exact:true}).click();
+  await page.getByRole('button',{name:'Open Parcels',exact:true}).dblclick();
   const win=page.locator('.desktop-window');await expect(win).toBeVisible();
   assert.ok(await page.evaluate(()=>motionEvents.some(e=>e.className.includes('desktop-window'))),'window has actual animation');
   await expect.poll(()=>page.evaluate(()=>document.getAnimations().length)).toBe(0);await page.evaluate(()=>motionEvents=[]);await page.waitForResponse(r=>r.url()===g.origin+'/api/session');assert.equal(await page.evaluate(()=>motionEvents.length),0,'session polling must not replay motion');

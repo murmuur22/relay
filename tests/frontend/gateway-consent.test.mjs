@@ -14,7 +14,7 @@ test('gateway consent is keyboard focused, invalidated by edits, and fail-closed
   await page.route('**/api/admin/gateway/validate',r=>r.fulfill({json:{valid:true}}));
   await page.route('**/api/admin/gateway',r=>r.request().method()==='GET'?r.fulfill({json:{source:'disabled',enabled:false,config:null}}):(mutations++,r.abort('failed')));
   const b=name=>page.getByRole('button',{name,exact:true});
-  await b('Open Control Panel').click();await page.getByRole('tab',{name:'Gateway',exact:true}).click();
+  await b('Open Control Panel').dblclick();await page.getByRole('tab',{name:'Gateway',exact:true}).click();
   await page.getByLabel('Service address',{exact:true}).fill('http://127.0.0.1:8096');
   await b('Check configuration').click();await b('Enable gateway').click();
   const password=page.getByLabel('Current password for gateway changes',{exact:true});await expect(password).toBeFocused();

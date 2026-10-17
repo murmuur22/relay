@@ -1,6 +1,14 @@
 # Relay prototype verification
 
-## Unreleased 0.6.6 source readiness
+## Current 0.6.7 integrated candidate — qualification in progress
+
+Canonical package/lock source version is 0.6.7, shared through unchanged `version.js`; this is local, uncommitted and unpublished. GitHub's release-by-tag and latest APIs identify v0.6.6 as non-draft/non-prerelease stable/latest, published 2026-10-14T20:54:35Z. This current-status section supersedes stale candidate/publication statements below; historical tests and failures remain historical, not new-candidate qualification.
+
+The seven changes are recorded under Unreleased in CHANGELOG.md and in the desktop/status/form compatibility documentation. Frozen frontend completion evidence (18 browser, 12 unit) and the independently accepted exact 18-file backend merge are inherited, not counted twice. Integrated fresh npm/native/updater setup, builds, current audits and serial bounded full suites are being recorded separately. The actual compiled HTTPS Exterminator browser form is a new test, not established by the inherited Node submission proof. No broad frontend/backend source changes or optional updater bridge/bootstrap/control-plane edits are part of this integration.
+
+Release admission remains closed until the actual integrated suite results, clean source export, extracted package and applicable migration/browser gates are recorded, parent independent review accepts the final exact source, and separate signed hosted/provenance/install/upgrade/rollback gates pass. No commit/push/tag/release, deployment, production connection, OS trust/hosts or network-policy changes were performed.
+
+## Historical 0.6.6 source readiness (before publication)
 
 The local candidate is 0.6.6, deliberately distinct from immutable published v0.6.5. The reviewed personal Home/Native shortcuts/Pixelarticons/Gateway-menu/mode-status baseline is retained; Gateway remains Experimental. This section supersedes no historical release result below.
 

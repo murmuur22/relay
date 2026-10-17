@@ -16,7 +16,7 @@ test('single home root and folder breadcrumbs share a vertical center at desktop
   await page.getByRole('button',{name:'Open Parcels',exact:true}).waitFor();
   await page.evaluate(()=>document.fonts.ready);
   assert.equal(await page.locator('.path a').count(),1);assert.equal(await page.getByRole('link',{name:'Home',exact:true}).textContent(),'~');
-  await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:'New folder',exact:true}).click();await page.getByLabel('Folder name',{exact:true}).fill('Header folder');await page.getByRole('button',{name:'Create folder',exact:true}).click();await page.getByRole('button',{name:'Open Header folder',exact:true}).click();
+  await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:'New folder',exact:true}).click();await page.getByLabel('Folder name',{exact:true}).fill('Header folder');await page.getByRole('button',{name:'Create folder',exact:true}).click();await page.getByRole('button',{name:'Open Header folder',exact:true}).dblclick();
   for(const width of [1440,390]){
    await page.setViewportSize({width,height:900});
    const centers=await page.locator('.path').evaluate(node=>Array.from(node.childNodes).filter(n=>n.nodeType===1||(n.nodeType===3&&n.textContent.trim())).map(n=>{const range=document.createRange();range.selectNodeContents(n);const r=range.getBoundingClientRect();return r.y+r.height/2;}));
