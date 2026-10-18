@@ -5,7 +5,15 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
-Target source version: **0.6.7**. Local candidate; not published.
+## [0.6.8] — local correction candidate
+
+- Restore configured Gateway startup while the updater holds maintenance through expected-version readiness. Listener startup checks irreversible shutdown intent separately; external requests, login/enrollment, launches/capabilities and queued mutations retain full maintenance admission.
+- Carry forward the seven desktop/status/form features and acknowledged revocation/shutdown protections listed under 0.6.7. No second UI version or updater/control-plane change is introduced.
+- Local source verification only. Independent review, integrated clean-export qualification, official Linux/signing, signed install/upgrade/matching-state rollback and discovery remain separate gates before stable promotion. No production deployment.
+
+## [0.6.7] — failed signed prerelease
+
+Signed [v0.6.7](https://github.com/murmuur22/relay/releases/tag/v0.6.7), source `8b94c020d038a35be5de893747ef147e44113702`, remains immutable. Configured Gateway startup fails when the updater intentionally holds maintenance before readiness; signed upgrade qualification failed. It was not promoted to stable. Version 0.6.6 remains the stable baseline. The original delivery context follows; local passes do not clear that hosted failure.
 
 - Use audited pixel defaults for newly created folders and system shortcuts without rewriting explicit legacy/custom appearance metadata.
 - Select apps and folders with modifier clicks or marquee; move mixed selections atomically with revision/owner checks. Selected items use deterministic consecutive slots; sparse relative geometry is not retained.

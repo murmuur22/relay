@@ -43,7 +43,8 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  if(maintenanceFile!==undefined&&!isAbsolute(maintenanceFile))throw Error('Invalid maintenance file');
  const maintenance=()=>{if(!maintenanceFile)return false;try{lstatSync(maintenanceFile);return true;}catch(error){return error.code!=='ENOENT';}};
  let shutdownIntent=false;
- const admit=()=>{if(shutdownIntent)throw fail(503,'Relay is shutting down.');if(maintenance())throw fail(503,'Relay is in maintenance. Try again after the update.');};
+ const lifecycle=()=>{if(shutdownIntent)throw fail(503,'Relay is shutting down.');};
+ const admit=()=>{lifecycle();if(maintenance())throw fail(503,'Relay is in maintenance. Try again after the update.');};
  iconPython(); // Validate trusted operator configuration before state or listener creation.
 
  if(!['development','standalone'].includes(profile))throw Error('Invalid Relay profile');
@@ -77,7 +78,8 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   pendingAuthHosts.add(host);pendingAuthNamespaces.add(base);
   try{
    for(const user of accounts.state.users){await desktop.queues.get(user.id)?.catch(()=>{});const state=await desktop.load(user.id);if((state.bookmarks||[]).some(b=>{const h=new URL(b.url).hostname.replace(/\.$/,'');return h===host||h===base||h.endsWith('.'+base);}))throw fail(409,'Gateway cookie hostname conflicts with a private Native shortcut. The owner must change or remove that shortcut first.');}
-   admit();const edge=await startExperimentalGateway({config,relayOrigin:origin,accounts,sessions,admit,ended:gatewayEnded});
+   // Listener lifecycle must permit updater-held maintenance, never shutdown.
+   lifecycle();const edge=await startExperimentalGateway({config,relayOrigin:origin,accounts,sessions,admit,ended:gatewayEnded});
    authHostnames.add(host);authNamespaces.add(base);return edge;
   }finally{pendingAuthHosts.delete(host);pendingAuthNamespaces.delete(base);}
  };
