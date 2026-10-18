@@ -14,6 +14,8 @@ Target source version: **0.6.7**. Local candidate; not published.
 - Give Profile the neutral 60% modal scrim, contained focus and authenticated teardown behavior.
 - Report bounded server responses for managed Native, Streamed and configured Gateway targets, with source/time and honest authentication/error states; personal URLs remain Not monitored and hidden status suppresses reads/probes.
 - Harden duplicate HTTP/WebSocket authority rejection and qualify generic allowlisted form-header forwarding against read-only Exterminator v0.2.0. Operators must configure `x-exterminator`, exact embedding origin and separate submission/admin grants; this is not proof of an unknown deployed failure or universal website compatibility.
+- Keep revoked sessions unauthenticated while retaining cleanup ownership until context or browser closure is acknowledged. Logout and account/service changes report applied-but-incomplete cleanup with HTTP 503; explicit shutdown retries retained managers without restoring access. Failed retirements count against existing session limits, and one failure does not skip other sessions' cleanup.
+- Close admission irreversibly at shutdown intent, including in-flight login/enrollment and late session initialization. Cancel already accepted streams, deny new launches/upgrades, and wait for already-queued listener changes and acknowledged owned-resource cleanup; failed cleanup permits explicit retry without reopening access.
 - Publication, full qualification and production maintenance remain separate gates. The optional updater bridge/bootstrap/control plane is unchanged.
 
 ## [0.6.6] — 2026-10-14

@@ -34,6 +34,10 @@ export class Manager {
     this.apps = apps;
     this.windows = new Map();
     this.resources = new Map();
+    // Retired published resources are inactive but owned until close is acknowledged.
+    this.pendingRetirement = new Map();
+    // Contexts not yet published remain owned here until closure is acknowledged.
+    this.pendingCleanup = new Map();
     this.serial = Promise.resolve();
     this.persistQueue = Promise.resolve();
   }
@@ -63,6 +67,8 @@ export class Manager {
   async open(appId) {
     const app = this.apps.find((a) => a.id === appId);
     if (!app) throw Error("Unknown registered app");
+    if (this.pendingRetirement.has(appId) || [...this.pendingCleanup.keys()].some(w=>w.id===appId && (this.windows.get(appId)!==w || !this.opening?.has(w))))
+      throw fail(503,'Stream cleanup pending. Retry closing the window.');
     let w = this.windows.get(appId);
     if (this.closed) throw Error('Session closed');
     if (!w) {
@@ -116,16 +122,18 @@ export class Manager {
     if (this.closed || this.windows.get(w.id) !== w) return null;
     if (this.resources.has(w.id)) return this.resources.get(w.id);
     if (this.opening.has(w)) return this.opening.get(w);
+    if (this.pendingCleanup.has(w) || this.pendingRetirement.has(w.id)) throw fail(503,'Stream cleanup pending. Retry closing the window.');
     this.creations ??= new Map();
     const controller = new AbortController();
     this.creations.set(w, controller);
     const promise = this.createResource(w, controller.signal).then(async (r) => {
       if (this.windows.get(w.id) !== w) {
         r.disposed = true;
-        await r.context.close();
+        await this.pendingCleanup.get(w)?.();
         return null;
       }
       this.resources.set(w.id, r);
+      this.pendingCleanup.delete(w); // Ownership transfers to the published resource.
       return r;
     });
     this.opening.set(w, promise);
@@ -147,9 +155,16 @@ export class Manager {
       serviceWorkers: "block",
       acceptDownloads: false,
     });
-    let closing;
-    const closeContext = () => closing ??= context.close().catch(() => {});
-    const abort = () => { void closeContext(); };
+    let closing, closeFailed=false;
+    const closeContext = (retry=false) => {
+      if (retry && closeFailed) { closing=undefined; closeFailed=false; }
+      return closing ??= Promise.resolve().then(()=>context.close()).then(
+        ()=>{this.pendingCleanup.delete(w);},
+        error=>{closeFailed=true;throw error;},
+      );
+    };
+    this.pendingCleanup.set(w,closeContext);
+    const abort = () => { void closeContext().catch(() => {}); };
     signal?.addEventListener('abort', abort, {once:true});
     try {
       signal?.throwIfAborted();
@@ -164,7 +179,15 @@ export class Manager {
           : route.abort(),
       );
       await context.routeWebSocket("**/*", (ws) => ws.close());
-      const page = await context.newPage();
+      // Chromium page creation can remain pending when its context is closed
+      // during initialization. Settle cancellation only after close is acknowledged.
+      const page = await new Promise((resolve,reject)=>{
+        const cancelled=()=>{void closeContext().then(()=>finish(reject,signal.reason),error=>finish(reject,error));};
+        const finish=(settle,value)=>{signal?.removeEventListener('abort',cancelled);settle(value);};
+        signal?.addEventListener('abort',cancelled,{once:true});
+        if(signal?.aborted){cancelled();return;}
+        context.newPage().then(page=>finish(resolve,page),error=>finish(reject,error));
+      });
       if(installWeb)await installWeb(page);
       context.on("page", (p) => {
         if (p !== page) p.close().catch(() => {});
@@ -513,24 +536,35 @@ export class Manager {
     });
     return r.releaseQueue;
   }
-  async dispose(id, expected = this.resources.get(id)) {
-    const r = this.resources.get(id);
-    if (!r || r !== expected) return;
+  async dispose(id, expected = this.resources.get(id) || this.pendingRetirement.get(id)) {
+    const r = expected;
+    if (!r || (this.resources.get(id) !== r && this.pendingRetirement.get(id) !== r)) return;
+    if (this.resources.get(id) === r) this.resources.delete(id);
+    this.pendingRetirement.set(id, r);
     r.disposed = true;
     r.capturing = false;
-    this.resources.delete(id);
     clearTimeout(r.grace);
-    await this.release(r);
-    for (const c of r.clients) c.ws.close(1000);
-    await r.captureQueue;
-    await r.context.close();
+    const released = this.release(r);
+    for (const c of r.clients) { c.pending=null; c.ws.close(1000); }
+    if (!r.disposal) r.disposal = (async () => {
+      await released;
+      await r.captureQueue;
+      await r.context.close();
+      if (this.pendingRetirement.get(id) === r) this.pendingRetirement.delete(id);
+    })();
+    const disposal=r.disposal;
+    try { await disposal; }
+    finally { if(r.disposal===disposal)r.disposal=undefined; }
   }
   async remove(id) {
     const w = this.windows.get(id);
     this.windows.delete(id);
     this.creations?.get(w)?.abort();
-    // Creation reports its failure to attach; closing still completes cleanup.
-    await Promise.all([this.dispose(id), this.opening?.get(w)?.catch(() => {})]);
+    const cleanup=[...this.pendingCleanup].filter(([owner])=>owner.id===id).map(([,close])=>close(true));
+    // Creation failure alone is expected on cancellation; retained cleanup is not.
+    const [disposed]=await Promise.allSettled([this.dispose(id),this.opening?.get(w),...cleanup]);
+    if(disposed.status==='rejected' || [...this.pendingCleanup.keys()].some(owner=>owner.id===id))
+      throw fail(503,'Stream cleanup failed. Retry closing the window.');
     await this.persist();
   }
   async reload(id) {
@@ -582,9 +616,15 @@ export class Manager {
     // Invalidate window identity before waiting for in-flight Chromium creation.
     this.windows.clear();
     for (const controller of this.creations?.values() || []) controller.abort();
-    await Promise.allSettled([...(this.opening?.values()||[])]);
-    for (const id of [...this.resources.keys()]) await this.dispose(id);
-    if (this.browserPromise) await (await this.browserPromise).close();
+    const disposals=[...new Set([...this.resources.keys(),...this.pendingRetirement.keys()])].map(id=>this.dispose(id));
+    await Promise.allSettled([...(this.opening?.values()||[]),... [...this.pendingCleanup.values()].map(close=>close(true)),...disposals]);
+    if (this.browserPromise) {
+      await (await this.browserPromise).close();
+      // Browser-wide closure is also an acknowledgement for failed context cleanup.
+      this.pendingCleanup.clear();
+      this.pendingRetirement.clear();
+      this.resources.clear();
+    }
     await this.persistQueue;
   }
 }

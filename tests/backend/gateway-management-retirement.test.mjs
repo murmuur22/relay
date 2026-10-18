@@ -18,7 +18,13 @@ async function fixture(t){
  const config={version:1,bind:'127.0.0.1',port,desktopHostname:'desktop-a.example.test',appBaseDomain:'apps.example.test',keyPath:dir+'/key.pem',certPath:dir+'/cert.pem',targets:[{id:'files',label:'Files',upstream:`http://127.0.0.1:${upstream.address().port}`}]};
  const relay=await createGateway({port:0,runtime:dir+'/state',profile:'standalone'});
  let closing;
- const close=()=>closing??=(async()=>{await relay.close();upstream.closeAllConnections();await new Promise(r=>upstream.close(r));await rm(dir,{recursive:true,force:true});})();
+ const close=()=>closing??=(async()=>{
+  try{await relay.close();}
+  finally{
+   try{upstream.closeAllConnections();await new Promise(r=>upstream.close(r));}
+   finally{await rm(dir,{recursive:true,force:true});}
+  }
+ })().finally(()=>{closing=undefined;});
  t.after(close);
  const api=client(relay.origin,await authenticate(relay.origin,dir+'/state'));
  assert.equal((await api('/admin/gateway','PUT',{config,password})).status,200);
@@ -69,7 +75,8 @@ for(const method of ['PUT','DELETE'])test(`postcommit ${method} persistence fail
   for(const api of [f.api,reader])for(const app of [...apps,native])assert.equal((await api('/windows','POST',{appId:app.id})).status,200);
   for(const api of [f.api,reader])assert.equal((await api('/gateway/launch','POST',{appId:apps[0].id})).status,200);
   const old=f.relay.experimentalGateway;assert.equal(old.stats().routes,2);
-  fault=f.relay.manager.runtime+'/layout.tmp';await mkdir(fault);
+  const adminManager=f.relay.manager;
+  fault=adminManager.runtime+'/layout.tmp';await mkdir(fault);
   const replacement={...f.config,desktopHostname:'desktop-b.example.test'};
   const response=await f.api('/admin/gateway',method,{config:replacement,password});
   assert.equal(response.status,503);assert.match((await response.json()).error,/configuration applied/i);
@@ -85,6 +92,22 @@ for(const method of ['PUT','DELETE'])test(`postcommit ${method} persistence fail
   const readerLayout=JSON.parse(await readFile(f.dir+'/state/users/'+user.id+'/layout.json','utf8'));
   assert.deepEqual(readerLayout.map(w=>w.id),[native.id],'later sessions still receive legitimate persistence cleanup');
   await rm(fault,{recursive:true});fault=null;
+  // This test covers retirement despite a failed write, not automatic storage
+  // recovery. Explicitly save the still-live owner's retained Native window
+  // through the ordinary authenticated desktop API before fixture shutdown.
+  const adminResponse=await f.api('/session');assert.equal(adminResponse.status,200);
+  const adminSession=await adminResponse.json();
+  assert.equal(adminManager.runtime,f.dir+'/state/users/'+adminSession.user.id);
+  const sameUser=[...f.relay.sessions.values()].filter(s=>s.userId===adminSession.user.id);
+  assert.equal(sameUser.length,1,'no newer same-user writer is replaced by fixture persistence');
+  assert.equal(sameUser[0].manager,adminManager,'save uses the exact live faulted owner');
+  assert.deepEqual(adminSession.windows.map(w=>w.id),[native.id]);
+  assert.equal(adminSession.windows[0].focused,true,'retained Native window is already focused');
+  const readerBytesBeforeSave=await readFile(f.dir+'/state/users/'+user.id+'/layout.json');
+  const saved=await f.api('/windows/'+native.id,'PATCH',{focused:true});assert.equal(saved.status,200);
+  assert.deepEqual(await saved.json(),adminSession.windows[0],'normal focus save preserves the complete retained window');
+  assert.equal(await readFile(adminManager.runtime+'/layout.json','utf8'),JSON.stringify(adminSession.windows),'acknowledged owner write preserves exact layout bytes without retired gateway windows');
+  assert.deepEqual(await readFile(f.dir+'/state/users/'+user.id+'/layout.json'),readerBytesBeforeSave,'owner save cannot replace another user layout');
   if(method==='PUT'){
    assert.equal((await reader('/windows','POST',{appId:apps[0].id})).status,200);
    assert.equal((await reader('/gateway/launch','POST',{appId:apps[0].id,launchId:'c'.repeat(64)})).status,200,'explicit reopen can launch the replacement');

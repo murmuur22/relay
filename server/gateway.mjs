@@ -42,7 +42,8 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  if(updaterSettings&&Number(new URL(updaterSettings.uiOrigin).port||80)===port)throw Error('Invalid updater configuration: distinct port required');
  if(maintenanceFile!==undefined&&!isAbsolute(maintenanceFile))throw Error('Invalid maintenance file');
  const maintenance=()=>{if(!maintenanceFile)return false;try{lstatSync(maintenanceFile);return true;}catch(error){return error.code!=='ENOENT';}};
- const admit=()=>{if(maintenance())throw fail(503,'Relay is in maintenance. Try again after the update.');};
+ let shutdownIntent=false;
+ const admit=()=>{if(shutdownIntent)throw fail(503,'Relay is shutting down.');if(maintenance())throw fail(503,'Relay is in maintenance. Try again after the update.');};
  iconPython(); // Validate trusted operator configuration before state or listener creation.
 
  if(!['development','standalone'].includes(profile))throw Error('Invalid Relay profile');
@@ -76,7 +77,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   pendingAuthHosts.add(host);pendingAuthNamespaces.add(base);
   try{
    for(const user of accounts.state.users){await desktop.queues.get(user.id)?.catch(()=>{});const state=await desktop.load(user.id);if((state.bookmarks||[]).some(b=>{const h=new URL(b.url).hostname.replace(/\.$/,'');return h===host||h===base||h.endsWith('.'+base);}))throw fail(409,'Gateway cookie hostname conflicts with a private Native shortcut. The owner must change or remove that shortcut first.');}
-   const edge=await startExperimentalGateway({config,relayOrigin:origin,accounts,sessions,admit,ended:gatewayEnded});
+   admit();const edge=await startExperimentalGateway({config,relayOrigin:origin,accounts,sessions,admit,ended:gatewayEnded});
    authHostnames.add(host);authNamespaces.add(base);return edge;
   }finally{pendingAuthHosts.delete(host);pendingAuthNamespaces.delete(base);}
  };
@@ -96,16 +97,39 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   };
   try{if(mutation){queuedWrites++;const job=writeQueue.catch(()=>{}).then(run);writeQueue=job;await job;}else await run();}catch(e){next(e);}finally{if(mutation)queuedWrites--;}
  };
- const revoke=async s=>{if(!s||s.revoked)return;s.revoked=true;sessions.delete(s.id);experimental?.endSession(s);clearTimeout(s.timer);for(const op of s.operations)op.controller.abort();for(const ws of s.sockets)ws.terminate();for(const res of s.responses)res.destroy();await Promise.allSettled([s.manager.close(),...[...s.operations].map(op=>op.done)]);};
+ // Retired sessions have no request authority. Keep their exact managers reachable
+ // until close acknowledges cleanup; admission counts them against existing caps.
+ const retiringSessions=new Map();
+ const cleanupError=()=>fail(503,'Change applied; session revoked, but stream cleanup is unconfirmed. Retry Relay shutdown to finish cleanup.');
+ const revoke=s=>{
+  if(!s)return Promise.resolve(true);
+  if(!s.revoked){
+   s.revoked=true;retiringSessions.set(s.id,s);sessions.delete(s.id);
+   experimental?.endSession(s);clearTimeout(s.timer);
+   for(const op of s.operations)op.controller.abort();for(const ws of s.sockets)ws.terminate();for(const res of s.responses)res.destroy();
+  }
+  if(retiringSessions.get(s.id)!==s)return Promise.resolve(true);
+  // Coalesce concurrent revocation/shutdown; rejection never discards ownership.
+  return s.cleanup??=(async()=>{
+   const results=await Promise.allSettled([s.manager.close(),...[...s.operations].map(op=>op.done)]);
+   const complete=results.every(r=>r.status==='fulfilled');
+   if(complete&&retiringSessions.get(s.id)===s)retiringSessions.delete(s.id);
+   return complete;
+  })().finally(()=>{s.cleanup=null;});
+ };
  const getSession=req=>{const id=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('relay_session='))?.slice(14);const s=sessions.get(id);if(!s)return null;const user=accounts.state.users.find(u=>u.id===s.userId);if(s.expires<=Date.now()||!user||user.disabled){void revoke(s);return null;}s.user=user;return s;};
  const layouts=new Map();
  const login=async(req,res,user)=>{
-  await revoke(getSession(req));
-  if(sessions.size>=16||[...sessions.values()].filter(s=>s.userId===user.id).length>=4)throw fail(429,'Session limit reached. Sign out of another browser.');
+  admit();
+  if(!await revoke(getSession(req)))throw cleanupError();
+  admit();
+  const owned=[...sessions.values(),...retiringSessions.values()];
+  if(owned.length>=16||owned.filter(s=>s.userId===user.id).length>=4)throw fail(429,'Session limit reached. Sign out of another browser.');
   const id=token(),dir=runtime+'/users/'+user.id;await mkdir(dir,{recursive:true,mode:0o700});await chmod(dir,0o700);
-  const manager=new Manager(dir,userApps(user,await desktop.load(user.id)));manager.transport=transport;
+  const state=await desktop.load(user.id);admit();
+  const manager=new Manager(dir,userApps(user,state));manager.transport=transport;
   if(!layouts.has(user.id))layouts.set(user.id,{queue:Promise.resolve()});manager.persistence=layouts.get(user.id);
-  await manager.init();
+  await manager.init();admit();
   if(accounts.state.users.find(u=>u.id===user.id)!==user)throw fail(401,'Account changed. Sign in again.');
   const counts=()=>{let total=0,own=0;for(const s of sessions.values()){const n=[...s.manager.windows.values()].filter(w=>w.mode==='stream').length;total+=n;if(s.userId===user.id)own+=n;}return {total,own};};
   manager.checkQuota=()=>{const {total,own}=counts();if(total>=8||own>=2)throw fail(429,'Stream limit reached. Close another stream.');};
@@ -154,7 +178,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   const authority=desktopAuthority(req),state=await desktop.load(req.session.userId);desktop.item(state,req.params.id,desktop.allowed(state,authority));
   req.normalizedIcon=await normalizeIcon(req.body,req.headers['content-type']);authority();await commitIcon(req,res,error=>{throw error;});
  },{queued:false}));
- const revokeUser=async id=>{await Promise.all([...sessions.values()].filter(s=>s.userId===id).map(revoke));};
+ const revokeUser=async id=>{const results=await Promise.all([...sessions.values(),...retiringSessions.values()].filter(s=>s.userId===id).map(revoke));if(results.some(complete=>!complete))throw cleanupError();};
  app.patch('/api/profile',wrap(async(req,res)=>{const user=await accounts.profile(req.session.userId,req.body||{});if('password' in req.body)await revokeUser(user.id);res.json(user);}));
  app.use('/api/admin',(req,res,next)=>{if(req.session.user.role!=='admin'||req.session.user.mustChange)return res.status(403).json({error:'Admin access required'});next();});
  gatewayManagementRoutes(app,{runtime,startup,getEdge:()=>experimental,setEdge:value=>{experimental=value;},startEdge:startPersonalSafeEdge,wrap,getSession,admit,accounts,sessions,managementPort:server.address().port,updaterPort:updaterSettings?Number(new URL(updaterSettings.uiOrigin).port||80):null,hostname});
@@ -207,12 +231,13 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   const result=await accounts.service(req.params.id,req.body||{},method==='delete');
   if(method==='delete')definitionEpochs.delete(req.params.id);else definitionEpochs.set(req.params.id,token());
   experimental?.endApp(req.params.id);
-  await Promise.all(affected.map(revoke));
-  for(const s of sessions.values()){for(const response of s.responses)if(response.serviceId===req.params.id)response.destroy();s.manager.apps=accounts.apps(accounts.state.users.find(u=>u.id===s.userId));await s.manager.remove(req.params.id);}
+  const revoked=await Promise.all(affected.map(revoke));
+  const cleanup=await Promise.allSettled([...sessions.values()].map(s=>{for(const response of s.responses)if(response.serviceId===req.params.id)response.destroy();s.manager.apps=accounts.apps(accounts.state.users.find(u=>u.id===s.userId));return s.manager.remove(req.params.id);}));
+  if(revoked.some(complete=>!complete)||cleanup.some(r=>r.status==='rejected'))throw fail(503,'Service changed; stream cleanup incomplete. Sign out or retry Relay shutdown to finish cleanup.');
   res.json(result);
  }));
  app.get('/api/admin/diagnostics',(req,res)=>res.json({version:VERSION,uptimeSeconds:Math.floor(process.uptime()),sessions:sessions.size,users:accounts.state.users.length,services:accounts.state.services.length,streams:[...sessions.values()].reduce((n,s)=>n+s.manager.resources.size,0),memory:process.memoryUsage(),limits:{sessionsPerUser:4,sessionsGlobal:16,streamsPerUser:2,streamsGlobal:8},externalConnections:'HTTP(S) web apps with approved origins; WebSockets and streamed file transfers unsupported'}));
- app.post('/api/logout',wrap(async(req,res)=>{await revoke(req.session);res.clearCookie('relay_session',{path:'/',httpOnly:true,sameSite:'strict'});res.json({ok:true});}));
+ app.post('/api/logout',wrap(async(req,res)=>{const complete=await revoke(req.session);res.clearCookie('relay_session',{path:'/',httpOnly:true,sameSite:'strict'});if(!complete)throw cleanupError();res.json({ok:true});}));
  const operation=fn=>wrap(async(req,res)=>{try{res.json(await fn(req,req.session.manager));}catch(e){throw fail(e.status||400,e.status?e.message:'Invalid window operation');}});
  const permit=async(req,id)=>{if(!(await personalFor(req)).some(a=>a.id===id))throw fail(403,'Service access denied');};
  app.post('/api/windows',operation(async(req,m)=>{await permit(req,req.body?.appId);if(accounts.state.services.find(a=>a.id===req.body.appId)?.mode==='gateway'&&!experimental)throw fail(503,'Experimental gateway is not configured');return m.open(req.body.appId);}));
@@ -224,7 +249,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   if(getSession(req)!==req.session)throw fail(401,'Authentication required');
   await permit(req,req.params.id);res.json(result);
  },{queued:false}));
- for(const method of ['patch','delete'])app[method]('/api/windows/:id',operation(async(req,m)=>{await permit(req,req.params.id);if(method==='patch')return m.patch(req.params.id,req.body||{});if(!m.windows.has(req.params.id))throw Error();experimental?.closeWindow(req.session,req.params.id);await m.remove(req.params.id);return {closed:true};}));
+ for(const method of ['patch','delete'])app[method]('/api/windows/:id',operation(async(req,m)=>{await permit(req,req.params.id);if(method==='patch')return m.patch(req.params.id,req.body||{});if(!m.windows.has(req.params.id)&&!m.resources.has(req.params.id)&&!m.pendingRetirement.has(req.params.id)&&![...m.pendingCleanup.keys()].some(w=>w.id===req.params.id))throw Error();experimental?.closeWindow(req.session,req.params.id);await m.remove(req.params.id);return {closed:true};}));
  let health={checkedAt:0,keepsakes:false,parcels:false},probing;
  const webHealth=new HealthProbes({gatewayOrigin:origin});
  const appHealth=a=>webHealth.probe(a);
@@ -246,7 +271,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  }));
  app.get('/api/metrics',operation((req,m)=>m.metrics()));
  server.on('upgrade',(req,socket,head)=>{
-  if(maintenance()){socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');return;}
+  if(shutdownIntent||maintenance()){socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');return;}
   const s=getSession(req),match=/^\/ws\/stream\/([a-z0-9-]+)$/.exec(req.url);
   if(!uniqueAuthority(req)||req.headers.host!==new URL(origin).host||req.headers.origin!==origin||!s||!match||!accounts.allowed(s.user,accounts.state.services.find(a=>a.id===match[1]))||s.manager.windows.get(match[1])?.mode!=='stream'){socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return;}
   wss.handleUpgrade(req,socket,head,ws=>{ws.on('error',()=>{});s.sockets.add(ws);ws.once('close',()=>s.sockets.delete(ws));s.manager.attach(match[1],ws);});
@@ -260,5 +285,21 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  if(setup){await writeFile(runtime+'/setup-url.txt',origin+'/#'+setup,{mode:0o600});await chmod(runtime+'/setup-url.txt',0o600);}
  await writeFile(runtime+'/open-url.txt',origin+'/',{mode:0o600});await chmod(runtime+'/open-url.txt',0o600);
  if(gatewaySettings)try{experimental=await startPersonalSafeEdge(gatewaySettings);}catch(e){await nativeService?.close();await webHealth.close();await transport.close();await new Promise(r=>server.close(r));throw e;}
- return {origin,app,server,accounts,sessions,get experimentalGateway(){return experimental;},get manager(){return [...sessions.values()][0]?.manager;},nativeService,authorized:req=>!!getSession(req),close:async()=>{await experimental?.close();await webHealth.close();await transport.close();for(const s of [...sessions.values()])await revoke(s);await nativeService?.close();await new Promise(r=>{server.close(r);for(const socket of connections)socket.destroy();});}};
+ let closing;
+ const close=()=>{
+  // Irreversible, including failed cleanup and explicit retries, before any await.
+  shutdownIntent=true;
+  return closing??=(async()=>{
+   // Revoke every live authority synchronously; retain failed cleanup ownership.
+   const cleanup=Promise.all([...new Set([...sessions.values(),...retiringSessions.values()])].map(revoke));
+   // Only the finite already-queued writes: late auth cannot mint sessions, and a
+   // held managed-listener launch must settle before its owner is closed below.
+   await writeQueue.catch(()=>{});
+   const services=await Promise.allSettled([experimental?.close(),webHealth.close(),transport.close(),nativeService?.close()]);
+   const complete=await cleanup;
+   await new Promise(r=>{server.close(r);for(const socket of connections)socket.destroy();});
+   if(complete.some(ok=>!ok)||services.some(r=>r.status==='rejected'))throw cleanupError();
+  })().finally(()=>{closing=null;});
+ };
+ return {origin,app,server,accounts,sessions,retiringSessions,get experimentalGateway(){return experimental;},get manager(){return [...sessions.values()][0]?.manager;},nativeService,authorized:req=>!!getSession(req),close};
 }

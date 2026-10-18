@@ -107,6 +107,9 @@ jobs:
           node --test --test-concurrency=1 --test-force-exit --test-reporter=tap --test-timeout=130000 tests/backend/private-lan*.test.mjs tests/frontend/updater*.test.mjs
           node --test --test-timeout=90000 tests/backend/web-request-body.test.mjs tests/backend/web-redirects.test.mjs tests/backend/stream-navigation.test.mjs tests/frontend/stream-navigation.test.mjs
           node --test --test-concurrency=1 --test-timeout=130000 tests/backend/desktop-gateway*.test.mjs tests/backend/gateway-*.test.mjs tests/backend/native-preview-validation.test.mjs tests/backend/system-apps.test.mjs tests/frontend/desktop-gateway.test.mjs tests/frontend/gateway-*.test.mjs tests/frontend/native-preview-retirement.test.mjs tests/frontend/control-panel.test.mjs
+          node --test --test-concurrency=1 --test-timeout=90000 tests/backend/cancel-await.test.mjs tests/backend/cancel-close-retry.test.mjs tests/backend/cancel-published-retirement.test.mjs tests/backend/reviewer-cancel-adverse.test.mjs tests/backend/reviewer-revocation-consumers.test.mjs tests/backend/reviewer-shutdown-invariant.test.mjs tests/backend/revocation-cleanup.test.mjs tests/backend/shutdown-admission.test.mjs
+          RELAY_CANCEL_PHASE=newContext node --test --test-concurrency=1 --test-timeout=90000 tests/backend/cancel-await.test.mjs
+          RELAY_CANCEL_PHASE=newCDPSession node --test --test-concurrency=1 --test-timeout=90000 tests/backend/cancel-await.test.mjs
       - name: Package standalone runtime and independent control plane
         env:
           RELEASE_TAG: ${{ github.ref_name }}
