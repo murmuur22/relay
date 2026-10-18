@@ -1,4 +1,34 @@
 import test from 'node:test';
+// DIAGNOSTIC ONLY: genuine fresh nonpooled HTTP request; not an accepted fix.
+import http from 'node:http';
+function freshLogin(g,csrf){return new Promise((resolve,reject)=>{
+ let response,socket,timer,finished=false,settled=false,ended=false,requestClosed=false,responseClosed=true,socketClosed=true,failure;
+ const cleanup=()=>{
+  if(settled||!finished||!requestClosed||!responseClosed||!socketClosed)return;settled=true;
+  clearTimeout(timer);q.removeListener('error',finish);q.removeListener('close',onRequestClose);q.removeListener('socket',onSocket);
+  if(response){response.removeListener('end',onEnd);response.removeListener('aborted',onAborted);response.removeListener('error',finish);response.removeListener('close',onResponseClose);}
+  socket?.removeListener('close',onSocketClose);
+  if(failure)reject(failure);else resolve(response);
+ };
+ const finish=error=>{
+  if(finished)return;finished=true;failure=error;clearTimeout(timer);
+  // agent:false makes these handles exclusively ours; success has already drained.
+  response?.destroy();q.destroy();socket?.destroy();cleanup();
+ };
+ const onEnd=()=>{ended=true;finish(response.complete?undefined:Error('incomplete login response'));};
+ const onAborted=()=>finish(Error('login response aborted'));
+ const onResponseClose=()=>{responseClosed=true;if(!ended)finish(Error('login response closed before end'));cleanup();};
+ const onRequestClose=()=>{requestClosed=true;if(!finished)finish(Error('login request closed before response end'));cleanup();};
+ const onSocketClose=()=>{socketClosed=true;cleanup();};
+ const onSocket=s=>{socket=s;socketClosed=false;s.once('close',onSocketClose);if(finished)s.destroy();};
+ const q=http.request(g.origin+'/api/login',{agent:false,method:'POST',headers:{Origin:g.origin,'Content-Type':'application/json','X-CSRF-Token':csrf}},r=>{
+  response=r;responseClosed=false;r.once('end',onEnd);r.once('aborted',onAborted);r.on('error',finish);r.once('close',onResponseClose);r.resume();
+ });
+ q.on('error',finish);q.once('close',onRequestClose);q.once('socket',onSocket);
+ // Same4000ms budget as bounded(); cancellation actually closes the owned transport.
+ timer=setTimeout(()=>finish(Error('shutdown admission deadline: fresh login')),4000);
+ q.end(JSON.stringify({username:'admin',password}));
+});}
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import {syncBuiltinESMExports} from 'node:module';
@@ -62,7 +92,7 @@ test('failed close retains live ownership and permanently denies admission throu
   const one=g.close(),two=g.close();assert.equal(one,two);const failed=await Promise.allSettled([one,two]);assert.ok(failed.every(r=>r.status==='rejected'&&r.reason.status===503));assert.equal(g.server.listening,false);assert.equal(g.sessions.size,0);assert.equal(g.retiringSessions.get(v.s.id),v.s);assert.equal(v.resource.page.isClosed(),false);assert.equal(b.contexts().length,1);
   // In-process genuine HTTP handlers remain closed too, not just a stopped listener.
   // Temporarily listen on the same owned server solely to probe irreversible admission.
-  const oldPort=new URL(g.origin).port;await new Promise(r=>g.server.listen(Number(oldPort),'127.0.0.1',r));const denied=await login(g,csrf);assert.equal(denied.status,503);assert.equal(denied.headers.get('set-cookie'),null);assert.equal(g.sessions.size,0);
+  const oldPort=new URL(g.origin).port;await new Promise(r=>g.server.listen(Number(oldPort),'127.0.0.1',r));const denied=await freshLogin(g,csrf);assert.equal(denied.statusCode,503);assert.equal(denied.headers['set-cookie'],undefined);assert.equal(g.sessions.size,0);console.log('DIAG fresh real HTTP 503; no cookie; retained live context',b.contexts().length);
   b.close=async()=>{entered.resolve();await ack.promise;return real();};closing=g.close();assert.equal(g.close(),closing);await bounded(entered.promise,'retry ack held');assert.equal(g.retiringSessions.get(v.s.id),v.s);assert.equal(v.resource.page.isClosed(),false);ack.resolve();await bounded(closing,'retry ack');assert.equal(v.resource.page.isClosed(),true);empty(g,b);await g.close();empty(g,b);
  }finally{ack.resolve();if(closing)await closing.catch(()=>{});if(real){b.close=real;await real();}await g.close();await rm(root,{recursive:true,force:true});}
 });
