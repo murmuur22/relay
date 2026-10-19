@@ -25,6 +25,60 @@ UNIT='relay-migration-qualification.service'
 MIGRATIONS=Path('/var/lib/relay-control-plane-migrations')
 OUTPUT=Path('/var/lib/relay-migration-qualification-output')
 
+# Diagnostic vocabulary is not acceptance evidence. Never serialize exceptions,
+# argv, stderr, service configuration, journal entries or private state.
+PHASES=('source-copy','old-provenance','baseline-prepare','baseline-install','ownership-capture',
+ 'migration-root','baseline-service-start','baseline-service-observe','worker-launch','matrix-readback','source-readback',
+ 'worker-admission','worker-construction','worker-closure','worker-control-wait','worker-gated-ready',
+ 'worker-ungate','worker-broker-restart','worker-control-rewait','worker-ready','worker-enrollment','worker-matrix','worker-complete')
+ERRORS=('None','Refused','InstallError','Cancelled','OSError','PermissionError','FileNotFoundError','FileExistsError',
+ 'RuntimeError','ValueError','TypeError','KeyError','AttributeError','JSONDecodeError','CalledProcessError','TimeoutExpired','OtherError')
+UNIT_FIELDS=dict(ActiveState=('active','inactive','failed','activating','deactivating','reloading','maintenance'),
+ SubState=('running','dead','failed','start','start-pre','start-post','auto-restart','stop','stop-sigterm','stop-sigkill','exited'),
+ Result=('success','exit-code','signal','core-dump','timeout','resources','protocol','start-limit-hit','oom-kill'))
+DIAG_UNITS=('relay.service','relay-updater-broker.service','relay-updater-web.service',UNIT)
+
+def error_fields(exc):
+ name=type(exc).__name__ if exc is not None else 'None'
+ value=dict(errorClass=name if name in ERRORS else 'OtherError',reasonCode='exception' if exc is not None else 'none',errno=None)
+ status=None
+ for _ in range(4):
+  if exc is None:break
+  if isinstance(exc,OSError) and type(exc.errno) is int and exc.errno in (1,2,5,8,12,13,17,20,22,24,28,30,38,98,99,110,111):value['errno']=exc.errno
+  if isinstance(exc,subprocess.CalledProcessError) and type(exc.returncode) is int and -127<=exc.returncode<=255:status=exc.returncode
+  exc=exc.__context__  # install.run suppresses display, not the typed cause.
+ return value,status
+
+def validate_worker_diagnostic(value):
+ policy.exact(value,('schema','phase','errorClass','reasonCode','errno'),'Invalid diagnostic')
+ c.require(type(value['schema']) is int and value['schema']==1 and value['phase'] in PHASES and
+  value['phase'].startswith('worker-') and value['errorClass'] in ERRORS and value['reasonCode'] in ('none','exception') and
+  (value['errno'] is None or type(value['errno']) is int and value['errno'] in (1,2,5,8,12,13,17,20,22,24,28,30,38,98,99,110,111)), 'Invalid diagnostic values')
+ return value
+
+def worker_diagnostic(owner=0):
+ try:return validate_worker_diagnostic(c.decode(c.bounded_read(ROOT/'worker-diagnostic.json',4096,owner)))
+ except Exception:return None
+
+def diagnostic(q,phase,exc,worker):
+ c.require(phase in PHASES,'Invalid diagnostic phase')
+ fields,status=error_fields(exc);units={}
+ for unit in DIAG_UNITS:
+  values={k:'unknown' for k in UNIT_FIELDS};values.update(ExecMainStatus=None,MainPID=None)
+  try:
+   raw=q.install.run(['/usr/bin/systemctl','show',unit,'--property=ActiveState,SubState,Result,ExecMainStatus,MainPID'],timeout=5)
+   c.require(len(raw)<=4096,'Diagnostic readback bound')
+   seen=set()
+   for line in raw.splitlines():
+    key,sep,value=line.partition('=')
+    c.require(sep and key in values and key not in seen,'Invalid diagnostic readback');seen.add(key)
+    if key in UNIT_FIELDS:values[key]=value if value in UNIT_FIELDS[key] else 'unknown'
+    elif value.isascii() and value.isdigit() and len(value)<=10 and int(value)<=(255 if key=='ExecMainStatus' else 4194304):values[key]=int(value)
+  except Exception:values={k:'unknown' for k in UNIT_FIELDS};values.update(ExecMainStatus=None,MainPID=None)
+  units[unit]=values
+ return dict(schema=1,kind='relay-migration-diagnostic-not-acceptance',phase=phase,**fields,commandStatus=status,
+  worker=validate_worker_diagnostic(worker) if worker is not None else None,units=units)
+
 def run_context(args,private_lan=None):
  for key in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT'):
   c.require(os.environ.get(key,'').isascii() and os.environ[key].isdigit() and int(os.environ[key])>0,'Invalid workflow run identity')
@@ -392,7 +446,7 @@ def run_owned(args,termination):
  # All published old inputs verify before any identities/state/units are created.
  # verify_old uses exact source/ref/signer and fixed manifest/archive pins.
  # Inputs are copied only AFTER fresh-host admission, never imported as authority.
- owner=Ownership(q);result=None;error=None
+ owner=Ownership(q);result=None;error=None;failure=None;phase='source-copy'
  output=Path(args.output)
  c.require(output.is_dir() and not output.is_symlink(),'Precreated workflow-private output directory required')
  owner.begin(args,private_lan)
@@ -413,13 +467,16 @@ def run_owned(args,termination):
   # Its verification/enrollment uses real old GitHub provenance, never this target adapter.
   baseline=argparse.Namespace(release_dir=str(ROOT/'old'),version='v0.6.4',private_lan=private_lan,apply=True)
   # Invoke exact old-provenance binding in the root-owned copied package first.
+  phase='old-provenance'
   q.install.run(['/usr/bin/python3','-B','-m','deploy.migration_069.qualification_worker','verify-old'],cwd=ROOT/'source',timeout=150)
+  phase='baseline-prepare'
   with q.install.prepare(baseline) as (work,manifest):
-   q.install.apply_install(work,manifest,'v0.6.4',private_lan)
-  owner.capture()
-  owner.create_private(MIGRATIONS)  # Required ReadWritePaths must exist before systemd establishes the worker namespace.
+   phase='baseline-install';q.install.apply_install(work,manifest,'v0.6.4',private_lan)
+  phase='ownership-capture';owner.capture()
+  phase='migration-root';owner.create_private(MIGRATIONS)  # Required writable root before namespace setup.
   q.base.NETWORK=q.install.deployment_network(private_lan)
-  q.install.run(['/usr/bin/systemctl','start',*q.install.UNITS]);owner.observe()
+  phase='baseline-service-start';q.install.run(['/usr/bin/systemctl','start',*q.install.UNITS])
+  phase='baseline-service-observe';owner.observe()
   props=('User=root','Group=root','WorkingDirectory='+str(ROOT/'source'),'UMask=0077','NoNewPrivileges=true',
    'ProtectHome=true','ProtectSystem=strict','ReadWritePaths=/opt /var/lib/relay /var/lib/relay-updater /var/lib/relay-updater-control /var/lib/relay-control-plane-migrations /run/relay-updater-control',
    'PrivateTmp=true','ProtectKernelTunables=true','ProtectKernelModules=true','ProtectControlGroups=true','RestrictSUIDSGID=true',
@@ -428,13 +485,20 @@ def run_owned(args,termination):
   command=['/usr/bin/systemd-run','--unit='+UNIT,'--description='+unit_description(owner.context),'--wait','--pipe','--collect',
    *('--property='+v for v in props),'/usr/bin/python3','-B','-m','deploy.migration_069.qualification_worker','matrix']
   # No raw private worker stdout/stderr leaves the protected boundary.
-  q.install.run(command,timeout=1560)
-  result=json.loads((ROOT/'execution.json').read_text())
-  check_inventory(ROOT/'source',inventory);git_inventory(source,args.source_commit)
+  phase='worker-launch';q.install.run(command,timeout=1560)
+  phase='matrix-readback';result=json.loads((ROOT/'execution.json').read_text())
+  phase='source-readback';check_inventory(ROOT/'source',inventory);git_inventory(source,args.source_commit)
  except Exception as exc:
-  error=type(exc).__name__
+  error=type(exc).__name__;failure=exc
  finally:
   termination['cleaning']=True
+  # Exact protected checkpoint + fixed unit fields BEFORE any cleanup removes them.
+  # Diagnostic persistence failure still cleans up, and cannot yield acceptance.
+  try:
+   evidence=diagnostic(q,phase,failure,worker_diagnostic())
+   c.write_json(output/('diagnostic-'+args.mode+'.json'),evidence,owner=os.geteuid())
+   c.require(c.decode(c.bounded_read(output/('diagnostic-'+args.mode+'.json'),16384,os.geteuid()))==evidence,'Diagnostic readback differs')
+  except Exception:error=error or 'diagnostic-failure'
   if result is None and (ROOT/'execution.json').is_file():
    try:result=c.decode(c.bounded_read(ROOT/'execution.json',4*1024**2,0))
    except Exception:pass

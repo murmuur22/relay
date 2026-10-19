@@ -347,13 +347,13 @@ jobs:
           # Best effort on workflow cancellation; a killed runner may never execute this.
           # Never signal a live original supervisor or adopt an unbound/replaced resource.
           sudo env -i PATH=/usr/bin:/bin LANG=C.UTF-8 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" /usr/bin/python3 -B -m deploy.migration_069.qualify cleanup --source-commit "$CANDIDATE_SOURCE" --mode "$MODE" --output /var/lib/relay-migration-qualification-output --ack I_ACCEPT_FRESH_DISPOSABLE_MIGRATION_QUALIFICATION
-      - name: Expose ONLY sanitized execution and cleanup JSON (also on failure)
+      - name: Expose ONLY sanitized execution, diagnostic and cleanup JSON (also on failure)
         if: always()
         env:
           MODE: ${{ matrix.mode }}
         run: |
           mkdir -m 700 "$RUNNER_TEMP/migration-output"
-          for kind in execution cleanup; do
+          for kind in execution cleanup diagnostic; do
             file="/var/lib/relay-migration-qualification-output/$kind-$MODE.json"
             if sudo test -f "$file"; then
               sudo install -o "$(id -u)" -g "$(id -g)" -m 0600 "$file" "$RUNNER_TEMP/migration-output/$kind-$MODE.json"
@@ -373,6 +373,14 @@ jobs:
         with:
           name: migration-cleanup-${{ matrix.mode }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/migration-output/cleanup-${{ matrix.mode }}.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: false
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: migration-diagnostic-${{ matrix.mode }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/migration-output/diagnostic-${{ matrix.mode }}.json
           if-no-files-found: error
           retention-days: 14
           overwrite: false

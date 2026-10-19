@@ -27,7 +27,7 @@ class SupervisorTests(unittest.TestCase):
    self.assertFalse(owned.exists(),'A failed stop must not skip unrelated owned-path cleanup')
 
  def test_real_supervisor_failure_cancel_and_artifact_failure_close_owned_listener(self):
-  for fault in ('worker','cancel','artifact','upload'):
+  for fault in ('worker','cancel','artifact','upload','service-start','diagnostic'):
    with self.subTest(fault=fault),tempfile.TemporaryDirectory() as d:
     root=Path(d);work=root/'admitted';dest=root/'installed';old=root/'old';candidate=root/'candidate';output=root/'output';migration=root/'migrations'
     for p in (old,candidate,output):p.mkdir()
@@ -48,6 +48,7 @@ class SupervisorTests(unittest.TestCase):
         time.sleep(.01)
        info=json.loads((root/'listener.json').read_text());ports.append(info['port']);events.append('started')
        with socket.create_connection(('127.0.0.1',ports[0]),timeout=1):pass
+       if fault=='service-start':raise PermissionError(13,'PRIVATE deterministic service start failure')
        return ''
       if action=='stop':
        for p in processes:
@@ -75,13 +76,31 @@ class SupervisorTests(unittest.TestCase):
     source=q.Path(q.__file__).resolve().parents[2];n='deploy/migration_069/qualification_worker.py';p=source/n
     inventory={n:dict(mode=p.stat().st_mode&0o777,size=p.stat().st_size,sha256=hashlib.sha256(p.read_bytes()).hexdigest())}
     args=types.SimpleNamespace(source_commit='c'*40,ack=q.ACK,mode='loopback',old_release_dir=str(old),candidate_dir=str(candidate),output=str(output))
+    real_write=q.c.write_json
+    def diagnostic_write(path,value,*a,**kw):
+     if Path(path).name.startswith('diagnostic-'):
+      self.assertNotIn('stopped',events)
+      if fault=='diagnostic':raise OSError(28,'PRIVATE diagnostic persistence failure')
+      events.append('diagnostic-before-cleanup')
+     return real_write(path,value,*a,**kw)
     try:
-     with patch.object(q,'ROOT',work),patch.object(q,'MIGRATIONS',migration),patch.object(q,'workflow_guard'),patch.object(q,'fresh_host'),patch.object(q,'helper',return_value=helper),patch.object(q,'git_inventory',return_value=inventory),patch.object(q,'process_identity',side_effect=identity,create=True),patch.dict(os.environ,dict(GITHUB_REF='refs/heads/main',GITHUB_SHA='c'*40,GITHUB_RUN_ID='1',GITHUB_RUN_ATTEMPT='1')):
+     with patch.object(q.c,'write_json',side_effect=diagnostic_write),patch.object(q,'ROOT',work),patch.object(q,'MIGRATIONS',migration),patch.object(q,'workflow_guard'),patch.object(q,'fresh_host'),patch.object(q,'helper',return_value=helper),patch.object(q,'git_inventory',return_value=inventory),patch.object(q,'process_identity',side_effect=identity,create=True),patch.dict(os.environ,dict(GITHUB_REF='refs/heads/main',GITHUB_SHA='c'*40,GITHUB_RUN_ID='1',GITHUB_RUN_ATTEMPT='1')):
       with self.assertRaises((q.c.Refused,OSError,KeyboardInterrupt)):q.run(args)
      if fault=='upload':
       with self.assertRaises(OSError):raise OSError('injected upload failure after supervisor return')
      self.assertEqual(len(processes),1);self.assertEqual(processes[0].returncode,0)
      self.assertFalse(dest.exists());self.assertFalse(work.exists());self.assertIn('stopped',events)
+     if fault!='diagnostic':
+      diag=json.loads((output/'diagnostic-loopback.json').read_text())
+      self.assertIn(diag['phase'],('baseline-service-start','worker-launch','source-readback'))
+      self.assertNotIn('PRIVATE',json.dumps(diag));self.assertNotIn('injected',json.dumps(diag))
+      self.assertIn('diagnostic-before-cleanup',events)
+      if fault=='service-start':
+       self.assertEqual(diag['phase'],'baseline-service-start');self.assertEqual(diag['errno'],13)
+       self.assertNotIn('worker',events)
+     if fault not in ('cancel','artifact'):
+      report=json.loads((output/'execution-loopback.json').read_text())
+      self.assertEqual(report['exit'],1);self.assertTrue(report['cleanup']['acknowledged'])
      with self.assertRaises(OSError):socket.create_connection(('127.0.0.1',ports[0]),timeout=.2)
     finally:
      for p in processes:

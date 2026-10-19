@@ -21,6 +21,14 @@ from . import coordinator_069 as m, control_plane_upgrade_069 as c
 R=ql.ROOT
 FUTURE='v0.6.10'
 FIXTURE_KIND='UNSIGNED-SYNTHETIC-FUTURE-NOT-A-RELEASE'
+_phase='worker-admission'
+
+def checkpoint(phase,exc=None):
+ global _phase
+ fields,_=ql.error_fields(exc)
+ value=ql.validate_worker_diagnostic(dict(schema=1,phase=phase,**fields))
+ c.write_json(R/'worker-diagnostic.json',value)
+ _phase=phase
 
 def admission(systemd=True):
  c.require(sys.platform=='linux' and os.geteuid()==0 and Path(__file__).resolve().parents[2]==R/'source',
@@ -387,10 +395,17 @@ class Matrix:
   serve_engine(self.q,Engine,Broker,password,lambda *args:self.staged_http(*args,password),target=FUTURE,fixture=fixture)
  def execute(self):
   import secrets
-  q=self.q;q.base.wait_control();q.base.ready('v0.6.4',True)
-  q.base.ungate();q.install.run(['/usr/bin/systemctl','restart',m.UNITS[1]]);q.base.wait_control();q.base.ready('v0.6.4',False)
+  q=self.q
+  checkpoint('worker-control-wait');q.base.wait_control()
+  checkpoint('worker-gated-ready');q.base.ready('v0.6.4',True)
+  checkpoint('worker-ungate');q.base.ungate()
+  checkpoint('worker-broker-restart');q.install.run(['/usr/bin/systemctl','restart',m.UNITS[1]])
+  checkpoint('worker-control-rewait');q.base.wait_control()
+  checkpoint('worker-ready');q.base.ready('v0.6.4',False)
+  checkpoint('worker-enrollment')
   password=secrets.token_urlsafe(40);secret=R/'password';q.install.write_new(secret,password)
   cookie,csrf=q.base.authenticate(password)
+  checkpoint('worker-matrix')
   self.case('stock-old-provenance',lambda:build.verify_old(R/'old'))
   self.case('ordinary-old-ui-runtime-upgrade',lambda:old_cycle(q,password))
   # old_cycle includes actual old-HTTP rollback then target re-install; no staged
@@ -418,13 +433,21 @@ class Matrix:
 
 def main():
  c.require(len(sys.argv)==2 and sys.argv[1] in ('verify-old','matrix'),'Internal fixed worker command required')
- mark=admission(sys.argv[1]=='matrix')
- if sys.argv[1]=='verify-old':build.verify_old(R/'old');return
- matrix=Matrix(mark);report=dict(schema=1,kind='relay-migration-prepolicy-execution',sourceCommit=mark['sourceCommit'],sourceRef=mark['sourceRef'],
-  mode=mark['mode'],baseline=policy.BASELINE,closure=policy.closure(),sourceInventory=mark['sourceInventory'],cases=matrix.cases,exit=1,
-  cleanup=dict(acknowledged=False,forced=False,remainingUnits=[],remainingPids=[],remainingPaths=[],remainingIdentities=[]))
- try:matrix.execute();report['exit']=0
- finally:c.write_json(R/'execution.json',report)
+ if sys.argv[1]=='verify-old':
+  admission(False);build.verify_old(R/'old');return
+ # Fixed copied-root guard precedes diagnostic writes, too. No local opt-in.
+ c.require(sys.platform=='linux' and os.geteuid()==0 and Path(__file__).resolve().parents[2]==R/'source','Fixed copied worker required')
+ try:
+  checkpoint('worker-admission');mark=admission()
+  checkpoint('worker-construction');matrix=Matrix(mark)
+  checkpoint('worker-closure')
+  report=dict(schema=1,kind='relay-migration-prepolicy-execution',sourceCommit=mark['sourceCommit'],sourceRef=mark['sourceRef'],
+   mode=mark['mode'],baseline=policy.BASELINE,closure=policy.closure(),sourceInventory=mark['sourceInventory'],cases=matrix.cases,exit=1,
+   cleanup=dict(acknowledged=False,forced=False,remainingUnits=[],remainingPids=[],remainingPaths=[],remainingIdentities=[]))
+  try:matrix.execute();checkpoint('worker-complete');report['exit']=0
+  finally:c.write_json(R/'execution.json',report)
+ except Exception as exc:
+  checkpoint(_phase,exc);raise
 
 if __name__=='__main__':
  try:main()
