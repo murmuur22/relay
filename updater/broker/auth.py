@@ -101,14 +101,14 @@ class Authority:
                 token, expiry = self.mint('ticket', cap, 60)
                 return dict(ticket=token, expiresAt=expiry)
             operation = payload.get('action')
-            if operation not in ('install', 'cancel', 'rollback'):
+            if operation not in ('install', 'prepare', 'apply', 'cancel', 'rollback'):
                 raise Denied('Invalid operation')
             cap = dict(userId=payload['userId'], action=operation)
-            if operation == 'install':
+            if operation in ('install', 'prepare', 'apply'):
                 if not isinstance(payload.get('version'), str) or not VERSION.fullmatch(payload['version']):
                     raise Denied('Invalid version')
                 cap['version'] = payload['version']
-            if operation == 'cancel':
+            if operation in ('cancel', 'apply'):
                 if not isinstance(payload.get('jobId'), str) or not re.fullmatch('[0-9a-f]{32}', payload['jobId']):
                     raise Denied('Invalid job')
                 cap['jobId'] = payload['jobId']
@@ -135,11 +135,18 @@ class Authority:
         with self.lock:
             return dict(self.get(token, 'token'))
 
-    def consume(self, token, authorization, action, **target):
+    def validate_action(self, token, authorization, action, **target):
+        """Non-consuming check; callers must consume again after slow validation."""
         with self.lock:
             user = self.get(token, 'token')
             cap = self.get(authorization, 'action')
             if cap['userId'] != user['userId'] or cap['action'] != action or any(cap.get(k) != v for k, v in target.items()):
                 raise Denied('Capability target mismatch')
+            return dict(cap)
+
+    def consume(self, token, authorization, action, **target):
+        with self.lock:
+            cap = self.validate_action(token, authorization, action, **target)
             del self.data['caps'][digest(authorization)]
             self.save()
+            return cap

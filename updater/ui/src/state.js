@@ -4,11 +4,12 @@ export const phases = {
   downloading: ['Downloading', 'Receiving artifact bytes. Verification follows the transfer.'],
   verifying: ['Verifying', 'Checking release provenance, artifact size and digest.'],
   staging: ['Staging', 'Preparing the verified release before activation.'],
+  ready: ['Ready to apply', 'Verified preparation is ready. Relay is still running. Apply only when you are ready to interrupt sessions.'],
   'backing-up': ['Backing up', 'Protecting the current Relay state before switching releases.'],
   activating: ['Activating', 'Switching to the staged release. Cancellation is no longer safe.'],
   restarting: ['Restarting Relay', 'Relay may be unavailable. This independent tab keeps monitoring.'],
   'health-checking': ['Checking readiness', 'Waiting for the expected Relay version to become ready.'],
-  succeeded: ['Update complete', 'The broker confirmed the updated Relay is ready. Sign in to Relay again.'],
+  succeeded: ['Installed', 'The broker confirmed the updated Relay is ready. Sign in to Relay again.'],
   failed: ['Update failed', 'The update did not complete. Review the broker details before another action.'],
   'rolled-back': ['Rolled back', 'The update did not succeed. The broker restored the previous release and state.'],
   'rollback-failed': ['Recovery required', 'Rollback failed. Operator recovery is required; Relay may remain in maintenance.'],
@@ -22,6 +23,14 @@ export function formatTime(value) {
   return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 19).replace('T', ' ') + ' UTC' : 'Time unavailable';
 }
 export function activeJob(job) { return Boolean(job && !terminalPhases.has(job.phase) && job.phase !== 'idle'); }
+export function stagedSupported(state) { return state?.capabilities?.prepare === 1 && state?.capabilities?.apply === 1; }
+export function stagedEligible({state, fresh, authenticated, selected, action, version = selected, jobId = state?.job?.id}) {
+  if (!fresh || !authenticated || !state || state.mode === 'observe') return false;
+  if (action === 'prepare') return Boolean(stagedSupported(state) && state.canPrepare === true && version === selected && version !== state.currentVersion && state.available?.some(r => r.version === version && r.verified === true) && !activeJob(state.job) && !['rollback-failed', 'interrupted'].includes(state.job?.phase));
+  if (action === 'apply') return Boolean(stagedSupported(state) && state.canApply === true && state.job?.kind === 'prepare' && state.job.phase === 'ready' && /^[a-f0-9]{32}$/.test(jobId || '') && jobId === state.job.id && version === state.job.version);
+  if (action === 'cancel' || action === 'rollback') return Boolean(jobId && jobId === state.job?.id && state.job[action === 'cancel' ? 'canCancel' : 'canRollback'] === true);
+  return false;
+}
 export function transfer(job) {
   const bytes = Number.isSafeInteger(job?.downloadedBytes) && job.downloadedBytes >= 0 ? job.downloadedBytes : 0;
   const total = Number.isSafeInteger(job?.totalBytes) && job.totalBytes > 0 ? job.totalBytes : null;

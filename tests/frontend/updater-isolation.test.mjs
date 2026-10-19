@@ -18,7 +18,7 @@ async function fixture(t){
  const broker=net.createServer(socket=>{let text='';socket.on('data',b=>{text+=b;if(!text.includes('\n'))return;const request=JSON.parse(text);let result;
   if(request.action==='issue-ui'){owner=JSON.parse(Buffer.from(request.payload,'base64')).userId;result={ticket:'t'.repeat(64),expiresAt:Date.now()+60000};}
   else if(request.action==='redeem-ui')result={token:'r'.repeat(64),userId:owner,expiresAt:Date.now()+60000,interfaceAnimations:false};
-  else result={mode:'fixture',currentVersion:'v0.6.3',available:[{version:'v0.6.4',verified:true,size:100,notes:'Synthetic protocol isolation fixture'}],job:null,history:[],canInstall:true};
+  else result={mode:'fixture',currentVersion:'v0.6.3',available:[{version:'v0.6.4',verified:true,size:100,notes:'Synthetic protocol isolation fixture'}],job:null,history:[],capabilities:{prepare:1,apply:1},canPrepare:true,canInstall:true};
   socket.end(JSON.stringify({ok:true,result})+'\n');
  });});await new Promise(r=>broker.listen(root+'/socket',r));
  const g=await createGateway({port:0,profile:'standalone',runtime:root+'/relay',updater:{socketPath:root+'/socket',keyFile:root+'/key',uiOrigin}});

@@ -9,7 +9,9 @@ number and complete relative file inventory by size and SHA-256. This is not a
 new release-manifest field or executable migration hook. The existing protocol-1
 manifest and signed runtime artifact remain the old engine's only runtime inputs.
 
-The root broker's seven modules are unchanged from 0.6.3 and 0.6.4. Runtime
+The root broker's seven modules were unchanged for the historical 0.6.5
+presentation-only bridge relative to 0.6.3 and 0.6.4; this is not a 0.6.9 claim.
+The 0.6.9 staged auth/engine intentionally differ. Runtime
 updates still cannot replace the installed web API, broker, key, configuration,
 identities or systemd units. No privileged control-plane self-updater is added.
 Ordinary desktop styling remains neutral; only updater surfaces use the licensed

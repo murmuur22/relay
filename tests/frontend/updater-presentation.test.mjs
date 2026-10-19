@@ -26,12 +26,19 @@ const scratch=await realpath(process.env.RELAY_PRESENTATION_EVIDENCE_DIR || proc
 const presentation=ROOT+'/updater/ui/presentation-dist';
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 async function freePort(){const server=net.createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));return port;}
-async function fixture(t,engine=chromium){
+const oldArchive=process.env.RELAY_PRESENTATION_OLD_UPDATER_ARCHIVE;
+// Current staged-engine and genuine old-engine compatibility are distinct tiers.
+// No implicit scratch discovery, candidate-as-old reference, or staged old-engine claim.
+async function fixture(t,engine=chromium,{old=Boolean(oldArchive),legacyUI=false}={}){
  await access(presentation+'/presentation.json'); // Parent must complete actual build first.
  const uiOrigin=`http://127.0.0.1:${await freePort()}`;
  const args=['-u','tests/helpers/updater-runtime-presentation.py','--presentation',presentation,'--ui-origin',uiOrigin];
- const archive=process.env.RELAY_PRESENTATION_OLD_UPDATER_ARCHIVE || scratch+'/public-v0.6.4/relay-updater-linux-x64.tar.gz';
- try{await access(archive);args.push('--old-archive',archive);}catch{if(process.env.RELAY_PRESENTATION_OLD_UPDATER_ARCHIVE)throw Error('Explicit old archive unavailable');}
+ if(old){
+  assert.ok(oldArchive,'Old tier requires an explicit verified archive');
+  assert.ok(process.env.RELAY_PRESENTATION_OLD_SOURCE,'Old tier requires trusted old source');
+  assert.ok(process.env.RELAY_PRESENTATION_OLD_MANIFEST,'Old tier requires already-attested manifest');
+  args.push('--old-archive',oldArchive,'--old-source',process.env.RELAY_PRESENTATION_OLD_SOURCE,'--old-manifest',process.env.RELAY_PRESENTATION_OLD_MANIFEST);
+ }
  const child=spawn('python3',args,{cwd:ROOT,env:{...process.env,PYTHONPATH:ROOT},stdio:['pipe','pipe','pipe']});
  let output='',errors='',gateway,web,browser;
  child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>errors+=b);
@@ -41,11 +48,15 @@ async function fixture(t,engine=chromium){
  const options={port:await freePort(),runtime:info.root+'/presentation-relay',profile:'standalone',updater:{socketPath:info.config.socketPath,keyFile:info.config.bridgeKeyFile,uiOrigin},maintenanceFile:info.config.maintenance};
  gateway=await createGateway(options);
  const createUpdaterWeb=await webFactory();
- web=await createUpdaterWeb({uiOrigin,relayOrigin:gateway.origin,socketPath:info.config.socketPath,staticDir:ROOT+'/updater/ui/dist',presentationFixture:{installRoot:info.config.installRoot,ownerUid:process.getuid()}});
+ web=await createUpdaterWeb({uiOrigin,relayOrigin:gateway.origin,socketPath:info.config.socketPath,staticDir:legacyUI?info.oldUIDir:ROOT+'/updater/ui/dist',...(!legacyUI?{presentationFixture:{installRoot:info.config.installRoot,ownerUid:process.getuid()}}:{})});
  browser=await engine.launch({headless:true,...(engine===chromium?{chromiumSandbox:true}:{})});
  const context=await browser.newContext({viewport:{width:1440,height:1050}}),desktop=await context.newPage();
  context.setDefaultTimeout(10000);await browserLogin(desktop,gateway.origin,options.runtime);
- t.diagnostic(info.oldBrokerHashes && Object.keys(info.oldBrokerHashes).length ? 'Genuine public v0.6.4 broker modules copied byteidentically, unchanged old Engine running' : 'Current source broker; provide RELAY_PRESENTATION_OLD_UPDATER_ARCHIVE for genuine old-module tier');
+ if(old){
+  assert.equal(Object.keys(info.oldBrokerHashes).length,7);
+  assert.deepEqual(Object.fromEntries(Object.entries(info.oldBrokerImports).map(([name,value])=>[name,value.sha256])),info.oldBrokerHashes);
+ }
+ t.diagnostic(JSON.stringify({tier:info.tier,ui:legacyUI?'genuine archived v0.6.4 static UI':'new candidate presentation UI',oldBrokerImports:info.oldBrokerImports}));
  return {info,options,web,browser,context,desktop,uiOrigin,get gateway(){return gateway;},async stopRelay(){await gateway.close();gateway=null;},async restartRelay(){gateway=await createGateway(options);}};
 }
 async function selectedIndex(f,version){
@@ -78,10 +89,17 @@ test('compiled runtime presentation is selected with genuine standalone one-use 
  const f=await fixture(t);
  const release=await selectedIndex(f,'v0.3.0');await verifyFiles(f,release,'v0.3.0');
  await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
- await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();
- const frame=f.desktop.frameLocator('iframe[title="Independent Relay updater"]');await expect(frame.locator('#console')).toBeVisible();
- assert.equal(f.context.pages().length,1);await fonts(await (await f.desktop.locator('iframe[title="Independent Relay updater"]').elementHandle()).contentFrame());
- const opened=f.context.waitForEvent('page');await f.desktop.getByRole('button',{name:'Standalone recovery (new tab)',exact:true}).click();const page=await opened;
+ let page;
+ if(oldArchive){
+  await expect(f.desktop.getByRole('button',{name:'Start update',exact:true})).toBeDisabled();
+  page=await standalone(f);
+  t.diagnostic('Old engine: native staged launch is disabled; explicit operator/test standalone launcher exercises new-presentation monitoring. The in-app recovery button is not reachable before a monitor exists.');
+ }else{
+  await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();
+  const frame=f.desktop.frameLocator('iframe[title="Independent Relay updater"]');await expect(frame.locator('#console')).toBeVisible();
+  assert.equal(f.context.pages().length,1);await fonts(await (await f.desktop.locator('iframe[title="Independent Relay updater"]').elementHandle()).contentFrame());
+  const opened=f.context.waitForEvent('page');await f.desktop.getByRole('button',{name:'Standalone recovery (new tab)',exact:true}).click();page=await opened;
+ }
  const requests=[];page.on('response',r=>{if(r.url().endsWith('.woff2'))requests.push(r);});
  await expect(page.locator('#mode')).toHaveText('FIXTURE SANDBOX');assert.equal(await page.evaluate(()=>opener),null);assert.equal(await page.evaluate(()=>location.hash),'');await fonts(page);
  await page.reload();await expect(page.locator('#console')).toBeVisible();await fonts(page);assert.equal(requests.length>=2,true,'Actual browser font HTTP responses required');for(const r of requests)assert.equal(r.status(),200);
@@ -99,21 +117,31 @@ test('compiled runtime presentation is selected with genuine standalone one-use 
  assert.equal((await f.context.request.post(f.uiOrigin+'/updater/api/exchange',{headers:{Origin:f.uiOrigin},data:{ticket:wrongTicket}})).status(),403,'Denied wrong-owner redemption still consumes ticket');
 });
 
+// Explicit test/operator standalone route, not a claim that a recovery button is
+// reachable before an embedded monitor exists. Exercise the unchanged production
+// launcher and real authenticated one-use issuance, never an API response mock.
+async function standalone(f){
+ await f.desktop.addScriptTag({content:(await readFile(ROOT+'/src/updater.js','utf8')).replaceAll('export ','')});
+ const opened=f.context.waitForEvent('page');
+ await f.desktop.evaluate(()=>launchUpdater(async()=>{const s=await(await fetch('/api/session')).json();const r=await fetch('/api/updater/launch',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':s.csrf},body:'{}'});if(!r.ok)throw Error('Standalone issuance rejected: '+r.status);return r.json();},()=>true,window));
+ return opened;
+}
 async function install(app,version){
  await app.locator('#release-select').selectOption(version);
- await app.getByRole('button',{name:'Review installation'}).click();
- await app.locator('#confirmed').check();await app.getByLabel('Current Relay password').fill(password);
- await app.getByRole('button',{name:'Authorize installation',exact:true}).click();
+ await app.getByRole('button',{name:'Download & prepare',exact:true}).click();
+ await app.locator('#confirmed').check();await app.getByLabel('Current Relay password').fill(password);await app.getByRole('button',{name:'Authorize preparation',exact:true}).click();await expect(app.locator('#phase')).toHaveText('Ready to apply',{timeout:30000});
+ await app.getByRole('button',{name:'Apply '+version,exact:true}).click();await expect(app.locator('#password')).toHaveValue('');await expect(app.locator('#confirmed')).not.toBeChecked();await expect(app.locator('#authorize')).toBeDisabled();await app.locator('#confirmed').check();await app.getByLabel('Current Relay password').fill(password);await app.getByRole('button',{name:'Authorize Apply',exact:true}).click();
 }
 
-test('already loaded native monitor survives actual HMAC install and readiness rollback; full candidate pin serves delayed Three/font bytes after deletion without web or broker restart',{timeout:120000},async t=>{
- const f=await fixture(t),webIdentity=f.web.server,brokerPid=f.info.brokerPid;
- let installs=0;f.context.on('request',r=>{if(new URL(r.url()).pathname==='/updater/api/install')installs++;});
+test('current staged-engine tier: already loaded native monitor survives actual HMAC apply and readiness rollback; full candidate pin serves delayed Three/font bytes after deletion without web or broker restart',{timeout:120000},async t=>{
+ const f=await fixture(t,chromium,{old:false}),webIdentity=f.web.server,brokerPid=f.info.brokerPid;
+ assert.deepEqual(f.info.oldBrokerHashes,{},'This tier qualifies changed candidate core, not unchanged old Engine');
+ let installs=0;f.context.on('request',r=>{if(new URL(r.url()).pathname==='/updater/api/apply')installs++;assert.notEqual(new URL(r.url()).pathname,'/updater/api/install','No immediate-install fallback');});
  await selectedIndex(f,'v0.3.0');
  await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();
  const iframe=f.desktop.locator('iframe[title="Independent Relay updater"]'),app=f.desktop.frameLocator('iframe[title="Independent Relay updater"]');
  await expect(app.locator('#console')).toBeVisible();const frameIdentity=await iframe.elementHandle();
- await install(app,'v0.3.1');await expect(app.locator('#phase')).toHaveText('Update complete',{timeout:30000});await expect(app.locator('#current-version')).toHaveText('v0.3.1');
+ await install(app,'v0.3.1');await expect(app.locator('#phase')).toHaveText('Installed',{timeout:30000});await expect(app.locator('#current-version')).toHaveText('v0.3.1');
  const goodRelease=await selectedIndex(f,'v0.3.1');await verifyFiles(f,goodRelease,'v0.3.1');
  await f.stopRelay();await expect(app.locator('#connection')).toHaveText('Connected to updater');
  await verifyFiles(f,goodRelease,'v0.3.1'); // Independent HTTP bytes while the genuine Relay listener is STOPPED.
@@ -140,7 +168,7 @@ test('already loaded native monitor survives actual HMAC install and readiness r
  await expect(candidate.locator('#console')).toBeVisible();await expect.poll(()=>held.length,{timeout:5000}).toBe(3);
  await expect(app.locator('#phase')).toHaveText('Rolled back',{timeout:30000});await expect(app.locator('#current-version')).toHaveText('v0.3.1');
  assert.equal(await realpath(f.info.config.installRoot+'/current'),goodRelease);
- assert.equal((await readdir(f.info.config.installRoot+'/releases')).some(n=>n.startsWith('v0.3.2-')),false,'Actual old Engine prunes failed candidate before delayed asset requests resume');
+ assert.equal((await readdir(f.info.config.installRoot+'/releases')).some(n=>n.startsWith('v0.3.2-')),false,'Actual candidate Engine prunes failed candidate before delayed asset requests resume');
  assert.equal(await readFile(f.info.root+'/state/fixture.txt','utf8'),'initial synthetic state','Readiness failure restores matching state');
  for(const entry of descriptor.files){const response=await fetch(`${f.uiOrigin}/updater/presentation/v0.3.2/${entry.path}`);assert.equal(response.status,200,entry.path);const bytes=Buffer.from(await response.arrayBuffer());assert.equal(bytes.length,entry.size);assert.equal(sha(bytes),entry.sha256);if(entry.path.startsWith('licenses/'))assert.deepEqual(bytes,await readFile(presentation+'/'+entry.path));}
  releaseDelayed();await expect(candidate.locator('#chamber')).toHaveAttribute('data-renderer','webgl');await fonts(candidate);
@@ -155,7 +183,7 @@ test('compiled browser uses exact built-in safe source for missing current, old 
  const f=await fixture(t);const release=await selectedIndex(f,'v0.3.0');
  const current=f.info.config.installRoot+'/current',dir=release+'/updater-presentation',descriptorPath=dir+'/presentation.json';
  const originalDescriptor=await readFile(descriptorPath),originalPackage=await readFile(release+'/package.json'),builtinIndex=await readFile(ROOT+'/updater/ui/dist/index.html');
- let installs=0;f.context.on('request',r=>{if(new URL(r.url()).pathname==='/updater/api/install')installs++;});
+ let installs=0;f.context.on('request',r=>{if(new URL(r.url()).pathname==='/updater/api/apply')installs++;assert.notEqual(new URL(r.url()).pathname,'/updater/api/install','No immediate-install fallback');});
  const cases=[
   {name:'missing managed current',async set(){await rename(current,current+'-held');},async restore(){await rename(current+'-held',current);}},
   {name:'old runtime without presentation',async set(){await rename(dir,f.info.root+'/presentation-held');await writeFile(release+'/package.json',JSON.stringify({version:'0.2.0'}));},async restore(){await writeFile(release+'/package.json',originalPackage);await rename(f.info.root+'/presentation-held',dir);}},
@@ -167,7 +195,11 @@ test('compiled browser uses exact built-in safe source for missing current, old 
   try{
    const response=await fetch(f.uiOrigin+'/updater/');assert.equal(response.status,200);assert.deepEqual(Buffer.from(await response.arrayBuffer()),builtinIndex,c.name+' must select exact fallback bytes');
    assert.equal(response.headers.get('x-relay-updater-presentation'),'builtin');
-   if(!app){await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();app=await (await f.desktop.locator('iframe[title="Independent Relay updater"]').elementHandle()).contentFrame();}
+   if(!app){
+    await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
+    if(oldArchive){await expect(f.desktop.getByRole('button',{name:'Start update',exact:true})).toBeDisabled();app=await standalone(f);}
+    else{await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();app=await (await f.desktop.locator('iframe[title="Independent Relay updater"]').elementHandle()).contentFrame();}
+   }
    else await app.goto(f.uiOrigin+'/updater/');
    await expect(app.locator('#console')).toBeVisible();await expect(app.locator('#mode')).toHaveText('FIXTURE SANDBOX');await fonts(app);
    const sourceURLs=await app.evaluate(()=>[...document.querySelectorAll('script[src],link[rel="stylesheet"]')].map(el=>el.src||el.href));assert.equal(sourceURLs.every(url=>new URL(url).pathname.startsWith('/updater/assets/')),true,c.name);
@@ -184,11 +216,52 @@ test('WebKit compiled runtime source has functional no-WebGL fallback with HTTP 
  const f=await fixture(t,webkit);const release=await selectedIndex(f,'v0.3.0');await verifyFiles(f,release,'v0.3.0');
  await f.context.addInitScript(()=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(kind,...args){return /webgl/i.test(kind)?null:original.call(this,kind,...args);};});
  const fontResponses=[];f.context.on('response',r=>{if(r.url().includes('/updater/presentation/v0.3.0/')&&r.url().endsWith('.woff2'))fontResponses.push(r);});
- await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();
- const app=f.desktop.frameLocator('iframe[title="Independent Relay updater"]');await expect(app.locator('#console')).toBeVisible();await expect(app.locator('#fallback')).toBeVisible();
- const frame=await (await f.desktop.locator('iframe[title="Independent Relay updater"]').elementHandle()).contentFrame();await fonts(frame);
+ await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
+ let frame;
+ if(oldArchive){await expect(f.desktop.getByRole('button',{name:'Start update',exact:true})).toBeDisabled();frame=await standalone(f);}
+ else{await f.desktop.getByRole('button',{name:'Start update',exact:true}).click();frame=await (await f.desktop.locator('iframe[title="Independent Relay updater"]').elementHandle()).contentFrame();}
+ const app=frame;await expect(app.locator('#console')).toBeVisible();await expect(app.locator('#fallback')).toBeVisible();await fonts(frame);
  await expect.poll(()=>fontResponses.length).toBe(2);for(const response of fontResponses){assert.equal(response.status(),200);assert.equal((await response.body()).length>0,true);}
- await expect(app.locator('#current-version')).toHaveText('v0.3.0');await expect(app.getByRole('button',{name:'Review installation'})).toBeEnabled();
+ await expect(app.locator('#current-version')).toHaveText('v0.3.0');
+ if(oldArchive){await expect(app.getByRole('button',{name:'Download & prepare'})).toBeDisabled();await expect(app.locator('#install-reason')).toContainText('Staged updates unsupported');}
+ else await expect(app.getByRole('button',{name:'Download & prepare'})).toBeEnabled();
  const bounds=await frame.locator('#console').evaluate(el=>({width:el.getBoundingClientRect().width,client:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth}));assert.equal(bounds.scroll<=bounds.client+1,true,'WebKit fallback has contained horizontal layout');
  t.diagnostic('Source-tier WebKit with deliberately unavailable WebGL, real HTTP/auth and fonts; no install or physical Safari GPU claim');
 });
+
+if(oldArchive){
+ test('genuine old-engine tier: new presentation explicitly rejects staged actions and retains independent monitoring through Relay downtime',{timeout:65000},async t=>{
+  const f=await fixture(t),identity=f.web.server;
+  await selectedIndex(f,'v0.3.0');
+  const requests=[];f.context.on('request',r=>{if(/\/updater\/api\/(?:prepare|apply|install)$/.test(new URL(r.url()).pathname))requests.push(r.url());});
+  await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
+  const page=await standalone(f);
+  await expect(page.locator('#console')).toBeVisible();await expect(page.locator('#install-reason')).toContainText('Staged updates unsupported');await expect(page.locator('#install-reason')).toContainText('No immediate-install fallback');
+  await expect(page.locator('#install')).toBeDisabled();await expect(page.locator('#apply')).toBeHidden();
+  const state=await(await f.context.request.get(f.uiOrigin+'/updater/api/state')).json();assert.equal(state.capabilities,undefined);assert.equal(state.currentVersion,'v0.3.0');
+  await page.locator('#install').dispatchEvent('click');await expect(page.locator('#confirm')).not.toBeVisible();assert.deepEqual(requests,[]);
+  const rejected=await page.evaluate(async password=>{const {csrf}=await(await fetch('/updater/api/auth')).json();const results=[];for(const action of ['prepare','apply']){const r=await fetch('/updater/api/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({version:'v0.3.1',...(action==='apply'?{jobId:'a'.repeat(32)}:{}),password,confirmed:true})});results.push({status:r.status,body:await r.json()});}return results;},password);
+  for(const result of rejected){assert.equal(result.status,409);assert.match(result.body.error,/unsupported/i);}
+  const before=await realpath(f.info.config.installRoot+'/current');
+  await f.stopRelay();await page.reload();await expect(page.locator('#connection')).toHaveText('Connected to updater');await expect(page.locator('#current-version')).toHaveText('v0.3.0');await expect(page.locator('#install')).toBeDisabled();
+  assert.equal(await realpath(f.info.config.installRoot+'/current'),before);const journal=JSON.parse(await readFile(f.info.config.controlRoot+'/journal.json','utf8'));assert.equal(journal.job,null);assert.equal(journal.checkpoint,null);await assert.rejects(access(f.info.config.maintenance));
+  assert.equal(f.web.server,identity);process.kill(f.info.brokerPid,0);
+  t.diagnostic('Design constraint: a presentation bridge admits webApi=1 new UI over an old engine; runtime updating is intentionally disabled. Monitoring is not staged-update compatibility. A separately qualified independent control-plane migration is required.');
+ });
+
+ test('genuine old-engine + archived old static UI tier: legacy install and readiness rollback, not staged qualification',{timeout:100000},async t=>{
+  const f=await fixture(t,chromium,{old:true,legacyUI:true});
+  const index=await fetch(f.uiOrigin+'/updater/');assert.equal(index.headers.get('x-relay-updater-presentation'),'builtin');assert.deepEqual(Buffer.from(await index.arrayBuffer()),await readFile(f.info.oldUIDir+'/index.html'));
+  await f.desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();const page=await standalone(f);
+  const mutations=[];page.on('request',r=>{if(/\/updater\/api\/(?:prepare|apply|install)$/.test(new URL(r.url()).pathname))mutations.push(new URL(r.url()).pathname);});
+  await expect(page.locator('#console')).toBeVisible();assert.equal(await page.locator('#apply').count(),0);
+  // Archived UI names success differently; current staged tier keeps Installed.
+  for(const [version,phase] of [['v0.3.1','Update complete'],['v0.3.2','Rolled back']]){
+   await page.locator('#release-select').selectOption(version);await page.locator('#install').click();await expect(page.locator('#authorize')).toHaveText('Authorize installation');await page.locator('#confirmed').check();await page.locator('#password').fill(password);await page.locator('#authorize').click();await expect(page.locator('#phase')).toHaveText(phase,{timeout:30000});await expect(page.locator('#current-version')).toHaveText('v0.3.1');
+  }
+  assert.deepEqual(mutations,['/updater/api/install','/updater/api/install']);assert.equal(await readFile(f.info.config.stateRoot+'/fixture.txt','utf8'),'initial synthetic state');
+  await f.stopRelay();await page.reload();await expect(page.locator('#phase')).toHaveText('Rolled back');await expect(page.locator('#connection')).toHaveText('Connected to updater');
+  for(const [name,hash] of Object.entries(f.info.oldBrokerHashes))assert.equal(sha(await readFile(f.info.root+'/old-control/'+name)),hash);
+  t.diagnostic('Archived old UI and all seven imported old broker modules; synthetic HMAC runtime upgrade + matching-state readiness rollback only. Current web/auth transport, not unchanged old web service or production qualification.');
+ });
+}

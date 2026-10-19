@@ -40,8 +40,16 @@ jobs:
           # This is a fresh hosted VM, not an operator/production host.
           # Chromium remains sandbox-enabled; allow its user namespaces here.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Verify unchanged signed old broker modules for real HMAC browser fixtures
+      - name: Verify signed old broker reference for legacy HMAC fixtures (not candidate equality)
         run: |
+          # Preserve all seven old-module hash guards against an isolated exact source.
+          # Candidate auth/engine intentionally implement staged prepare/apply.
+          reference="$RUNNER_TEMP/relay-old-broker-reference"
+          reference_source=0bf423eae6709b28fd5ace2a4b97e74924626fc8
+          git init "$reference"
+          git -C "$reference" fetch --depth=1 https://github.com/murmuur22/relay.git "$reference_source"
+          git -C "$reference" checkout --detach FETCH_HEAD
+          test "$(git -C "$reference" rev-parse HEAD)" = "$reference_source"
           for baseline in v0.6.3 v0.6.4; do
             directory="$RUNNER_TEMP/public-$baseline"
             mkdir -m 700 "$directory"
@@ -52,8 +60,11 @@ jobs:
             anonymous_home="$(mktemp -d "$RUNNER_TEMP/relay-old-verifier.XXXXXX")"
             env -i PATH="$PATH" LANG=C.UTF-8 HOME="$anonymous_home" GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 gh attestation verify "$directory/relay-release.json" --bundle "$directory/relay-release.attestation.json" --repo murmuur22/relay --signer-workflow murmuur22/relay/.github/workflows/release.yml --source-ref "refs/tags/$baseline" --source-digest "$source" --signer-digest "$source" --deny-self-hosted-runners
             rm -rf -- "$anonymous_home"
-            python3 -m updater.release.verify_broker_baseline --source "$GITHUB_WORKSPACE" --manifest "$directory/relay-release.json" --archive "$directory/relay-updater-linux-x64.tar.gz"
+            python3 -m updater.release.verify_broker_baseline --source "$reference" --manifest "$directory/relay-release.json" --archive "$directory/relay-updater-linux-x64.tar.gz"
           done
+          # Explicit already-attested old inputs, never the changed candidate source.
+          printf 'RELAY_PRESENTATION_OLD_SOURCE=%s\n' "$reference" >> "$GITHUB_ENV"
+          printf 'RELAY_PRESENTATION_OLD_MANIFEST=%s/public-v0.6.4/relay-release.json\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           printf 'RELAY_PRESENTATION_OLD_UPDATER_ARCHIVE=%s/public-v0.6.4/relay-updater-linux-x64.tar.gz\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           printf 'RELAY_PRESENTATION_EVIDENCE_DIR=%s\nTMPDIR=%s\n' "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Provision checksummed isolated Caddy test binary (no service installation)
@@ -78,6 +89,9 @@ jobs:
           export RELAY_ICON_PYTHON="$(command -v python3)"
           python3 -m unittest discover -s updater/tests -v
           npm --prefix updater/ui run test:unit
+          # Candidate safety is independent of signed legacy-baseline equality.
+          # Automatic updater backend selection includes staged HTTP/real broker tests;
+          # unittest discovery, unit/UI globs and frontend/updater* below include new stages.
           node --test --test-concurrency=1 --test-timeout=130000 tests/backend/updater*.test.mjs
           npm --prefix updater/ui test
           node --test --test-concurrency=1 --test-timeout=90000 updater/ui/tests/http-smoke.mjs updater/ui/tests/fixture-smoke.mjs

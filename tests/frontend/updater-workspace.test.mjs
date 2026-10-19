@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {chromium,expect} from '@playwright/test';
+import {mkdtemp,rm,mkdir} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {createGateway} from '../../server/gateway.mjs';
+import {browserLogin} from '../auth-helper.mjs';
+test('compiled C release browser preserves explicit selection with a persistent rail at 420px on wide desktop',{timeout:30000},async t=>{
+ const runtime=await mkdtemp(tmpdir()+'/c-ui-'),g=await createGateway({port:0,runtime,profile:'standalone'}),browser=await chromium.launch({headless:true,chromiumSandbox:true});t.after(async()=>{await browser.close();await g.close();await rm(runtime,{recursive:true,force:true});});
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});await browserLogin(page,g.origin,runtime);
+ const state={mode:'fixture',currentVersion:'v0.3.0',capabilities:{prepare:1,apply:1},canPrepare:true,available:[{version:'v0.4.0',verified:true,size:100,notes:'SYNTHETIC FIXTURE — not a published release\n\n'+ 'Readable release changes.\n'.repeat(40)},{version:'v0.3.0',verified:true,size:90,notes:'Synthetic installed release.'}],job:null,history:[]};
+ for(const route of ['check','state'])await page.route('**/api/updater/'+route,r=>r.fulfill({json:state}));
+ await page.getByRole('button',{name:'Open Updater',exact:true}).dblclick();const app=page.locator('.updater-browser');await expect(app.getByRole('heading',{name:'Release v0.4.0',exact:true})).toBeVisible();
+ await app.getByLabel('Available release').selectOption('v0.3.0');await app.getByLabel('Available release').focus();state.available.reverse();await expect(app.getByLabel('Available release')).toHaveValue('v0.3.0');await expect(app.getByLabel('Available release')).toBeFocused();
+ state.available=state.available.filter(r=>r.version!=='v0.3.0');await expect(app.getByText('Selected release v0.3.0 is unavailable.',{exact:false})).toBeVisible();await expect(app.getByLabel('Available release')).toHaveValue('v0.3.0');await expect(app.getByRole('button',{name:'Start update',exact:true})).toBeDisabled();
+ await app.getByLabel('Available release').selectOption('v0.4.0');const win=page.locator('[data-window-id="system-updater"]'),width=(await win.boundingBox()).width,handle=await page.getByRole('button',{name:'Resize Updater',exact:true}).boundingBox();await page.mouse.move(handle.x+4,handle.y+4);await page.mouse.down();await page.mouse.move(handle.x+4+420-width,handle.y+4);await page.mouse.up();
+ assert.ok(await page.evaluate(()=>innerWidth>1000));assert.ok((await win.boundingBox()).width<=422);assert.equal(await app.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+ const bounds=await app.boundingBox(),rail=await app.locator('.action-rail').boundingBox();assert.ok(rail.y+rail.height<=bounds.y+bounds.height);await expect(app.getByRole('button',{name:'Start update',exact:true})).toBeInViewport();
+ const out=process.env.RELAY_C_UI_EVIDENCE||'screenshots/c-ui';await mkdir(out,{recursive:true});await page.screenshot({path:out+'/native-420-synthetic.png'});
+});

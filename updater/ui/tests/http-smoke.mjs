@@ -15,7 +15,9 @@ test('compiled UI uses real HTTP cookies, CSRF and action bridge; read monitorin
   const socketPath = join(root, 'broker.sock');
   const token = 'a'.repeat(64), ticket = 'b'.repeat(64), authorization = 'c'.repeat(64);
   const state = { protocol: 1, mode: 'fixture', currentVersion: 'v0.3.0', available: [{ version: 'v0.4.0', notes: 'SYNTHETIC HTTP CONTRACT FIXTURE\nNo real release or service activation.', verified: true, size: 1048576 }], job: null, history: [], canInstall: true, reason: null };
-  let starts = 0, authorized = false;
+  let starts = 0, prepares = 0, authorized = null;
+  const authorizations = [];
+  const jobId = 'd'.repeat(32);
   const broker = net.createServer(socket => {
     let input = '';
     socket.on('data', data => {
@@ -28,9 +30,18 @@ test('compiled UI uses real HTTP cookies, CSRF and action bridge; read monitorin
         result = { token, userId: 'synthetic-user', interfaceAnimations: false, expiresAt: Date.now() + 60000 };
       } else {
         assert.equal(request.params.token, token);
-        if (request.action === 'start') {
-          assert.equal(request.params.authorization, authorization); assert.equal(request.params.version, 'v0.4.0'); assert.ok(authorized); starts++;
-          state.job = { id: 'd'.repeat(32), version: 'v0.4.0', phase: 'restarting', downloadedBytes: 1048576, totalBytes: 1048576, canCancel: false, canRollback: false, events: [], outcome: null, error: null };
+        assert.notEqual(request.action, 'start', 'no immediate-install fallback');
+        if (request.action === 'prepare' || request.action === 'apply') {
+          assert.equal(request.params.authorization, authorization); assert.equal(request.params.version, 'v0.4.0');
+          assert.equal(authorized, request.action); authorized = null;
+          if (request.action === 'prepare') {
+            assert.equal(request.params.jobId, undefined); prepares++;
+            state.job = { id: jobId, kind: 'prepare', userId: 'synthetic-user', version: 'v0.4.0', phase: 'ready', downloadedBytes: 1048576, totalBytes: 1048576, canCancel: true, canRollback: false, events: [], outcome: null, error: null };
+            state.canPrepare = false; state.canApply = true;
+          } else {
+            assert.equal(request.params.jobId, jobId); assert.equal(state.job.phase, 'ready'); starts++;
+            state.job.phase = 'restarting'; state.job.canCancel = false; state.canApply = false;
+          }
           state.canInstall = false;
         }
         result = state;
@@ -45,7 +56,10 @@ test('compiled UI uses real HTTP cookies, CSRF and action bridge; read monitorin
     else {
       let body = ''; for await (const chunk of req) body += chunk;
       const data = JSON.parse(body); assert.equal(data.password, 'synthetic-password'); assert.equal(data.confirmed, true); assert.equal(req.headers['x-csrf-token'], 'e'.repeat(64));
-      authorized = true; res.end(JSON.stringify({ authorization, expiresAt: Date.now() + 60000 }));
+      assert.ok(['prepare', 'apply'].includes(data.action)); assert.equal(data.version, 'v0.4.0');
+      assert.equal(data.jobId, data.action === 'apply' ? jobId : undefined);
+      authorized = data.action; authorizations.push(data.action);
+      res.end(JSON.stringify({ authorization, expiresAt: Date.now() + 60000 }));
     }
   });
   let web, browser;
@@ -62,13 +76,30 @@ test('compiled UI uses real HTTP cookies, CSRF and action bridge; read monitorin
     const page = await context.newPage(); const errors = []; page.on('pageerror', error => errors.push(error.message));
     const fonts=[];page.on('response',response=>{if(response.url().endsWith('.woff2'))fonts.push(response.status());});
     await page.goto(`${uiOrigin}/updater/#${ticket}`);
-    await page.getByRole('button', { name: 'Review installation' }).click();
+    await page.locator('#console:not([hidden])').waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Review installation' }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Download & prepare' }).isDisabled(), true);
+    assert.match(await page.locator('#install-reason').textContent(), /Staged updates unsupported/);
+    assert.equal(prepares, 0); assert.equal(starts, 0); assert.deepEqual(authorizations, []);
+    state.capabilities = { prepare: 1, apply: 1 }; state.canPrepare = true; state.canApply = false;
+    await page.getByRole('button', { name: 'Download & prepare' }).click();
     await page.evaluate(()=>document.fonts.ready);assert.deepEqual(fonts,[200,200]);assert.equal(await page.evaluate(()=>document.fonts.check('700 44px "Relay Pixel"')&&document.fonts.check('400 12px "Relay Mono"')),true);
+    const noCsrf = await context.request.post(`${uiOrigin}/updater/api/prepare`, { headers: { Origin: uiOrigin }, data: { version: 'v0.4.0', password: 'synthetic-password', confirmed: true } });
+    assert.equal(noCsrf.status(), 403); assert.equal(prepares, 0); assert.deepEqual(authorizations, []);
+    await page.getByLabel('Current Relay password').fill('synthetic-password');
+    await page.getByLabel('I authorize download and preparation only, not Apply.').check();
+    await page.getByRole('button', { name: 'Authorize preparation' }).click();
+    await page.waitForFunction(() => document.getElementById('phase').textContent === 'Ready to apply');
+    assert.equal(prepares, 1); assert.equal(starts, 0); assert.deepEqual(authorizations, ['prepare']);
+    await page.getByRole('button', { name: 'Apply v0.4.0', exact: true }).click();
+    assert.equal(await page.getByLabel('Current Relay password').inputValue(), '');
+    assert.equal(await page.getByRole('button', { name: 'Authorize Apply' }).isDisabled(), true);
     await page.getByLabel('Current Relay password').fill('synthetic-password');
     await page.getByLabel('I understand active Relay sessions will be interrupted.').check();
-    await page.getByRole('button', { name: 'Authorize installation' }).click();
+    await page.getByRole('button', { name: 'Authorize Apply' }).click();
     await page.waitForFunction(() => document.getElementById('phase').textContent === 'Restarting Relay');
     assert.equal(starts, 1);
+    assert.deepEqual(authorizations, ['prepare', 'apply']);
     assert.equal(new URL(page.url()).hash, '');
     assert.ok((await context.cookies()).some(cookie => cookie.name === 'relay_updater_session' && cookie.httpOnly));
     await new Promise(resolve => { relay.close(resolve); relay.closeAllConnections(); });

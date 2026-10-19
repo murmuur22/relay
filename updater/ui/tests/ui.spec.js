@@ -3,17 +3,17 @@ test('the installed release cannot be authorized as a new update', async ({page}
  const state=snapshot();state.currentVersion=state.available[0].version;
  const calls=await mockAPI(page,state);await page.goto('/updater/');
  await expect(page.locator('#current-version')).toHaveText('v0.4.0');
- await expect(page.getByRole('button',{name:'Review installation'})).toBeDisabled();
+ await expect(page.getByRole('button',{name:'Download & prepare'})).toBeDisabled();
  await expect(page.locator('#install-reason')).toContainText('already installed');
- expect(calls.some(c=>c.name==='install')).toBe(false);
+ expect(calls.some(c=>c.name==='prepare')).toBe(false);
 });
 test('handoff never silently substitutes a different release when the selected version disappeared', async ({page})=>{
  const calls=await mockAPI(page);await page.goto('/updater/#'+'a'.repeat(64)+'~v9.9.9');
  await expect(page.locator('#connection')).toContainText('Connected');
- await expect(page.getByRole('button',{name:'Review installation'})).toBeDisabled();
+ await expect(page.getByRole('button',{name:'Download & prepare'})).toBeDisabled();
  await expect(page.locator('#install-reason')).toContainText('v9.9.9');
- expect(calls.some(c=>c.name==='install')).toBe(false);expect(new URL(page.url()).hash).toBe('');
- await page.locator('#release-select').selectOption('v0.4.0');await expect(page.getByRole('button',{name:'Review installation'})).toBeEnabled();
+ expect(calls.some(c=>c.name==='prepare')).toBe(false);expect(new URL(page.url()).hash).toBe('');
+ await page.locator('#release-select').selectOption('v0.4.0');await expect(page.getByRole('button',{name:'Download & prepare'})).toBeEnabled();
 });
 for (const reload of [false,true]) test(`reviewed handoff installs exact non-default target, reload=${reload}`,async({page})=>{
  const state=snapshot();state.available.push({...state.available[0],version:'v0.5.0'});
@@ -24,24 +24,25 @@ for (const reload of [false,true]) test(`reviewed handoff installs exact non-def
  expect(await page.evaluate(()=>history.state)).toEqual({reviewedVersion:'v0.5.0'});
  expect(calls.filter(c=>c.name==='exchange')).toHaveLength(1);
  expect(calls.every(c=>c.hash==='')).toBe(true);
- expect(calls.some(c=>c.name==='install')).toBe(false);
- await page.getByRole('button',{name:'Review installation'}).click();
- await expect(page.locator('#confirm-title')).toHaveText('Install v0.5.0?');
+ expect(calls.some(c=>c.name==='prepare')).toBe(false);
+ await page.getByRole('button',{name:'Download & prepare'}).click();
+ for (const call of calls) expect(call.name).not.toBe('install');
+ await expect(page.locator('#confirm-title')).toHaveText('Prepare v0.5.0?');
  await page.locator('#confirmed').check();await page.locator('#password').fill('synthetic-password-only');
- await page.getByRole('button',{name:'Authorize installation',exact:true}).click();
- await expect.poll(()=>calls.filter(c=>c.name==='install').length).toBe(1);
- expect(calls.find(c=>c.name==='install').body).toEqual({version:'v0.5.0',password:'synthetic-password-only',confirmed:true});
+ await page.getByRole('button',{name:'Authorize preparation',exact:true}).click();
+ await expect.poll(()=>calls.filter(c=>c.name==='prepare').length).toBe(1);
+ expect(calls.find(c=>c.name==='prepare').body).toEqual({version:'v0.5.0',password:'synthetic-password-only',confirmed:true});
  expect(await page.evaluate(()=>({history:history.state,local:{...localStorage},session:{...sessionStorage}}))).toEqual({history:{reviewedVersion:'v0.5.0'},local:{},session:{}});
 });
 test('unavailable saved review target requires explicit selection after reload',async({page})=>{
  const calls=await mockAPI(page);await page.goto('/updater/#'+'a'.repeat(64)+'~v9.9.9');
  await expect(page.locator('#connection')).toContainText('Connected');await page.reload();
  await expect(page.locator('#install-reason')).toContainText('v9.9.9');await expect(page.locator('#install')).toBeDisabled();
- expect(calls.some(c=>c.name==='install')).toBe(false);
+ expect(calls.some(c=>c.name==='prepare')).toBe(false);
  await page.locator('#release-select').selectOption('v0.4.0');await page.reload();
  await expect(page.locator('#release-select')).toHaveValue('v0.4.0');await expect(page.locator('#install')).toBeEnabled();
 });
-export const snapshot = () => ({ protocol: 1, mode: 'fixture', currentVersion: 'v0.3.0', available: [{ version: 'v0.4.0', notes: 'Synthetic release notes\nA safer update path. <img src=x onerror=alert(1)>', size: 104857600, verified: true }], job: null, history: [], canInstall: true, reason: null });
+export const snapshot = () => ({ protocol: 1, mode: 'fixture', currentVersion: 'v0.3.0', available: [{ version: 'v0.4.0', notes: 'Synthetic release notes\nA safer update path. <img src=x onerror=alert(1)>', size: 104857600, verified: true }], job: null, history: [], capabilities: {prepare:1,apply:1}, canPrepare: true, canApply: false, canInstall: true, reason: null });
 async function mockAPI(page, state = snapshot(), options = {}) {
   const calls = [];
   await page.route('**/updater/api/**', async route => {
@@ -60,7 +61,7 @@ test('polls real snapshot bytes without fabricated progress, unknown totals and 
   await expect(page.locator('#phase')).toHaveText('Downloading');
   await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '25');
   await expect(page.locator('#bytes')).toHaveText('26,214,400 / 104,857,600 bytes');
-  await expect(page.getByRole('button', { name: 'Review installation' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Download & prepare' })).toBeDisabled();
   state.job = job('downloading', null);
   await expect(page.locator('#bytes')).toHaveText('26,214,400 bytes · total unknown');
   await expect(page.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
@@ -76,21 +77,21 @@ test('polls real snapshot bytes without fabricated progress, unknown totals and 
 });
 test('installation requires explicit interruption consent and transient password; rejection preserves monitoring', async ({ page }) => {
   const calls = await mockAPI(page);
-  await page.route('**/updater/api/install', async route => {
-    calls.push({ name: 'install', body: route.request().postDataJSON(), headers: route.request().headers() });
+  await page.route('**/updater/api/prepare', async route => {
+    calls.push({ name: 'prepare', body: route.request().postDataJSON(), headers: route.request().headers() });
     await route.fulfill({ status: 403, json: { error: 'Rejected' } });
   });
   await page.goto('/updater/');
-  await page.getByRole('button', { name: 'Review installation' }).click();
+  await page.getByRole('button', { name: 'Download & prepare' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Authorize installation' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Authorize preparation' })).toBeDisabled();
   await page.getByLabel('Current Relay password').fill('synthetic-password-only');
-  await page.getByLabel('I understand active Relay sessions will be interrupted.').check();
-  await page.getByRole('button', { name: 'Authorize installation' }).click();
+  await page.getByLabel('I authorize download and preparation only, not Apply.').check();
+  await page.getByRole('button', { name: 'Authorize preparation' }).click();
   await expect(page.getByLabel('Current Relay password')).toHaveValue('');
   await expect(page.locator('#confirm-error')).toContainText('Authorization was not accepted');
-  expect(calls.find(call => call.name === 'install').body).toEqual({ version: 'v0.4.0', password: 'synthetic-password-only', confirmed: true });
-  expect(calls.find(call => call.name === 'install').headers['x-csrf-token']).toBe('synthetic-csrf');
+  expect(calls.find(call => call.name === 'prepare').body).toEqual({ version: 'v0.4.0', password: 'synthetic-password-only', confirmed: true });
+  expect(calls.find(call => call.name === 'prepare').headers['x-csrf-token']).toBe('synthetic-csrf');
   await page.getByRole('button', { name: 'Go back', exact: true }).click();
   await expect(page.locator('#connection')).toContainText('Connected');
   expect(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).not.toContain('synthetic-password');
@@ -141,7 +142,7 @@ test('no WebGL is fully functional; account animation preference overrides OS', 
   await expect(page.locator('#chamber')).toHaveAttribute('data-renderer', 'static');
   await expect(page.locator('#fallback')).toBeVisible();
   await expect(page.locator('#motion-label')).toHaveText('MOTION OFF');
-  await expect(page.getByRole('button', { name: 'Review installation' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Download & prepare' })).toBeEnabled();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: '../../screenshots/updater-synthetic-fallback-mobile.png', fullPage: true });
@@ -162,22 +163,22 @@ test('connectivity loss freezes stale action controls then recovers without gues
   let offline = false;
   await page.route('**/updater/api/state', route => route.fulfill({ status: offline ? 503 : 200, json: offline ? { error: 'Unavailable' } : snapshot() }));
   await page.goto('/updater/');
-  await expect(page.getByRole('button', { name: 'Review installation' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Download & prepare' })).toBeEnabled();
   offline = true;
   await expect(page.locator('#connection')).toContainText('last known state');
-  await expect(page.getByRole('button', { name: 'Review installation' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Download & prepare' })).toBeDisabled();
   offline = false;
-  await expect(page.getByRole('button', { name: 'Review installation' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Download & prepare' })).toBeEnabled();
 });
 test('an open authorization dialog freezes on lost connectivity and recovers explicitly', async ({ page }) => {
   await mockAPI(page);
   let offline = false;
   await page.route('**/updater/api/state', route => route.fulfill({ status: offline ? 503 : 200, json: offline ? { error: 'Unavailable' } : snapshot() }));
   await page.goto('/updater/');
-  await page.getByRole('button', { name: 'Review installation' }).click();
+  await page.getByRole('button', { name: 'Download & prepare' }).click();
   await page.getByLabel('Current Relay password').fill('synthetic-password');
-  await page.getByLabel('I understand active Relay sessions will be interrupted.').check();
-  const authorize = page.getByRole('button', { name: 'Authorize installation' });
+  await page.getByLabel('I authorize download and preparation only, not Apply.').check();
+  const authorize = page.getByRole('button', { name: 'Authorize preparation' });
   await expect(authorize).toBeEnabled();
   offline = true;
   await expect(page.locator('#connection')).toContainText('last known state');
@@ -187,13 +188,13 @@ test('an open authorization dialog freezes on lost connectivity and recovers exp
   await expect(authorize).toBeEnabled();
 });
 const staleConfirmationCases = [
-  ['install', 'installation disabled', state => { state.canInstall = false; }],
-  ['install', 'release removed with another verified release available', state => { state.available = [{ ...state.available[0], version: 'v0.5.0' }]; }],
-  ['install', 'release unverified', state => { state.available[0].verified = false; }],
-  ['install', 'new active job', state => { state.job = job(); }],
-  ['install', 'observe mode', state => { state.mode = 'observe'; }],
-  ['install', 'interrupted job', state => { state.job = job('interrupted'); }],
-  ['install', 'failed rollback', state => { state.job = job('rollback-failed'); }],
+  ['prepare', 'preparation disabled', state => { state.canPrepare = false; }],
+  ['prepare', 'release removed with another verified release available', state => { state.available = [{ ...state.available[0], version: 'v0.5.0' }]; }],
+  ['prepare', 'release unverified', state => { state.available[0].verified = false; }],
+  ['prepare', 'new active job', state => { state.job = job(); }],
+  ['prepare', 'observe mode', state => { state.mode = 'observe'; }],
+  ['prepare', 'interrupted job', state => { state.job = job('interrupted'); }],
+  ['prepare', 'failed rollback', state => { state.job = job('rollback-failed'); }],
   ...['cancel', 'rollback'].flatMap(action => [
     [action, 'permission revoked', state => { state.job[action === 'cancel' ? 'canCancel' : 'canRollback'] = false; }],
     [action, 'job replaced while still eligible', state => { state.job.id = 'replacement-job'; }],
@@ -203,12 +204,12 @@ const staleConfirmationCases = [
 for (const [action, change, invalidate] of staleConfirmationCases) {
   test(`stale confirmation: ${action} requires review again after ${change}`, async ({ page }) => {
     const state = snapshot();
-    if (action !== 'install') state.job = job(action === 'cancel' ? 'downloading' : 'succeeded');
+    if (action !== 'prepare') state.job = job(action === 'cancel' ? 'downloading' : 'succeeded');
     const original = structuredClone(state);
     const calls = await mockAPI(page, state, { motion: false });
-    const mutations = () => calls.filter(call => ['install', 'cancel', 'rollback'].includes(call.name));
+    const mutations = () => calls.filter(call => ['prepare', 'cancel', 'rollback'].includes(call.name));
     await page.goto('/updater/');
-    await page.locator(`#${action}`).click();
+    await page.locator(`#${action === 'prepare' ? 'install' : action}`).click();
     await page.locator('#password').fill('synthetic-password');
     await page.locator('#confirmed').check();
     await expect(page.locator('#authorize')).toBeEnabled();
@@ -232,14 +233,14 @@ for (const [action, change, invalidate] of staleConfirmationCases) {
     await expect(page.getByRole('dialog')).toBeVisible();
 
     await page.locator('#back').click();
-    await page.locator(`#${action}`).click();
+    await page.locator(`#${action === 'prepare' ? 'install' : action}`).click();
     await page.locator('#password').fill('synthetic-password');
     await page.locator('#confirmed').check();
     await page.locator('#authorize').click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
     expect(mutations().map(call => ({ name: call.name, body: call.body }))).toEqual([{
       name: action,
-      body: { ...(action === 'install' ? { version: 'v0.4.0' } : action === 'cancel' ? { jobId: 'synthetic-job' } : {}), password: 'synthetic-password', confirmed: true },
+      body: { ...(action === 'prepare' ? { version: 'v0.4.0' } : action === 'cancel' ? { jobId: 'synthetic-job' } : {}), password: 'synthetic-password', confirmed: true },
     }]);
   });
 }
@@ -256,12 +257,12 @@ test('initial state read cannot overlap a manual release check', async ({ page }
 });
 test('expired Relay action session does not imply expired read-only monitoring', async ({ page }) => {
   await mockAPI(page);
-  await page.route('**/updater/api/install', route => route.fulfill({ status: 401, json: { error: 'Sign in to Relay' } }));
+  await page.route('**/updater/api/prepare', route => route.fulfill({ status: 401, json: { error: 'Sign in to Relay' } }));
   await page.goto('/updater/');
-  await page.getByRole('button', { name: 'Review installation' }).click();
+  await page.getByRole('button', { name: 'Download & prepare' }).click();
   await page.getByLabel('Current Relay password').fill('synthetic');
-  await page.getByLabel('I understand active Relay sessions will be interrupted.').check();
-  await page.getByRole('button', { name: 'Authorize installation' }).click();
+  await page.getByLabel('I authorize download and preparation only, not Apply.').check();
+  await page.getByRole('button', { name: 'Authorize preparation' }).click();
   await expect(page.locator('#confirm-error')).toContainText('Sign in to Relay again');
   await expect(page.locator('#confirm-error')).not.toContainText('Monitoring session expired');
   await page.screenshot({ path: '../../screenshots/updater-synthetic-reauth.png', fullPage: true });
@@ -274,7 +275,7 @@ test('cancel and rollback use bound API targets, never optimistic success', asyn
     await page.goto('/updater/');
     await page.getByRole('button', { name: button, exact: true }).click();
     await page.getByLabel('Current Relay password').fill('synthetic-password');
-    await page.getByLabel('I understand active Relay sessions will be interrupted.').check();
+    await page.getByLabel(action === 'cancel' ? 'I authorize cancellation of this exact job.' : 'I understand active Relay sessions will be interrupted.').check();
     await page.getByRole('button', { name: authorize }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
     const call = calls.find(call => call.name === action);
@@ -284,7 +285,7 @@ test('cancel and rollback use bound API targets, never optimistic success', asyn
 });
 test('every broker phase is represented without treating downloaded bytes as update completion', async ({ page }) => {
   const state = snapshot(); await mockAPI(page, state, { motion: false }); await page.goto('/updater/');
-  const labels = { checking: 'Checking releases', downloading: 'Downloading', verifying: 'Verifying', staging: 'Staging', 'backing-up': 'Backing up', activating: 'Activating', restarting: 'Restarting Relay', 'health-checking': 'Checking readiness', succeeded: 'Update complete', failed: 'Update failed', 'rolled-back': 'Rolled back', 'rollback-failed': 'Recovery required', cancelled: 'Transfer cancelled', interrupted: 'Update interrupted' };
+  const labels = { checking: 'Checking releases', downloading: 'Downloading', verifying: 'Verifying', staging: 'Staging', ready: 'Ready to apply', 'backing-up': 'Backing up', activating: 'Activating', restarting: 'Restarting Relay', 'health-checking': 'Checking readiness', succeeded: 'Installed', failed: 'Update failed', 'rolled-back': 'Rolled back', 'rollback-failed': 'Recovery required', cancelled: 'Transfer cancelled', interrupted: 'Update interrupted' };
   for (const [phase, label] of Object.entries(labels)) {
     state.job = { ...job(phase), downloadedBytes: 104857600 };
     await page.getByRole('button', { name: 'Check releases' }).click();
@@ -299,7 +300,7 @@ test('observe and empty releases never offer installation; session expiry hides 
   await mockAPI(page, state); await page.goto('/updater/');
   await expect(page.locator('#mode')).toHaveText('OBSERVE / READ ONLY');
   await expect(page.locator('#verification')).toHaveText('No published release available.');
-  await expect(page.getByRole('button', { name: 'Review installation' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Download & prepare' })).toBeDisabled();
   await page.route('**/updater/api/state', route => route.fulfill({ status: 401, json: { error: 'Expired' } }));
   await expect(page.locator('#mode')).toHaveText('SESSION EXPIRED');
   await expect(page.locator('#console')).toBeHidden();
@@ -310,10 +311,10 @@ test('lost WebGL context switches to usable static fallback', async ({ page }) =
   await page.locator('#chamber canvas').evaluate(canvas => canvas.characterSource.getContext('webgl2').getExtension('WEBGL_lose_context').loseContext());
   await expect(page.locator('#chamber')).toHaveAttribute('data-renderer', 'static');
   await expect(page.locator('#fallback')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Review installation' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Download & prepare' })).toBeEnabled();
 });
 test('confirmation supporting text has readable contrast on the light surface', async ({ page }) => {
-  await mockAPI(page); await page.goto('/updater/'); await page.getByRole('button', { name: 'Review installation' }).click();
+  await mockAPI(page); await page.goto('/updater/'); await page.getByRole('button', { name: 'Download & prepare' }).click();
   const ratios = await page.locator('dialog').evaluate(dialog => {
     const luminance = color => { const rgb = color.match(/[\d.]+/g).slice(0, 3).map(Number).map(n => { n /= 255; return n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4; }); return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722; };
     const background = luminance(getComputedStyle(dialog).backgroundColor);
@@ -325,13 +326,13 @@ test('unverified releases never receive a verified label or install control', as
   const state = snapshot(); state.available[0].verified = false;
   await mockAPI(page, state); await page.goto('/updater/');
   await expect(page.locator('#verification')).toContainText('Not verified');
-  await expect(page.getByRole('button', { name: 'Review installation' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Download & prepare' })).toBeDisabled();
   await expect(page.locator('.chamber-label')).not.toContainText('VERIFIED');
 });
 test('clears launch fragment before exchange and renders actual release data safely', async ({ page }) => {
   const calls = await mockAPI(page);
   await page.goto('/updater/?keep=1#synthetic-ticket');
-  await expect(page.getByRole('heading', { name: 'Transfer chamber' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Release v0.4.0', exact: true })).toBeVisible();
   await expect(page.getByText('FIXTURE SANDBOX', { exact: true })).toBeVisible();
   await expect(page.locator('#current-version')).toHaveText('v0.3.0');
   await expect(page.locator('#release-notes')).toContainText('<img src=x onerror=alert(1)>');
@@ -340,5 +341,5 @@ test('clears launch fragment before exchange and renders actual release data saf
   expect(calls[0].hash).toBe('');
   expect(calls[0].body).toEqual({ ticket: 'synthetic-ticket' });
   expect(page.url()).toContain('?keep=1');
-  await expect(page.getByRole('button', { name: 'Review installation' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Download & prepare' })).toBeEnabled();
 });

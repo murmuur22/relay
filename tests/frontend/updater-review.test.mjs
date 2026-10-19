@@ -10,7 +10,7 @@ for(const outcome of ['held','rejected'])test(`local updater closes independentl
  const runtime=await mkdtemp(tmpdir()+'/relay-updater-close-'),g=await createGateway({port:0,runtime,profile:'development'}),browser=await chromium.launch({headless:true,chromiumSandbox:true});
  let release=()=>{},releaseLaunch=()=>{};t.after(async()=>{release();releaseLaunch();await browser.close();await g.close();await rm(runtime,{recursive:true,force:true});});
  const page=await browser.newPage();await browserLogin(page,g.origin,runtime);
- await page.route('**/api/updater/check',route=>route.fulfill({json:{mode:'fixture',available:[{version:'v0.3.1',verified:true,size:100,notes:'Synthetic close regression'}],canInstall:true,job:null}}));
+ await page.route('**/api/updater/check',route=>route.fulfill({json:{mode:'fixture',available:[{version:'v0.3.1',verified:true,size:100,notes:'Synthetic close regression'}],capabilities:{prepare:1,apply:1},canPrepare:true,canInstall:true,job:null,history:[]}}));
  await page.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
  const win=page.locator('[data-window-id="system-updater"]');await expect(win).toBeVisible();
  await page.getByRole('button',{name:'Navigation',exact:true}).click();await page.getByRole('button',{name:/^Notes Lab/}).click();

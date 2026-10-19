@@ -10,6 +10,22 @@ window have been reviewed. Prior v0.6.3-to-v0.6.4 refresh evidence does not qual
 these new reader/server bytes. No production access, SSH, OS trust, publication,
 commit or push is part of this work.
 
+## 0.6.9 compatibility exclusion
+
+The procedure and runtime-first/bootstrap-first ordering below describe the
+historical 0.6.5 presentation-only bridge, not installation of the 0.6.9 staged
+control plane. Do not substitute 0.6.9 binaries into this two-file recipe. An
+existing bridge automatically selects the 0.6.9 presentation on the next document
+load over an old broker because webApi=1 does not assert staged capabilities.
+That new UI disables install/Apply without immediate-install fallback. Direct
+navigation to /updater/ is not a guarantee of retaining the old actionable UI.
+Independently qualify the control-plane upgrade before relying on staged updates,
+and preserve a separately qualified archived-old-UI recovery route for legacy
+installation. The desktop recovery button is unavailable before a monitor exists.
+If no compatible old UI route remains, direct binary/operator migration is
+necessary; that separate migration procedure is not implemented or qualified by
+this historical bootstrap. See [0.6.9 ordering](updater-embedded.md).
+
 ## Scope
 
 The only live code changes are:

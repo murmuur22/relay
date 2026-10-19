@@ -17,14 +17,48 @@ import tarfile
 from updater.fixtures.harness import Sandbox, SERVICE
 from updater.broker.auth import atomic_json
 from updater.broker.releases import ARTIFACT
+from updater.release.verify_broker_baseline import MODULES, verify
+
+
+def verified_old_files(old_archive, old_source, old_manifest):
+    """Already attested by the workflow; recheck hash/size and exact seven pins.
+
+    Never infer a reference from candidate source or accept archive path rebasing.
+    Static legacy UI bytes share the same manifest-bound archive as the broker.
+    """
+    if not old_source or not old_manifest:
+        raise ValueError('Old archive requires explicit trusted old source and manifest')
+    proofs = verify(old_source, old_manifest, old_archive)
+    files = {}
+    with tarfile.open(old_archive) as archive:
+        for entry in archive:
+            if entry.name not in MODULES and not entry.name.startswith('updater/ui/dist/'):
+                continue
+            parts = entry.name.split('/')
+            if any(part in ('', '.', '..') for part in parts) or not entry.isfile() or entry.size > 4 * 1024 * 1024:
+                raise ValueError('Unsafe old fixture path: ' + entry.name)
+            stream = archive.extractfile(entry)
+            if stream is None:
+                raise ValueError('Missing old fixture bytes')
+            files[entry.name] = stream.read()
+    if 'updater/ui/dist/index.html' not in files:
+        raise ValueError('Missing genuine old UI')
+    for name, digest in proofs.items():
+        if hashlib.sha256(files[name]).hexdigest() != digest:
+            raise ValueError('Old module changed while copying: ' + name)
+    return proofs, files
 
 
 class PresentationSandbox(Sandbox):
-    def __init__(self, presentation, ui_origin, old_archive=None):
+    def __init__(self, presentation, ui_origin, old_archive=None, old_source=None, old_manifest=None):
         self.presentation = Path(presentation).resolve()
         self.descriptor = json.loads((self.presentation / 'presentation.json').read_text())
         self.old_archive = old_archive
         self.old_hashes = {}
+        old_files = {}
+        if old_archive:
+            # Validate before starting a sandbox, feed thread or runtime process.
+            self.old_hashes, old_files = verified_old_files(old_archive, old_source, old_manifest)
         super().__init__(ui_origin=ui_origin)
         # Give the locally verified baseline the exact Engine release naming shape.
         current = Path(self.config['installRoot']) / 'current'
@@ -38,31 +72,10 @@ class PresentationSandbox(Sandbox):
             # Explicit test-owned copy; never import or modify installed production.
             modules = self.root / 'old-control'
             modules.mkdir(mode=0o700)
-            with tarfile.open(old_archive) as archive:
-                for entry in archive:
-                    parts = Path(entry.name).parts
-                    try:
-                        start = parts.index('updater')
-                    except ValueError:
-                        continue
-                    relative = Path(*parts[start:])
-                    if len(relative.parts) != 3 or relative.parts[1] != 'broker' or relative.suffix != '.py':
-                        continue
-                    if not entry.isfile():
-                        raise RuntimeError('Old broker module must be a regular file')
-                    stream = archive.extractfile(entry)
-                    if stream is None:
-                        raise RuntimeError('Missing old broker module bytes')
-                    data = stream.read()
-                    source = Path(__file__).resolve().parents[2] / relative
-                    if data != source.read_bytes():
-                        raise RuntimeError('Broker source differs from genuine old archive: ' + str(relative))
-                    target = modules / relative
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(data)
-                    self.old_hashes[str(relative)] = hashlib.sha256(data).hexdigest()
-            if len(self.old_hashes) < 7:
-                raise RuntimeError('Incomplete genuine old broker module inventory')
+            for name, data in old_files.items():
+                target = modules / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
             self.old_modules = modules
 
     def release(self, version):
@@ -100,10 +113,26 @@ class PresentationSandbox(Sandbox):
         # Sandbox.start already has bounded readiness logic. Substitute only the
         # subprocess launch cwd so its normal -m command loads copied old modules.
         original = subprocess.Popen
-        def old_process(*args, **kwargs):
+        def old_process(args, **kwargs):
             kwargs['cwd'] = self.old_modules
             kwargs['env'] = dict(os.environ, PYTHONPATH=str(self.old_modules))
-            return original(*args, **kwargs)
+            # Record actual import origins/hashes in the broker process, not merely
+            # a parent's inventory of files it intended the child to import.
+            probe = self.root / 'old-imports.json'
+            launch = self.root / 'launch-old.py'
+            launch.write_text(
+                'import hashlib, importlib, json, pathlib, sys\n'
+                'proof = {}\n'
+                'for name in ' + repr(MODULES) + ':\n'
+                ' module = importlib.import_module(name[:-3].replace("/", "."))\n'
+                ' path = pathlib.Path(module.__file__).resolve()\n'
+                ' expected = pathlib.Path(' + repr(str(self.old_modules)) + ') / name\n'
+                ' assert path == expected, (path, expected)\n'
+                ' proof[name] = {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}\n'
+                'pathlib.Path(' + repr(str(probe)) + ').write_text(json.dumps(proof))\n'
+                'from updater.broker.server import main\n'
+                'main()\n')
+            return original([args[0], str(launch), *args[3:]], **kwargs)
         subprocess.Popen = old_process
         try:
             return super().start()
@@ -116,13 +145,18 @@ def main():
     parser.add_argument('--presentation', required=True)
     parser.add_argument('--ui-origin', required=True)
     parser.add_argument('--old-archive')
+    parser.add_argument('--old-source')
+    parser.add_argument('--old-manifest')
     args = parser.parse_args()
-    box = PresentationSandbox(args.presentation, args.ui_origin, args.old_archive)
+    box = PresentationSandbox(args.presentation, args.ui_origin, args.old_archive, args.old_source, args.old_manifest)
     try:
         box.start()
         if box.process is None:
             raise RuntimeError('Broker process did not start')
-        print(json.dumps(dict(root=str(box.root), config=box.config, brokerPid=box.process.pid, oldBrokerHashes=box.old_hashes, tier='compiled source rebased + fixture HMAC, NOT public signature or real release')), flush=True)
+        imports = json.loads((box.root / 'old-imports.json').read_text()) if args.old_archive else {}
+        if {name: entry['sha256'] for name, entry in imports.items()} != box.old_hashes:
+            raise RuntimeError('Actual old imports do not match all seven verified pins')
+        print(json.dumps(dict(root=str(box.root), config=box.config, brokerPid=box.process.pid, oldBrokerHashes=box.old_hashes, oldBrokerImports=imports, oldUIDir=str(box.old_modules / 'updater/ui/dist') if args.old_archive else None, tier=('genuine old broker compatibility' if args.old_archive else 'current candidate staged broker') + '; compiled source rebased + fixture HMAC, NOT public signature or real release')), flush=True)
         sys.stdin.readline()
     finally:
         box.close()

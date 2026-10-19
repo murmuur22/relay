@@ -1,8 +1,10 @@
 <script>
  import {VERSION} from '../version.js';
 
- import { onMount } from 'svelte';
+ import { onMount, tick } from 'svelte';
  import {launchUpdater} from './updater.js';
+ import UpdaterReadyDialog from './UpdaterReadyDialog.svelte';
+ import {readyObservation,parseReadyMessage} from '../updater/ui/src/host-ready.js';
  import DesktopWindow from './DesktopWindow.svelte';
  import PersonalDesktop from './PersonalDesktop.svelte';
  import {resolveDesktop,folderPath,itemToken,ancestry} from './desktop.js';
@@ -11,16 +13,68 @@
  // Independent maintenance lives outside the authenticated desktop lifecycle.
  // Only a one-use launch fragment crosses into its fixed origin; messages carry no authority.
  let maintenance=$state(null),maintenanceOpen=$state(false),maintenanceLogin=$state(false),maintenanceFrame=$state();
+ // Local-only window state belongs to this exact independent monitoring generation.
+ // Reuse desktop bounds and pointer-capture behavior, not authenticated window persistence.
+ let maintenanceGesture=$state(null),monitorWidth=$state(window.innerWidth),monitorHeight=$state(window.innerHeight);
+ const monitorArea=()=>({width:Math.max(4,monitorWidth-24),height:Math.max(24,monitorHeight-110)});
+ let monitorBounds=$derived.by(()=>{if(!maintenance)return null;const a=monitorArea();return maintenance.maximized?{x:0,y:0,width:a.width-4,height:a.height-24}:clampBounds(maintenance.bounds,a.width,a.height);});
+ function fitMaintenance(){monitorWidth=window.innerWidth;monitorHeight=window.innerHeight;maintenanceGesture=null;if(!maintenance)return;const a=monitorArea();maintenance.bounds=clampBounds(maintenance.bounds,a.width,a.height);if(maintenance.restoreBounds)maintenance.restoreBounds=clampBounds(maintenance.restoreBounds,a.width,a.height);}
+ function beginMaintenance(e,kind){if(e.button!==0||e.target.closest('.maintenance-controls'))return;e.preventDefault();if(!maintenance||maintenance.ending||maintenance.maximized)return;maintenanceGesture={kind,x:e.clientX,y:e.clientY,bounds:{...monitorBounds},target:maintenance,epoch};e.currentTarget.setPointerCapture(e.pointerId);}
+ function moveMaintenance(e){const g=maintenanceGesture;if(!g)return;if(g.target!==maintenance||g.epoch!==epoch||maintenance.ending){maintenanceGesture=null;return;}const a=monitorArea(),dx=e.clientX-g.x,dy=e.clientY-g.y,b=g.bounds;maintenance.bounds=clampBounds(g.kind==='drag'?{...b,x:b.x+dx,y:b.y+dy}:{...b,width:b.width+dx,height:b.height+dy},a.width,a.height);}
+ function maximizeMaintenance(){if(!maintenance||maintenance.ending)return;maintenanceGesture=null;if(maintenance.maximized){const a=monitorArea();maintenance.bounds=clampBounds(maintenance.restoreBounds||maintenance.bounds,a.width,a.height);maintenance.maximized=false;}else{maintenance.restoreBounds={...monitorBounds};maintenance.maximized=true;}}
+ function minimizeMaintenance(){maintenanceGesture=null;maintenanceOpen=false;}
+ let readyNotice=$state(null),readyDialog=$state(false),noticeDismissed=$state(false);
+ let noticeSerial=0,noticeRead=0,noticeExpiry,noticed=new Set();
+ function suppressReady(){noticeSerial++;noticeRead=0;clearTimeout(noticeExpiry);readyNotice=null;readyDialog=false;noticeDismissed=false;}
+ function ownsMaintenance(){return !!maintenance&&!maintenance.ending&&maintenance.authEpoch===epoch&&phase==='ready'&&user?.role==='admin'&&!user.disabled&&!user.mustChange&&user.id===maintenance.owner;}
+ function editing(){const el=document.activeElement;return !!el&&(el.matches('input,textarea,select,iframe')||el.isContentEditable||!!document.querySelector('dialog[open]'));}
+ function considerReady(){if(ownsMaintenance()&&readyNotice?.phase==='ready'&&!noticeDismissed&&maintenanceOpen&&!maintenanceLogin&&document.visibilityState==='visible'&&document.hasFocus()&&!editing())readyDialog=true;}
+ async function observeReady(hint){
+  if(!ownsMaintenance())return;
+  if(hint.phase==='unavailable'){suppressReady();return;}
+  if(noticeRead)return;const target=maintenance,e=epoch,serial=++noticeSerial;noticeRead=serial;
+  try{
+   // Independently corroborate a hint with the existing read-only bridge.
+   const snapshot=await sessionApi('/updater/state');
+   if(target!==maintenance||e!==epoch||serial!==noticeSerial||!ownsMaintenance())return;
+   const actual=readyObservation(snapshot,true);
+   if(actual.phase!=='ready'||actual.phase!==hint.phase||actual.jobId!==hint.jobId||actual.version!==hint.version){suppressReady();return;}
+   const changed=!readyNotice||readyNotice.jobId!==actual.jobId||readyNotice.version!==actual.version;
+   if(changed){readyDialog=false;noticeDismissed=noticed.has(actual.jobId);readyNotice=actual;}
+   clearTimeout(noticeExpiry);noticeExpiry=setTimeout(suppressReady,3500);
+   if(!noticed.has(actual.jobId)){
+    // Session-only bounded memory. At the cap, suppress new automatic reminders.
+    if(noticed.size<32)noticed.add(actual.jobId);else noticeDismissed=true;
+   }
+   considerReady();
+  }catch{if(target===maintenance&&e===epoch&&serial===noticeSerial)suppressReady();}
+  finally{if(noticeRead===serial)noticeRead=0;}
+ }
+ function restoreMaintenance(){if(!maintenance||maintenance.ending)return;maintenanceOpen=true;maintenanceLogin=false;queueMicrotask(considerReady);}
+ function laterReady(){readyDialog=false;noticeDismissed=true;}
+ async function reviewReady(){
+  const target=readyNotice,e=epoch,owned=maintenance;laterReady();
+  if(!target||target.phase!=='ready'||!ownsMaintenance())return;
+  try{const snapshot=await sessionApi('/updater/state'),actual=readyObservation(snapshot,true);
+   if(e!==epoch||maintenance!==owned||!ownsMaintenance()||actual.phase!=='ready'||actual.jobId!==target.jobId||actual.version!==target.version){if(e===epoch&&maintenance===owned)suppressReady();return;}
+   restoreMaintenance();await tick();
+   if(e===epoch&&maintenance===owned&&ownsMaintenance())maintenanceFrame?.contentWindow?.postMessage({...actual,type:'relay-updater-review'},maintenance.origin);
+  }catch{if(e===epoch&&maintenance===owned)suppressReady();}
+ }
+ onMount(()=>{let task;const check=()=>{clearTimeout(task);task=setTimeout(considerReady,0);};window.addEventListener('focus',check);document.addEventListener('focusin',check);document.addEventListener('visibilitychange',check);return()=>{clearTimeout(task);clearTimeout(noticeExpiry);window.removeEventListener('focus',check);document.removeEventListener('focusin',check);document.removeEventListener('visibilitychange',check);};});
  function mountMaintenance(frame){maintenanceFrame=frame;const target=maintenance.url;maintenance.url=undefined;frame.contentWindow.location.replace(target);}
- function startMaintenance(url){if(maintenance?.ending)throw Error('The previous monitoring session is still ending. Try again.');if(phase!=='ready'||user?.role!=='admin')throw Error('Updater launch expired.');if(maintenance){maintenanceOpen=true;maintenanceLogin=false;return;}maintenance={url,origin:new URL(url).origin,version:new URL(url).hash.split('~')[1]||'',owner:user.id,runtimeInstance:relayRuntime};maintenanceOpen=true;maintenanceLogin=false;}
+ function startMaintenance(url){if(maintenance?.ending)throw Error('The previous monitoring session is still ending. Try again.');if(phase!=='ready'||user?.role!=='admin')throw Error('Updater launch expired.');if(maintenance){restoreMaintenance();return;}suppressReady();noticed.clear();maintenance={url,origin:new URL(url).origin,version:new URL(url).hash.split('~')[1]||'',owner:user.id,authEpoch:epoch,runtimeInstance:relayRuntime,bounds:clampBounds({x:24,y:20,width:1100,height:760},monitorArea().width,monitorArea().height),maximized:false,restoreBounds:null};maintenanceOpen=true;maintenanceLogin=false;}
  async function standaloneMaintenance(){const e=epoch;try{await launchUpdater(()=>sessionApi('/updater/launch','POST',{}),()=>e===epoch&&!!maintenance,window,maintenance?.version||'');}catch(err){if(e===epoch)error=err.message;}}
  function maintenanceVisibility(){if(maintenance&&maintenanceFrame)maintenanceFrame.contentWindow.postMessage({type:maintenanceOpen&&!maintenanceLogin?'relay-updater-visible':'relay-updater-hidden'},maintenance.origin);}
  $effect(()=>{maintenanceOpen;maintenanceLogin;maintenanceFrame;maintenanceVisibility();});
  let maintenanceEndTimer;
- function clearMaintenance(){clearTimeout(maintenanceEndTimer);maintenance=null;maintenanceOpen=false;maintenanceLogin=false;maintenanceFrame=undefined;}
+ function clearMaintenance(){maintenanceGesture=null;suppressReady();noticed.clear();clearTimeout(maintenanceEndTimer);maintenance=null;maintenanceOpen=false;maintenanceLogin=false;maintenanceFrame=undefined;}
  function endMaintenanceMessage(){if(maintenance?.ending&&maintenance.ready)maintenanceFrame?.contentWindow?.postMessage({type:'relay-updater-end'},maintenance.origin);}
- function retireMaintenance(){if(!maintenance||maintenance.ending)return;maintenance.ending=true;maintenanceOpen=false;maintenanceLogin=false;endMaintenanceMessage();const target=maintenance;maintenanceEndTimer=setTimeout(()=>{if(maintenance===target){clearMaintenance();error='Monitoring was hidden, but independent session termination could not be confirmed.';}},10000);}
- function maintenanceMessage(event){if(!maintenance||event.source!==maintenanceFrame?.contentWindow||event.origin!==maintenance.origin||!event.data||Object.keys(event.data).length!==1)return;
+ function retireMaintenance(){maintenanceGesture=null;suppressReady();noticed.clear();if(!maintenance||maintenance.ending)return;maintenance.ending=true;maintenanceOpen=false;maintenanceLogin=false;endMaintenanceMessage();const target=maintenance;maintenanceEndTimer=setTimeout(()=>{if(maintenance===target){clearMaintenance();error='Monitoring was hidden, but independent session termination could not be confirmed.';}},10000);}
+ function maintenanceMessage(event){if(!maintenance||event.source!==maintenanceFrame?.contentWindow||event.origin!==maintenance.origin||!event.data)return;
+  const observation=parseReadyMessage(event.data);
+  if(observation){void observeReady(observation);return;}
+  if(typeof event.data!=='object'||Array.isArray(event.data)||Object.keys(event.data).length!==1)return;
   if(event.data.type==='relay-updater-ready'){maintenance.ready=true;if(maintenance.ending)endMaintenanceMessage();else maintenanceVisibility();}
   if(event.data.type==='relay-updater-sign-in'&&!maintenance.ending){lock('Sign in again to authorize further actions. Monitoring is read-only during restart.');maintenanceLogin=true;}
   if(event.data.type==='relay-updater-ended')clearMaintenance();
@@ -77,7 +131,7 @@
  let deviceController;
  function observation(app){return health[app.id]||{state:'Unknown',reachability:'not-monitored',source:'relay',checkedAt:0,detail:app.personal?'Personal Native URL: not monitored. Relay never probes personal URLs.':'No server observation available. Reachability is not device connectivity, readiness or successful login.'};}
  $effect(()=>{if(!showStatus){deviceController?.abort();health={};}});
- function lock(message='Session expired. Sign in again.'){epoch++;navigation++;deviceController?.abort();deviceController=null;health={};personal={items:[],iconChoices:[]};route={folderId:null,unavailable:false,app:null};tabLanding=null;phase='locked';windows=[];apps=[];user=null;settings='';hotkeys=false;quick=false;error=message;timers.forEach(clearTimeout);pending.clear();csrf='';}
+ function lock(message='Session expired. Sign in again.'){suppressReady();noticed.clear();epoch++;navigation++;deviceController?.abort();deviceController=null;health={};personal={items:[],iconChoices:[]};route={folderId:null,unavailable:false,app:null};tabLanding=null;phase='locked';windows=[];apps=[];user=null;settings='';hotkeys=false;quick=false;error=message;timers.forEach(clearTimeout);pending.clear();csrf='';}
  async function refresh(){const s=await api('/session');if(s.csrf!==csrf){retireMaintenance();lock('Account session changed. Sign in again.');throw new Error('Account session changed.');}user=s.user;apps=s.apps;windows=windows.filter(w=>apps.some(a=>a.id===w.appId)&&(systemWindow(w.id)||s.windows.some(saved=>saved.id===w.id)));await loadDesktop();canonicalize();}
  async function status(){if(phase!=='ready')return;const e=epoch;try{await refresh();if(showStatus){deviceController?.abort();const controller=new AbortController();deviceController=controller;const observed=await api('/status','GET',undefined,{signal:controller.signal});if(e===epoch&&showStatus&&phase==='ready')health=observed;}}catch(err){if(err.name!=='AbortError'&&e===epoch)error=err.message;}}
  async function logout(){const token=csrf;retireMaintenance();lock('Signing out…');phase='loading';const e=epoch;try{const response=await fetch('/api/logout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':token},body:'{}',signal:AbortSignal.timeout(10000)});if(e!==epoch)return;const data=await response.json();if(!response.ok)throw Error(data.error||'Sign out could not be confirmed.');error='Signed out.';}catch(err){if(e===epoch)error=err.message;}finally{if(e===epoch)phase='locked';}}
@@ -102,7 +156,7 @@
   if(path==='/session')relayRuntime=runtime;
   return data;
  }
- async function bootstrap(){const e=++epoch;phase='loading';error='';try{const session=await api('/session');csrf=session.csrf;sessionApi=(...args)=>e===epoch?api(...args):Promise.reject(new Error('Expired app session'));user=session.user;if(maintenance){if(maintenance.owner!==user.id||user.role!=='admin'||user.disabled||user.mustChange)retireMaintenance();else{maintenance.runtimeInstance=relayRuntime;maintenanceLogin=false;maintenanceFrame?.contentWindow?.postMessage({type:'relay-updater-reconnected'},maintenance.origin);}}apps=session.apps;windows=session.windows.map(w=>({...w,z:++topZ}));const focused=windows.find(w=>w.focused);if(focused)focused.z=++topZ;await loadDesktop();phase='ready';if(user?.mustChange)settings='profile';fitDesktop();if(!onboarding)await reconcileRoute();await status();}catch(err){if(e===epoch&&phase!=='locked'){phase='error';error=err.message;}}}
+ async function bootstrap(){const e=++epoch;phase='loading';error='';try{const session=await api('/session');csrf=session.csrf;sessionApi=(...args)=>e===epoch?api(...args):Promise.reject(new Error('Expired app session'));user=session.user;if(maintenance){if(maintenance.owner!==user.id||user.role!=='admin'||user.disabled||user.mustChange)retireMaintenance();else{maintenance.authEpoch=e;maintenance.runtimeInstance=relayRuntime;maintenanceLogin=false;maintenanceFrame?.contentWindow?.postMessage({type:'relay-updater-reconnected'},maintenance.origin);}}apps=session.apps;windows=session.windows.map(w=>({...w,z:++topZ}));const focused=windows.find(w=>w.focused);if(focused)focused.z=++topZ;await loadDesktop();phase='ready';if(user?.mustChange)settings='profile';fitDesktop();if(!onboarding)await reconcileRoute();await status();}catch(err){if(e===epoch&&phase!=='locked'){phase='error';error=err.message;}}}
  const systemIds=new Set(['system-updater','system-control-panel']);
  function systemWindow(id){const w=windows.find(w=>w.id===id);return w?.mode==='system'&&w.appId===id&&systemIds.has(id);}
  function local(id,patch){windows=windows.map(w=>w.id===id?{...w,...patch}:patch.focused?{...w,focused:false}:w);}
@@ -115,7 +169,7 @@
  function fitDesktop(){for(const w of windows){const b=w.maximized||(areaWidth<640&&w.focused)?{x:0,y:0,width:areaWidth-4,height:areaHeight-24}:clampBounds(w,areaWidth,areaHeight);const patch={...b,...(areaWidth<640&&!w.focused&&w.visible?{visible:false}:{})};if(Object.entries(patch).some(([key,value])=>w[key]!==value))change(w.id,patch);}}
  onMount(()=>{areaWidth=desktop.clientWidth;areaHeight=desktop.clientHeight;const observer=new ResizeObserver(([entry])=>{areaWidth=entry.contentRect.width;areaHeight=entry.contentRect.height;fitDesktop();});observer.observe(desktop);bootstrap();const interval=setInterval(()=>now=new Date(),1000),poll=setInterval(status,5000);return()=>{observer.disconnect();clearInterval(interval);clearInterval(poll);timers.forEach(clearTimeout);};});
 </script>
-<svelte:window onpopstate={()=>{void reconcileRoute().catch(e=>error=e.message);}}/>
+<svelte:window bind:innerWidth={monitorWidth} bind:innerHeight={monitorHeight} onresize={fitMaintenance} onblur={()=>maintenanceGesture=null} onpopstate={()=>{void reconcileRoute().catch(e=>error=e.message);}}/>
 <SignalIntro enabled={intro} onvisibility={value=>introVisible=value}/>
 <div class="relay-shell" style="display: contents" inert={introVisible}>
 <header class="topbar"><nav class="path" aria-label="Desktop path"><a href="/desktop" aria-label="Home" onclick={e=>follow(e,'/desktop')}>~</a>{#if phase==='ready'}{#each crumbs as crumb}<span>/</span><a href={folderPath(personal.items,crumb.id)} onclick={e=>follow(e,folderPath(personal.items,crumb.id))}>{crumb.label}</a>{/each}{/if}</nav><time datetime={now.toISOString()}>{now.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}<span>{now.toLocaleTimeString('en-GB')}</span></time></header>
@@ -141,15 +195,22 @@
 {#if phase==='ready'&&hotkeys}<Hotkeys context={route.folderId?'folder':'desktop'} onclose={()=>hotkeys=false}/>{/if}
 {#if phase==='ready'&&settings}<Settings kind={settings} {user} {api} onclose={()=>settings=''} onrefresh={refresh} onpassword={()=>lock('Password changed. Sign in again.')}/>{/if}
 {#if maintenance}
- <section class="maintenance-surface" class:concealed={!maintenanceOpen||maintenanceLogin} inert={!maintenanceOpen||maintenanceLogin} aria-label="Independent maintenance">
-  <div class="maintenance-bar"><span>Relay / independent maintenance</span><span>Monitoring is independent · changes require fresh authorization</span><button disabled={phase!=='ready'||user?.role!=='admin'||user?.mustChange} onclick={standaloneMaintenance}>Standalone recovery (new tab)</button><button aria-label="Close maintenance" onclick={()=>maintenanceOpen=false}>×</button></div>
+ <section class="maintenance-surface" class:gesturing={!!maintenanceGesture} class:concealed={!maintenanceOpen||maintenanceLogin} inert={!maintenanceOpen||maintenanceLogin} aria-label="Independent maintenance" style:left={monitorBounds.x+12+'px'} style:top={monitorBounds.y+54+'px'} style:width={monitorBounds.width+4+'px'} style:height={monitorBounds.height+24+'px'}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="maintenance-bar" onpointerdown={e=>beginMaintenance(e,'drag')} onpointermove={moveMaintenance} onpointerup={()=>maintenanceGesture=null} onpointercancel={()=>maintenanceGesture=null} onlostpointercapture={()=>maintenanceGesture=null} ondblclick={e=>{if(!e.target.closest('.maintenance-controls'))maximizeMaintenance();}}><span>Relay / independent maintenance</span><span>Monitoring is independent · changes require fresh authorization</span><div class="maintenance-controls"><button disabled={phase!=='ready'||user?.role!=='admin'||user?.mustChange} onclick={standaloneMaintenance}>Standalone recovery (new tab)</button><button aria-label="Minimize maintenance monitor" title="Minimize" onclick={minimizeMaintenance}>−</button><button aria-label={(maintenance.maximized?'Restore size ':'Maximize ')+'maintenance monitor'} title={maintenance.maximized?'Restore':'Maximize'} onclick={maximizeMaintenance}>{maintenance.maximized?'❐':'□'}</button><button aria-label="Close maintenance" title="Hide monitor (session retained)" onclick={minimizeMaintenance}>×</button></div></div>
   <iframe use:mountMaintenance title={maintenance.ending?'Retiring Relay updater':'Independent Relay updater'} referrerpolicy="no-referrer"></iframe>
+  {#if !maintenance.maximized}<button class="maintenance-resize" aria-label="Resize maintenance monitor" onpointerdown={e=>beginMaintenance(e,'resize')} onpointermove={moveMaintenance} onpointerup={()=>maintenanceGesture=null} onpointercancel={()=>maintenanceGesture=null} onlostpointercapture={()=>maintenanceGesture=null}></button>{/if}
  </section>
- {#if !maintenance.ending&&(!maintenanceOpen||maintenanceLogin)}<button class="maintenance-restore" onclick={()=>{maintenanceOpen=true;maintenanceLogin=false;}}>Return to maintenance monitor</button>{/if}
+ {#if !maintenance.ending&&(!maintenanceOpen||maintenanceLogin)}<button class="maintenance-restore" onclick={restoreMaintenance}>Return to maintenance monitor</button>{/if}
+{/if}
+{#if readyNotice?.phase==='ready'&&ownsMaintenance()}
+ <aside class="updater-ready-notice" data-job-id={readyNotice.jobId} aria-label="Prepared update"><span role={noticeDismissed?undefined:'status'}>{noticeDismissed?'Prepared update':`Update ready: ${readyNotice.version}. Relay is still running.`}</span><button aria-label={'Update ready: '+readyNotice.version} onclick={restoreMaintenance}>Review prepared update</button></aside>
+ {#if readyDialog}<UpdaterReadyDialog version={readyNotice.version} onapply={reviewReady} onlater={laterReady}/>{/if}
 {/if}
 </div>
 <style>
- .maintenance-surface{position:fixed;inset:54px 12px 56px;z-index:100;background:#0b0b0a;border:1px solid #77756e;display:flex;flex-direction:column}.maintenance-surface.concealed{visibility:hidden;pointer-events:none}.maintenance-bar{display:flex;flex-wrap:wrap;gap:16px;align-items:center;font:11px ui-monospace,monospace;padding:6px 10px;border-bottom:1px solid #44443f}.maintenance-bar span:nth-child(2){margin-left:auto;color:#aaa8a0}.maintenance-bar button{padding:4px 10px;border:1px solid #77756e}.maintenance-surface iframe{width:100%;height:100%;min-height:0;flex:1;border:0}.maintenance-restore{position:fixed;right:12px;bottom:56px;z-index:101;background:#111110;color:#efeee5;border:1px solid #77756e;padding:12px;font:12px ui-monospace,monospace}
+ .updater-ready-notice{position:fixed;right:12px;bottom:104px;z-index:1003;max-width:calc(100vw - 24px);display:flex;flex-wrap:wrap;gap:8px;padding:12px;background:#242321;color:#fafaf9;border:1px solid #a8a29e;font:12px/1.5 ui-monospace,monospace}.updater-ready-notice button{border:1px solid #a8a29e;padding:4px 8px}
+ .maintenance-surface{position:fixed;box-sizing:border-box;z-index:1004;background:#0b0b0a;border:1px solid #77756e;display:flex;flex-direction:column}.maintenance-surface.concealed{visibility:hidden;pointer-events:none}.maintenance-bar{display:flex;flex-wrap:wrap;flex-shrink:0;gap:8px;align-items:center;font:11px ui-monospace,monospace;padding:6px 10px;border-bottom:1px solid #44443f;cursor:move;touch-action:none;user-select:none}.maintenance-bar span:nth-child(2){margin-left:auto;color:#aaa8a0}.maintenance-controls{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto;cursor:default}.maintenance-bar button{padding:4px 8px;border:1px solid #77756e}.maintenance-surface iframe{width:100%;height:100%;min-height:0;flex:1;border:0}.maintenance-surface.gesturing iframe{pointer-events:none}.maintenance-resize{position:absolute;right:0;bottom:0;width:16px;height:16px;border:0;border-right:2px solid #aaa8a0;border-bottom:2px solid #aaa8a0;cursor:nwse-resize;touch-action:none}.maintenance-restore{position:fixed;right:12px;bottom:56px;z-index:101;background:#111110;color:#efeee5;border:1px solid #77756e;padding:12px;font:12px ui-monospace,monospace}
  .window-layer{position:absolute;inset:0;z-index:10;pointer-events:none}.window-layer :global(.desktop-window){pointer-events:auto}.window-layer.unavailable{visibility:hidden}
  .path{min-width:0;overflow-x:auto;white-space:nowrap;margin-right:16px;scrollbar-width:none}.path a{color:inherit;text-decoration:none;flex:none}.path a:hover{text-decoration:underline}.path a:focus-visible{outline:1px dashed #fafaf9;outline-offset:2px}time{flex:none}.tab-landing{position:absolute;left:50%;top:30%;transform:translateX(-50%);padding:24px;background:#1c1917;border:1px solid #a8a29e;z-index:2;max-width:calc(100% - 24px)}.tab-landing button{border:1px solid #a8a29e;padding:10px}
 </style>

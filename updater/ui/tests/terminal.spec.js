@@ -10,19 +10,20 @@ test('reference terminal loads redistributed fonts, monochrome progress and domi
  await page.evaluate(()=>document.fonts.ready);expect(await page.evaluate(()=>document.fonts.check('700 44px "Relay Pixel"')&&document.fonts.check('400 12px "Relay Mono"'))).toBe(true);
  expect(resources.length).toBe(2);expect(resources.every(r=>r.status===200)).toBe(true);
  await expect(page.locator('.brand')).toHaveText('Relay updater');expect(await page.locator('.brand').evaluate(el=>parseFloat(getComputedStyle(el).fontSize))).toBeLessThanOrEqual(18);await expect(page.locator('header .path')).toHaveCount(0);await expect(page.locator('.edge-caption')).toHaveCount(0);
- expect(await page.locator('#percentage').evaluate(el=>getComputedStyle(el).color)).toBe('rgb(239, 238, 229)');
+ expect(await page.locator('#percentage').evaluate(el=>getComputedStyle(el).color)).toBe('rgb(32, 32, 29)');
  await expect(page.locator('#percentage .percent-symbol')).toHaveText('%');
  expect(await page.locator('#percentage .percent-symbol').evaluate(el=>parseFloat(getComputedStyle(el).fontSize))).toBeLessThan(60);
  await expect(page.locator('#progress')).toHaveAttribute('aria-label','Artifact download');await expect(page.locator('#progress')).toHaveAttribute('aria-valuenow','68');
  expect(await page.locator('#progress-fill').evaluate(el=>el.textContent)).toBe('█'.repeat(27)+'░'.repeat(13));
- const left=await page.locator('.transfer').boundingBox(),right=await page.locator('.release').boundingBox();expect(left.width/right.width).toBeGreaterThan(2);
+ const left=await page.locator('.release-list').boundingBox(),right=await page.locator('.release-detail').boundingBox();expect(right.width/left.width).toBeGreaterThan(2);
  await expect(page.locator('#chamber')).toHaveAttribute('data-renderer','webgl');await expect(page.locator('#chamber')).toHaveAttribute('data-geometry','shaded-torus-knot');
- expect(await page.locator('#chamber').evaluate(el=>Number(el.dataset.cells))).toBeGreaterThanOrEqual(17000);
+ // The C workspace uses a compact monitor dock rather than the retired dominant chamber.
+ const cells=await page.locator('#chamber').evaluate(el=>Number(el.dataset.cells));expect(cells).toBeGreaterThanOrEqual(1000);expect(cells).toBeLessThanOrEqual(24000);
  await expect(page.locator('#chamber')).toHaveAttribute('data-guides','dotted-coordinate-field');
  expect(await page.locator('.brand').evaluate(el=>getComputedStyle(el).color)).toBe('rgb(239, 238, 229)');
  await page.emulateMedia({reducedMotion:'reduce'});await expect(page.locator('#chamber')).toHaveAttribute('data-motion','off');await capture(page,'independent-68-desktop');
  state.job.phase='verifying';state.job.downloadedBytes=303000000;await page.locator('#check').click();await expect(page.locator('#phase')).toHaveText('Verifying');await expect(page.locator('#percentage')).toHaveText('100% of artifact');await capture(page,'independent-verifying');
- state.job.phase='succeeded';await page.locator('#check').click();await expect(page.locator('#phase')).toHaveText('Update complete');await capture(page,'independent-success');
+ state.job.phase='succeeded';await page.locator('#check').click();await expect(page.locator('#phase')).toHaveText('Installed');await capture(page,'independent-success');
  state.job=null;await page.locator('#check').click();await expect(page.locator('#percentage')).toHaveText('—');await expect(page.locator('#progress')).not.toHaveAttribute('aria-valuenow');await capture(page,'independent-idle');
  state.job=snapshot().job;await page.locator('#check').click();await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await capture(page,'independent-68-mobile');
 });

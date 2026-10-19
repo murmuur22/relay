@@ -1,70 +1,62 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
+import {spawn,execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {once} from 'node:events';
+import {watch} from 'node:fs';
 import net from 'node:net';
-import { readFile } from 'node:fs/promises';
-import { chromium, expect } from '@playwright/test';
-import { createGateway, ROOT } from '../../../server/gateway.mjs';
-import { createUpdaterWeb } from '../../web/server.mjs';
-import { browserLogin, password } from '../../../tests/auth-helper.mjs';
+import {readFile,readlink,access,mkdir,writeFile} from 'node:fs/promises';
+import {chromium,expect} from '@playwright/test';
+import {createGateway,ROOT} from '../../../server/gateway.mjs';
+import {createUpdaterWeb} from '../../web/server.mjs';
+import {browserLogin,password} from '../../../tests/auth-helper.mjs';
 
-// REAL broker, HMAC fixture release, HTTP bytes, disposable Node service and state rollback.
-// No production updater, GitHub proof, systemd, real Relay state or external host is involved.
-test('real disposable fixture success and rollback appear in the compiled transfer chamber', { timeout: 65000 }, async t => {
-  const reserve = net.createServer(); await new Promise(resolve => reserve.listen(0, '127.0.0.1', resolve));
-  const uiOrigin = `http://127.0.0.1:${reserve.address().port}`; await new Promise(resolve => reserve.close(resolve));
-  const script = "from updater.fixtures.harness import Sandbox\nfrom updater.broker.auth import atomic_json\nimport sys,json\nbox=Sandbox()\ntry:\n box.config['uiOrigin']=sys.argv[1]\n atomic_json(box.config_path,box.config)\n box.start()\n print(json.dumps({'root':str(box.root),'config':box.config}),flush=True)\n sys.stdin.readline()\nfinally:\n box.close()";
-  const child = spawn('python3', ['-u', '-c', script, uiOrigin], { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
-  let output = '', errors = '', gateway, web, browser;
-  child.stdout.on('data', data => output += data); child.stderr.on('data', data => errors += data);
-  t.after(async () => {
-    await browser?.close(); await web?.close(); await gateway?.close();
-    child.stdin.end('\n');
-    if (child.exitCode === null) { const timer = setTimeout(() => child.kill('SIGKILL'), 22000); await once(child, 'exit'); clearTimeout(timer); }
-  });
-  await expect.poll(() => { if (child.exitCode !== null) throw new Error(errors); return output.includes('\n'); }, { timeout: 15000 }).toBe(true);
-  const { root, config } = JSON.parse(output.split('\n')[0]);
-  gateway = await createGateway({ port: 0, runtime: root + '/visual-relay', profile: 'standalone', updater: { socketPath: config.socketPath, keyFile: config.bridgeKeyFile, uiOrigin }, maintenanceFile: config.maintenance });
-  web = await createUpdaterWeb({ uiOrigin, relayOrigin: gateway.origin, socketPath: config.socketPath });
-  browser = await chromium.launch({ chromiumSandbox: true });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
-  const desktop = await context.newPage(); await browserLogin(desktop, gateway.origin, root + '/visual-relay');
-  await desktop.getByRole('button', { name: 'Open Updater', exact: true }).dblclick();
-  await expect(desktop.getByLabel('Available release')).toHaveValue('v0.3.1');assert.equal(context.pages().length,1);
-  await desktop.getByRole('button',{name:'Maximize Updater',exact:true}).click();
-  await desktop.screenshot({path:ROOT+'/screenshots/updater-desktop-browse-fixture.png',fullPage:true});
-  await desktop.getByRole('button',{name:'Restore size Updater',exact:true}).click();
-  // Exercise the preserved safe standalone launcher explicitly. Normal desktop
-  // Start update now embeds and is covered by updater-embedded.test.mjs.
-  await desktop.addScriptTag({content:(await readFile(ROOT+'/src/updater.js','utf8')).replaceAll('export ','')});
-  const opened = context.waitForEvent('page');await desktop.evaluate(()=>launchUpdater(async()=>{const session=await(await fetch('/api/session')).json();return(await fetch('/api/updater/launch',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':session.csrf},body:'{}'})).json();},()=>true,window,'v0.3.1'));
-  const page = await opened; const pageErrors = []; page.on('pageerror', error => pageErrors.push(error.message));
-  await expect(page.locator('#mode')).toHaveText('FIXTURE SANDBOX');
-  await page.getByRole('button', { name: 'Check releases' }).click();
-  async function install(version, phase) {
-    await page.locator('#release-select').selectOption(version);
-    await page.getByRole('button', { name: 'Review installation' }).click();
-    await page.getByLabel('I understand active Relay sessions will be interrupted.').check();
-    await page.getByLabel('Current Relay password').fill(password);
-    await page.getByRole('button', { name: 'Authorize installation', exact: true }).click();
-    await expect(page.getByRole('dialog')).not.toBeVisible();
-    await expect(page.locator('#phase')).toHaveText(phase, { timeout: 30000 });
-    assert.equal(await page.locator('#password').inputValue(), '');
-  }
-  await install('v0.3.1', 'Update complete');
-  await expect(page.locator('#current-version')).toHaveText('v0.3.1');
-  await expect(page.locator('#chamber')).toHaveAttribute('data-renderer', 'webgl');
-  await page.getByText('Current job details', { exact: false }).click();
-  await page.screenshot({ path: ROOT + '/screenshots/updater-real-fixture-success.png', fullPage: true });
-  await install('v0.3.2', 'Rolled back');
-  await expect(page.locator('#current-version')).toHaveText('v0.3.1');
-  assert.equal(await readFile(root + '/state/fixture.txt', 'utf8'), 'initial synthetic state');
-  await page.getByText('Update history', { exact: false }).click();
-  await page.screenshot({ path: ROOT + '/screenshots/updater-real-fixture-rollback.png', fullPage: true });
-  assert.equal(await page.evaluate(() => window.opener), null);
-  await desktop.close(); await gateway.close(); gateway = null;
-  await page.reload(); await expect(page.locator('#phase')).toHaveText('Rolled back');
-  await expect(page.locator('#current-version')).toHaveText('v0.3.1');
-  assert.deepEqual(pageErrors, []);
+// Genuine compiled UI, Relay enrollment/cookies/CSRF/password, broker.server,
+// HMAC HTTP artifact, Engine/Driver and disposable Node activation/rollback.
+// NOT GitHub attestation, a compiled Relay-to-Relay upgrade, or Linux/systemd.
+const exec=promisify(execFile),out=process.env.RELAY_C_UI_EVIDENCE||ROOT+'/screenshots/c-ui';
+async function exists(path){try{await access(path);return true;}catch(e){if(e.code==='ENOENT')return false;throw e;}}
+function alive(pid){try{process.kill(pid,0);return true;}catch(e){if(e.code==='ESRCH')return false;throw e;}}
+async function children(pid){return (await exec('ps',['-axo','pid=,ppid='])).stdout.split('\n').map(l=>l.trim().split(/\s+/).map(Number)).filter(v=>v[1]===pid).map(v=>v[0]);}
+async function closed(port){return new Promise(resolve=>{const s=net.connect({host:'127.0.0.1',port});s.setTimeout(500,()=>{s.destroy();resolve(false);});s.on('connect',()=>{s.destroy();resolve(false);});s.on('error',e=>{s.destroy();resolve(e.code==='ECONNREFUSED');});});}
+async function capture(page,name){await page.evaluate(()=>{let label=document.getElementById('synthetic-provenance');if(!label){label=document.createElement('div');label.id='synthetic-provenance';label.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#efeee5;color:#151514;font:10px monospace;text-align:center;pointer-events:none';document.body.append(label);}label.textContent='SYNTHETIC HMAC FIXTURE / actual compiled UI + broker / NOT production or GitHub attestation';});await page.screenshot({path:out+'/'+name+'.png'});}
+
+test('real compiled standalone C workspace prepares without runtime effects then explicitly applies and retains actual rollback monitoring',{timeout:100000},async t=>{
+ await mkdir(out,{recursive:true});const reserve=net.createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const uiOrigin='http://127.0.0.1:'+reserve.address().port;await new Promise(r=>reserve.close(r));
+ const script="from updater.fixtures.harness import Sandbox\nimport sys,json\nbox=Sandbox(ui_origin=sys.argv[1])\ntry:\n box.start()\n print(json.dumps({'root':str(box.root),'config':box.config,'brokerPid':box.process.pid}),flush=True)\n sys.stdin.readline()\nfinally:\n box.close()\n print(json.dumps({'cleanup':True,'brokerExitCode':box.process.returncode,'rootAbsent':not box.root.exists()}),flush=True)";
+ const child=spawn('python3',['-u','-c',script,uiOrigin],{cwd:ROOT,stdio:['pipe','pipe','pipe']});let stdout='',stderr='',gateway,web,browser,root,config,brokerPid,watcher,forced=false;const runtimePids=new Set(),markerEvents=[],requests=[],observations=[],errors=[];
+ child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);child.stdin.on('error',()=>{});
+ t.after(async()=>{
+  watcher?.close();const failures=[];for(const close of [()=>browser?.close(),()=>web?.close(),()=>gateway?.close()])try{await close();}catch(e){failures.push(e.message);}
+  const exit=child.exitCode===null&&child.signalCode===null?once(child,'exit'):Promise.resolve([child.exitCode,child.signalCode]);child.stdin.end('\n');const timer=setTimeout(()=>{forced=true;child.kill('SIGKILL');},22000);const [exitCode,signal]=await exit;clearTimeout(timer);
+  const cleanup=stdout.split('\n').filter(Boolean).map(v=>JSON.parse(v)).find(v=>v.cleanup);const ports=config?[Number(new URL(uiOrigin).port),config.fixturePort,Number(new URL(config.fixtureFeed).port),...(gateway?[Number(new URL(gateway.origin).port)]:[])]:[];
+  const receipt={tier:'actual compiled browser + HMAC broker fixture',root,supervisorPid:child.pid,brokerPid,runtimePids:[...runtimePids],exitCode,signal,forced,cleanup,rootAbsent:root?!await exists(root):null,pidsGone:[child.pid,brokerPid,...runtimePids].filter(Boolean).every(pid=>!alive(pid)),portsClosed:(await Promise.all(ports.map(closed))).every(Boolean),failures,requests,observations,markerEvents,errors,stderr};await writeFile(out+'/actual-browser-receipt.json',JSON.stringify(receipt,null,2)+'\n');
+  console.log(JSON.stringify({cleanup:receipt}));assert.equal(forced,false);assert.equal(exitCode,0,stderr);assert.equal(signal,null);assert.equal(cleanup?.brokerExitCode,0);assert.equal(cleanup?.rootAbsent,true);assert.equal(receipt.rootAbsent,true);assert.equal(receipt.pidsGone,true);assert.equal(receipt.portsClosed,true);assert.deepEqual(failures,[]);
+ });
+ await expect.poll(()=>{if(child.exitCode!==null)throw Error(stderr);return stdout.includes('\n');},{timeout:15000}).toBe(true);({root,config,brokerPid}=JSON.parse(stdout.split('\n')[0]));
+ const [baselinePid]=await children(brokerPid);assert.ok(baselinePid);runtimePids.add(baselinePid);const baselineLink=await readlink(config.installRoot+'/current');
+ gateway=await createGateway({port:0,runtime:root+'/visual-relay',profile:'standalone',updater:{socketPath:config.socketPath,keyFile:config.bridgeKeyFile,uiOrigin},maintenanceFile:config.maintenance});web=await createUpdaterWeb({uiOrigin,relayOrigin:gateway.origin,socketPath:config.socketPath});watcher=watch(root,(event,file)=>{if(String(file)==='maintenance')markerEvents.push(event);});
+ browser=await chromium.launch({chromiumSandbox:true});const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'}),desktop=await context.newPage();await browserLogin(desktop,gateway.origin,root+'/visual-relay');
+ await desktop.getByRole('button',{name:'Open Updater',exact:true}).dblclick();const native=desktop.locator('.updater-browser');await expect(native.getByLabel('Available release')).toHaveValue('v0.3.1');assert.equal(context.pages().length,1);
+ // Preserve and exercise the explicit standalone launcher; normal embedded flow
+ // is independently covered by tests/frontend/updater-embedded.test.mjs.
+ await desktop.addScriptTag({content:(await readFile(ROOT+'/src/updater.js','utf8')).replaceAll('export ','')});const opened=context.waitForEvent('page');await desktop.evaluate(()=>launchUpdater(async()=>{const s=await(await fetch('/api/session')).json();return(await fetch('/api/updater/launch',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':s.csrf},body:'{}'})).json();},()=>true,window,'v0.3.1'));
+ const page=await opened;page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{const name=new URL(r.url()).pathname.split('/').pop();if(['prepare','apply','install','cancel','rollback'].includes(name)){const body=r.postDataJSON();requests.push({name,version:body.version,jobId:body.jobId,confirmed:body.confirmed,freshPassword:body.password===password,csrfPresent:Boolean(r.headers()['x-csrf-token'])});}});
+ await expect(page.locator('#mode')).toHaveText('FIXTURE SANDBOX');await page.locator('#check').click();
+ const health=async()=>{const r=await fetch('http://127.0.0.1:'+config.fixturePort+'/health/ready');assert.equal(r.status,200);return r.json();};
+ const unchanged=async()=>{assert.equal(await exists(config.maintenance),false);assert.equal(await readlink(config.installRoot+'/current'),baselineLink);assert.deepEqual(await children(brokerPid),[baselinePid]);assert.equal(alive(baselinePid),true);assert.deepEqual(await health(),{status:'ready',version:'0.3.0',maintenance:false});const journal=JSON.parse(await readFile(config.controlRoot+'/journal.json','utf8'));assert.equal(journal.checkpoint,null);assert.equal(journal.previous,null);assert.equal((await desktop.request.get(gateway.origin+'/api/session')).status(),200);return journal;};
+ async function authorize(button){await page.getByRole('button',{name:button,exact:true}).click();await expect(page.locator('#password')).toHaveValue('');await expect(page.locator('#confirmed')).not.toBeChecked();await expect(page.locator('#authorize')).toBeDisabled();await page.locator('#confirmed').check();await page.locator('#password').fill(password);await page.locator('#authorize').click();await expect(page.getByRole('dialog')).not.toBeVisible();await expect(page.locator('#password')).toHaveValue('');}
+ await unchanged();await authorize('Download & prepare');await expect(page.locator('#phase')).toHaveText('Ready to apply',{timeout:30000});const prepared=await unchanged(),job=prepared.job;assert.equal(job.kind,'prepare');assert.equal(job.version,'v0.3.1');assert.ok(job.downloadedBytes>500000);assert.equal(job.downloadedBytes,job.totalBytes);assert.deepEqual(markerEvents,[]);assert.equal(requests.filter(r=>r.name==='apply'||r.name==='install').length,0);
+ // A complete extra read proves Ready does not auto-apply and leaves Relay usable.
+ await page.locator('#check').click();await unchanged();await expect(page.locator('#apply')).toBeEnabled();observations.push({ready:job.phase,id:job.id,version:job.version,baselinePid,baselineLink,maintenanceEvents:markerEvents.length,health:await health(),relaySessionAlive:true});
+ for(const [width,name] of [[1440,'desktop'],[420,'narrow']]){await page.setViewportSize({width,height:1000});await expect(page.locator('#apply')).toBeInViewport();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await capture(page,'standalone-'+name+'-Ready-synthetic');}
+ // Native container really is narrow on a wide viewport, with actual ready state.
+ await native.getByRole('button',{name:'Check releases',exact:true}).click();await expect(native.getByText('Ready: v0.3.1.',{exact:false})).toBeVisible();
+ const win=desktop.locator('[data-window-id="system-updater"]'),w=(await win.boundingBox()).width,handle=await desktop.getByRole('button',{name:'Resize Updater',exact:true}).boundingBox();await desktop.mouse.move(handle.x+4,handle.y+4);await desktop.mouse.down();await desktop.mouse.move(handle.x+4+420-w,handle.y+4);await desktop.mouse.up();assert.ok((await win.boundingBox()).width<=422);assert.equal(await native.evaluate(el=>el.scrollWidth<=el.clientWidth),true);await expect(native.getByRole('button',{name:'Start update',exact:true})).toBeInViewport();await capture(desktop,'native-420-Ready-synthetic');
+ await page.setViewportSize({width:1440,height:1000});await page.locator('#apply').click();await expect(page.locator('#password')).toHaveValue('');await expect(page.locator('#confirmed')).not.toBeChecked();await expect(page.locator('#authorize')).toBeDisabled();await page.locator('#confirmed').check();await page.locator('#password').fill('Wrong-synthetic-password-42!');await page.locator('#authorize').click();await expect(page.locator('#confirm-error')).toContainText('Authorization was not accepted');await expect(page.locator('#password')).toHaveValue('');await unchanged();await page.locator('#back').click();
+ await authorize('Apply v0.3.1');await expect(page.locator('#phase')).toHaveText('Installed',{timeout:30000});await expect(page.locator('#current-version')).toHaveText('v0.3.1');const applied=JSON.parse(await readFile(config.controlRoot+'/journal.json','utf8'));assert.equal(applied.job.id,job.id);assert.equal(applied.previous.backupComplete,true);assert.equal(applied.checkpoint,null);assert.equal(applied.prepared,undefined);assert.notEqual(await readlink(config.installRoot+'/current'),baselineLink);for(const pid of await children(brokerPid))runtimePids.add(pid);assert.deepEqual(await health(),{status:'ready',version:'0.3.1',maintenance:false});observations.push({installed:applied.job.phase,id:applied.job.id,version:applied.job.version,health:await health()});
+ for(const [width,name] of [[1440,'desktop'],[420,'narrow']]){await page.setViewportSize({width,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await capture(page,'standalone-'+name+'-Installed-synthetic');}await native.getByRole('button',{name:'Check releases',exact:true}).click();await expect(native.getByRole('heading',{name:'Installed',exact:true})).toBeVisible();await capture(desktop,'native-420-Installed-synthetic');
+ assert.equal(requests.filter(r=>r.name==='prepare').length,1);assert.deepEqual(requests.filter(r=>r.name==='apply').map(r=>({version:r.version,jobId:r.jobId,freshPassword:r.freshPassword})),[{version:'v0.3.1',jobId:job.id,freshPassword:false},{version:'v0.3.1',jobId:job.id,freshPassword:true}]);assert.ok(requests.every(r=>r.csrfPresent&&r.confirmed));assert.ok(!requests.some(r=>r.name==='install'));
+ await page.setViewportSize({width:1440,height:1000});await page.locator('#release-select').selectOption('v0.3.2');await authorize('Download & prepare');await expect(page.locator('#phase')).toHaveText('Ready to apply',{timeout:30000});await authorize('Apply v0.3.2');await expect(page.locator('#phase')).toHaveText('Rolled back',{timeout:30000});await expect(page.locator('#current-version')).toHaveText('v0.3.1');for(const pid of await children(brokerPid))runtimePids.add(pid);assert.equal(await readFile(config.stateRoot+'/fixture.txt','utf8'),'initial synthetic state');assert.deepEqual(await health(),{status:'ready',version:'0.3.1',maintenance:false});await capture(page,'standalone-actual-rollback-synthetic');assert.equal(await page.evaluate(()=>opener),null);
+ await desktop.close();const relayPort=Number(new URL(gateway.origin).port);await gateway.close();await page.reload();await expect(page.locator('#phase')).toHaveText('Rolled back');await expect(page.locator('#current-version')).toHaveText('v0.3.1');assert.equal(await closed(relayPort),true);assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>JSON.stringify({history:history.state,local:{...localStorage},session:{...sessionStorage}}).includes('password')),false);
 });

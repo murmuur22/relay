@@ -12,7 +12,7 @@ test('desktop updater does not offer to install the current release', {timeout:2
  const browser=await chromium.launch({chromiumSandbox:true});
  t.after(async()=>{await browser.close();await gateway.close();await rm(runtime,{recursive:true,force:true});});
  const context=await browser.newContext(),page=await context.newPage();
- const snapshot={mode:'fixture',currentVersion:'v1.2.3',canInstall:true,job:null,available:[{version:'v1.2.3',verified:true,size:100,notes:'Synthetic installed release'},{version:'v1.2.4',verified:true,size:110,notes:'Synthetic new release'}]};
+ const snapshot={mode:'fixture',currentVersion:'v1.2.3',capabilities:{prepare:1,apply:1},canPrepare:true,canInstall:true,job:null,available:[{version:'v1.2.3',verified:true,size:100,notes:'Synthetic installed release'},{version:'v1.2.4',verified:true,size:110,notes:'Synthetic new release'}]};
  await page.route('**/api/updater/check',route=>route.fulfill({json:snapshot}));
  await page.route('**/api/updater/state',route=>route.fulfill({json:snapshot}));
  await browserLogin(page,gateway.origin,runtime);
