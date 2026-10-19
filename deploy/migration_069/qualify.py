@@ -38,26 +38,86 @@ UNIT_FIELDS=dict(ActiveState=('active','inactive','failed','activating','deactiv
  Result=('success','exit-code','signal','core-dump','timeout','resources','protocol','start-limit-hit','oom-kill'))
 DIAG_UNITS=('relay.service','relay-updater-broker.service','relay-updater-web.service',UNIT)
 
+REFUSAL_REASONS={'Untrusted ancestry or permissions':'untrusted-ancestry',
+ 'Path changed during acquisition':'acquisition-drift','Absolute normalized path required':'path-invalid',
+ 'Link or special entry refused':'link-special'}
+DIAG_ERRNOS=(1,2,5,8,12,13,17,20,22,24,28,30,38,40,98,99,110,111)
+
 def error_fields(exc):
  name=type(exc).__name__ if exc is not None else 'None'
- value=dict(errorClass=name if name in ERRORS else 'OtherError',reasonCode='exception' if exc is not None else 'none',errno=None)
+ reason='exception' if exc is not None else 'none'
+ if type(exc) is c.Refused and len(exc.args)==1 and type(exc.args[0]) is str:
+  reason=REFUSAL_REASONS.get(exc.args[0],'exception')
+ value=dict(errorClass=name if name in ERRORS else 'OtherError',reasonCode=reason,errno=None)
  status=None
  for _ in range(4):
   if exc is None:break
-  if isinstance(exc,OSError) and type(exc.errno) is int and exc.errno in (1,2,5,8,12,13,17,20,22,24,28,30,38,98,99,110,111):value['errno']=exc.errno
+  if isinstance(exc,OSError) and type(exc.errno) is int and exc.errno in DIAG_ERRNOS:value['errno']=exc.errno
   if isinstance(exc,subprocess.CalledProcessError) and type(exc.returncode) is int and -127<=exc.returncode<=255:status=exc.returncode
   exc=exc.__context__  # install.run suppresses display, not the typed cause.
  return value,status
 
+def public_source_components():
+ # Stable ordinals only: fixed copied SOURCE, its ancestors and policy.FILES.
+ # No caller path, directory enumeration, symlink target or file contents.
+ paths=[]
+ for name in policy.FILES:
+  target=ROOT/'source'/name
+  for p in (*reversed(target.parents),target):
+   if p not in paths:paths.append(p)
+ c.require(len(paths)<=64,'Public source diagnostic bound')
+ return paths
+
+def source_boundary():
+ paths=public_source_components();entries=[]
+ with contextlib.ExitStack() as stack:
+  fds={}
+  for index,p in enumerate(paths):
+   item=dict(component=index,kind='unknown',mode=None,uid=None,gid=None,nlink=None,errno=None)
+   try:
+    if p==Path('/'):
+     fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW);stack.callback(os.close,fd);fds[p]=fd
+     s=os.fstat(fd)
+    else:
+     if p.parent not in fds:entries.append(item);continue
+     s=os.stat(p.name,dir_fd=fds[p.parent],follow_symlinks=False)
+    item.update(kind='directory' if stat.S_ISDIR(s.st_mode) else 'file' if stat.S_ISREG(s.st_mode) else 'link' if stat.S_ISLNK(s.st_mode) else 'other',
+     mode=stat.S_IMODE(s.st_mode),uid=s.st_uid,gid=s.st_gid,nlink=s.st_nlink)
+    if p!=Path('/') and stat.S_ISDIR(s.st_mode):
+     fd=os.open(p.name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=fds[p.parent])
+     stack.callback(os.close,fd);fds[p]=fd
+   except OSError as exc:item['errno']=exc.errno if type(exc.errno) is int and exc.errno in DIAG_ERRNOS else None
+   entries.append(item)
+ return dict(rootRelation='fixed-source' if policy.ROOT==ROOT/'source' else 'other',
+  defaultRootRelation='fixed-source' if policy.closure.__defaults__==(ROOT/'source',) else 'other',
+  owner=os.geteuid(),components=entries)
+
+def validate_source_boundary(value):
+ policy.exact(value,('rootRelation','defaultRootRelation','owner','components'),'Invalid public source boundary')
+ c.require(value['rootRelation'] in ('fixed-source','other') and value['defaultRootRelation'] in ('fixed-source','other') and
+  type(value['owner']) is int and 0<=value['owner']<=4294967295 and type(value['components']) is list and
+  len(value['components'])==len(public_source_components())<=64,'Invalid public source boundary values')
+ for index,item in enumerate(value['components']):
+  policy.exact(item,('component','kind','mode','uid','gid','nlink','errno'),'Invalid public component')
+  c.require(type(item['component']) is int and item['component']==index and item['kind'] in ('unknown','directory','file','link','other') and
+   all(item[k] is None or type(item[k]) is int and 0<=item[k]<=(4095 if k=='mode' else 4294967295) for k in ('mode','uid','gid','nlink')) and
+   (item['errno'] is None or type(item['errno']) is int and item['errno'] in DIAG_ERRNOS),'Invalid public component values')
+ return value
+
 def validate_worker_diagnostic(value):
- policy.exact(value,('schema','phase','errorClass','reasonCode','errno'),'Invalid diagnostic')
+ keys=('schema','phase','errorClass','reasonCode','errno')
+ policy.exact(value,(*keys,'sourceBoundary') if type(value) is dict and 'sourceBoundary' in value else keys,'Invalid diagnostic')
  c.require(type(value['schema']) is int and value['schema']==1 and value['phase'] in PHASES and
-  value['phase'].startswith('worker-') and value['errorClass'] in ERRORS and value['reasonCode'] in ('none','exception') and
-  (value['errno'] is None or type(value['errno']) is int and value['errno'] in (1,2,5,8,12,13,17,20,22,24,28,30,38,98,99,110,111)), 'Invalid diagnostic values')
+  value['phase'].startswith('worker-') and value['errorClass'] in ERRORS and value['reasonCode'] in ('none','exception',*REFUSAL_REASONS.values()) and
+  (value['reasonCode'] not in REFUSAL_REASONS.values() or value['errorClass']=='Refused') and
+  (value['errno'] is None or type(value['errno']) is int and value['errno'] in DIAG_ERRNOS), 'Invalid diagnostic values')
+ if 'sourceBoundary' in value:
+  c.require(value['phase']=='worker-closure' and value['errorClass']!='None','Invalid public source boundary phase')
+  validate_source_boundary(value['sourceBoundary'])
  return value
 
 def worker_diagnostic(owner=0):
- try:return validate_worker_diagnostic(c.decode(c.bounded_read(ROOT/'worker-diagnostic.json',4096,owner)))
+ try:return validate_worker_diagnostic(c.decode(c.bounded_read(ROOT/'worker-diagnostic.json',16384,owner)))
  except Exception:return None
 
 def diagnostic(q,phase,exc,worker):

@@ -26,7 +26,11 @@ _phase='worker-admission'
 def checkpoint(phase,exc=None):
  global _phase
  fields,_=ql.error_fields(exc)
- value=ql.validate_worker_diagnostic(dict(schema=1,phase=phase,**fields))
+ value=dict(schema=1,phase=phase,**fields)
+ if phase=='worker-closure' and exc is not None:
+  try:value['sourceBoundary']=ql.validate_source_boundary(ql.source_boundary())
+  except Exception:pass  # Diagnostic probe cannot replace the original refusal.
+ value=ql.validate_worker_diagnostic(value)
  c.write_json(R/'worker-diagnostic.json',value)
  _phase=phase
 
