@@ -305,6 +305,8 @@ jobs:
           printf 'PLAYWRIGHT_BROWSERS_PATH=%s/migration-browsers\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SOURCE"
           sudo env -i PATH=/usr/bin:/bin GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" /usr/bin/python3 -B -m deploy.migration_069.qualify admit --source-commit "$CANDIDATE_SOURCE" --ack I_ACCEPT_FRESH_DISPOSABLE_MIGRATION_QUALIFICATION
+          mkdir -m 700 "$RUNNER_TEMP/migration-tests"
+          printf 'TMPDIR=%s/migration-tests\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '26.8.1'
