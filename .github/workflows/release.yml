@@ -293,7 +293,6 @@ jobs:
       contents: read
     env:
       CANDIDATE_SOURCE: ${{ github.sha }}
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/migration-browsers
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -303,6 +302,7 @@ jobs:
           persist-credentials: false
       - name: Read-only fresh-host admission BEFORE provisioning or Relay writes
         run: |
+          printf 'PLAYWRIGHT_BROWSERS_PATH=%s/migration-browsers\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SOURCE"
           sudo env -i PATH=/usr/bin:/bin GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" /usr/bin/python3 -B -m deploy.migration_069.qualify admit --source-commit "$CANDIDATE_SOURCE" --ack I_ACCEPT_FRESH_DISPOSABLE_MIGRATION_QUALIFICATION
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
