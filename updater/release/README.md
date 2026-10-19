@@ -11,6 +11,19 @@ The hosted job builds both browser bundles with dependency lifecycle scripts dis
 
 The control plane is for initial operator installation. Normal broker updates continue to install only `artifact`; this is NOT control-plane self-update. A fresh 0.6.5 installation, or a separately qualified manual web-only bootstrap of an old installation, enables the independent unprivileged web reader to serve compatible runtime presentation files. It never replaces installed broker/web API/configuration/units. Full-byte immutable pins keep old lazy assets available during runtime switching/failure/rollback, bounded by the [delivery policy](../../docs/updater-ui-delivery.md). Existing protocol-1 manifests without `updaterArtifact` remain accepted by the runtime updater, while initial installation requires both artifacts.
 
+## Unreleased separate migration artifact contract
+
+The source-only `deploy.migration_069` package and release-only builder are
+implemented; see [migration policy](../../docs/updater-migration-policy.md).
+They do not change the current two-archive release builder or publisher. A future
+reviewed official preparation job must produce and attest exact real systemd
+receipt pins, and the official release must bind a separate
+`relay-migration-linux-x64.tar.gz` through optional `migrationArtifact` in the
+final attested protocol-1 manifest. Existing runtime/updater descriptors remain
+unchanged. Neither that workflow/producer nor real Linux migration qualification
+exists yet. Source checkout apply/rollback is disabled, and no new tool has been
+published or enabled by local synthetic packaging tests.
+
 ## Trust and anonymous installation
 
 `murmuur22/relay` is the publisher identity, not a required installer login. The verifier downloads public assets using stdlib HTTPS without ambient tokens, proxies or cookies, then invokes `gh attestation verify --bundle` with a cleared environment, a fresh private temporary HOME for Sigstore's trust-root cache, nonexistent GH_CONFIG_DIR, the exact official repository/workflow/tag, and self-hosted runners denied. Deployment machines do not need a GitHub account/login.

@@ -4,9 +4,14 @@ on:
     tags: ['v*.*.*']
   workflow_dispatch:
     inputs:
+      migration-prepare:
+        description: 'Pre-policy disposable systemd matrix for THIS workflow head SHA; unsigned current source target; no publication'
+        type: boolean
+        default: false
+        required: false
       version:
-        description: 'Existing public prerelease tag to qualify; does not publish or promote'
-        required: true
+        description: 'Existing public prerelease tag to qualify; unused for migration-prepare'
+        required: false
         type: string
       upgrade-from:
         description: 'OPTIONAL: v0.4.2 (off), v0.6.1 (Direct to v2), v0.6.2 (v2 to v3), v0.6.3/v0.6.4 (signed runtime upgrade/rollback plus web-only delivery bootstrap)'
@@ -154,7 +159,7 @@ jobs:
           gh release create "$RELEASE_TAG" --repo murmuur22/relay --verify-tag --draft --prerelease --latest=false --title "$RELEASE_TAG — Linux x64 qualification prerelease" --generate-notes "$RUNNER_TEMP/relay-release/relay-release.json" "$RUNNER_TEMP/relay-release/relay-release.attestation.json" "$RUNNER_TEMP/relay-release/relay-linux-x64.tar.gz" "$RUNNER_TEMP/relay-release/relay-updater-linux-x64.tar.gz"
           gh release edit "$RELEASE_TAG" --repo murmuur22/relay --draft=false --prerelease --latest=false
   qualify:
-    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch'
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && !inputs['migration-prepare']
     strategy:
       fail-fast: false
       matrix:
@@ -215,7 +220,7 @@ jobs:
           sudo journalctl -u relay.service -u relay-updater-web.service -u relay-updater-broker.service --no-pager -n 100
       # This job deliberately has no release-write permission or promotion step.
   qualify-upgrade:
-    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && inputs['upgrade-from'] != ''
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && !inputs['migration-prepare'] && inputs['upgrade-from'] != ''
     strategy:
       fail-fast: false
       matrix:
@@ -275,3 +280,126 @@ jobs:
         run: |
           sudo journalctl -u relay.service -u relay-updater-web.service -u relay-updater-broker.service -u relay-qualification-upgrade.service --no-pager -n 100
       # No SSH, credentials, release promotion, receipt fabrication or state uploads.
+  migration-systemd:
+    name: migration-systemd-${{ matrix.mode }}
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && inputs['migration-prepare'] && github.ref == 'refs/heads/feat/relay-069-staged-foundation'
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [loopback, private-lan]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    env:
+      CANDIDATE_SOURCE: ${{ github.sha }}
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/migration-browsers
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          # The dispatched workflow revision is authoritative, NOT a tag, input
+          # string, moving branch or the historical preflight checkout.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Read-only fresh-host admission BEFORE provisioning or Relay writes
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SOURCE"
+          sudo env -i PATH=/usr/bin:/bin GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" /usr/bin/python3 -B -m deploy.migration_069.qualify admit --source-commit "$CANDIDATE_SOURCE" --ack I_ACCEPT_FRESH_DISPOSABLE_MIGRATION_QUALIFICATION
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26.8.1'
+      - name: Test harness guards and build UNSIGNED exact-current-source target
+        run: |
+          python3 -B -m unittest updater.tests.test_migration_linux_harness updater.tests.test_migration_policy updater.tests.test_migration_builder updater.tests.test_migration_package -v
+          npm ci --ignore-scripts
+          npm --prefix updater/ui ci --ignore-scripts
+          npm run build
+          npm run build:updater
+          node node_modules/playwright/cli.js install --with-deps chromium
+          npm prune --omit=dev --ignore-scripts
+          python3 -B -m updater.release.build --source "$GITHUB_WORKSPACE" --browsers "$PLAYWRIGHT_BROWSERS_PATH" --output "$RUNNER_TEMP/migration-candidate" --version v0.6.9
+          # No attestation or signing key is created for this target.
+      - name: Disposable prerequisites and anonymously downloaded signed stock old inputs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+          sudo install -m 0755 "$(command -v node)" /usr/bin/node
+          sudo chmod 0755 /opt
+          mkdir -m 700 "$RUNNER_TEMP/migration-old"
+          test ! -e /var/lib/relay-migration-qualification-output
+          sudo install -d -o root -g root -m 0700 /var/lib/relay-migration-qualification-output
+          for asset in relay-release.json relay-release.attestation.json relay-linux-x64.tar.gz relay-updater-linux-x64.tar.gz; do
+            env -i PATH="$PATH" curl -q --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --max-filesize 1073741824 --output "$RUNNER_TEMP/migration-old/$asset" "https://github.com/murmuur22/relay/releases/download/v0.6.4/$asset"
+          done
+      - name: Actual Linux systemd old-runtime-migration-staged matrix and bound cleanup
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          sudo env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME=/nonexistent GH_CONFIG_DIR=/nonexistent GH_PROMPT_DISABLED=1 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" TMPDIR="$RUNNER_TEMP" /usr/bin/python3 -B -m deploy.migration_069.qualify run --source-commit "$CANDIDATE_SOURCE" --mode "$MODE" --old-release-dir "$RUNNER_TEMP/migration-old" --candidate-dir "$RUNNER_TEMP/migration-candidate" --output /var/lib/relay-migration-qualification-output --ack I_ACCEPT_FRESH_DISPOSABLE_MIGRATION_QUALIFICATION
+      - name: Independent bounded ownership cleanup and exact readback
+        if: always()
+        timeout-minutes: 15
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          # Best effort on workflow cancellation; a killed runner may never execute this.
+          # Never signal a live original supervisor or adopt an unbound/replaced resource.
+          sudo env -i PATH=/usr/bin:/bin LANG=C.UTF-8 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" /usr/bin/python3 -B -m deploy.migration_069.qualify cleanup --source-commit "$CANDIDATE_SOURCE" --mode "$MODE" --output /var/lib/relay-migration-qualification-output --ack I_ACCEPT_FRESH_DISPOSABLE_MIGRATION_QUALIFICATION
+      - name: Expose ONLY sanitized execution and cleanup JSON (also on failure)
+        if: always()
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/migration-output"
+          for kind in execution cleanup; do
+            file="/var/lib/relay-migration-qualification-output/$kind-$MODE.json"
+            if sudo test -f "$file"; then
+              sudo install -o "$(id -u)" -g "$(id -g)" -m 0600 "$file" "$RUNNER_TEMP/migration-output/$kind-$MODE.json"
+            fi
+          done
+          # Protected ownership journal, private hashes and worker output are NOT uploaded.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: migration-execution-${{ matrix.mode }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/migration-output/execution-${{ matrix.mode }}.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: false
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: migration-cleanup-${{ matrix.mode }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/migration-output/cleanup-${{ matrix.mode }}.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: false
+  migration-receipts:
+    needs: migration-systemd
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && inputs['migration-prepare'] && github.ref == 'refs/heads/feat/relay-069-staged-foundation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Read back actual run/job/artifact IDs, digest and whole matrix before reducing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SOURCE: ${{ github.sha }}
+        run: |
+          python3 -B -m deploy.migration_069.receipt_producer --source-commit "$CANDIDATE_SOURCE" --output "$RUNNER_TEMP/migration-receipts"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: migration-receipts-unattested-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/migration-receipts/*.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: false
+      # Deliberately NO attestation/policy build/tag/release/promotion here. Parent
+      # must review actual receipts, then add separately reviewed acceptance and
+      # final artifact ordering. Source checkout production remains disabled.
