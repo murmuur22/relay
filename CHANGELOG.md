@@ -19,7 +19,16 @@ Versions describe the source/application, not a production deployment or a GitHu
 - Give the updater UI's POSIX Playwright test server direct Vite ownership and bounded SIGTERM teardown. Pinned Vite intentionally exits 143 after acknowledged close; qualification requires identity-bound functional completion before TERM and complete closure evidence, never a blanket 143 waiver or conversion to zero. No installed updater/control-plane change is included.
 - Independent review of this isolated candidate remains required before source acceptance or publication.
 
-## [0.6.10] — corrective preparation (unpublished)
+## [0.6.11] — corrective preparation (unpublished)
+
+- Advance only the root package/lock to 0.6.11; preserve immutable v0.6.10 after its failed publisher run with no release/assets. Stable/latest remains v0.6.8 at preparation readback. Independent consumer versions and all runtime, dependency and workflow bytes are unchanged from 0.6.10.
+- Integrate the independently accepted three-path Caddy test-fixture correction: hold distinct backend/edge reservations during setup, retain bounded sanitized Caddy/readiness diagnostics, and add reservation-ownership regressions. The external descriptor handoff remains non-atomic: truthful bounded failure is guaranteed under the accepted fixture contract, not elimination of port races. Original TLS/security assertions, Chromium sandbox and test deadlines remain intact.
+- Rebuild and qualify an exact post-bump source freeze. Earlier macOS 8/8 and local Linux retained-PKI readiness results are separate from new-version and hosted Ubuntu/browser qualification. The Linux certificate-generating helper's openssl ENOENT failure remains retained; historical publisher cause is unknown.
+- Full local suites, audits, packaging/extracted runtime and independent exact-version review remain separate from official Linux preflight, signed artifacts/provenance, both-mode fresh install and unchanged-v0.6.8-control-plane enabled-Gateway upgrade/matching rollback, discovery and stable promotion. No optional Parcels or updater bridge expansion, production access or independent updater replacement is included.
+
+## [0.6.10] — corrective preparation (historical; immutable failed tag)
+
+Later status: v0.6.10 remains immutable after its failed publisher run; no release/assets existed at 0.6.11 preparation readback. Its historical cause is unknown. The original preparation record below is retained, not a current readiness claim.
 
 - Prepare a new root package/lock version rather than changing immutable v0.6.9 source/tag. Shared `version.js`, independent consumer versions/locks and the accepted dependency closure are unchanged.
 - Integrate the independently accepted test-only updater-embedding fixture repair: register pending acquisitions before setup, retire admission synchronously and retain ownership until acknowledged late-resource disposal. Preserve original framing/API assertions, Chromium sandbox and internal deadlines; never turn an expected failed/cancelled probe into a passing test.

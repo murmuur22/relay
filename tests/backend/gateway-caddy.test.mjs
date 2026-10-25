@@ -5,7 +5,7 @@ import https from 'node:https';
 import {mkdtemp,readFile,writeFile,rm,realpath} from 'node:fs/promises';
 import {remotePKI,remoteReference} from '../remote-tls-helper.mjs';
 import {tmpdir} from 'node:os';
-import {spawn,execFileSync} from 'node:child_process';
+import {execFileSync} from 'node:child_process';
 import {chromium,expect} from '@playwright/test';
 import {randomBytes,X509Certificate,createHash} from 'node:crypto';
 import {once} from 'node:events';
@@ -13,34 +13,43 @@ import {WebSocket,WebSocketServer} from 'ws';
 import {caddySnippet} from '../../server/gateway-caddy.mjs';
 import {createGateway} from '../../server/gateway.mjs';
 import {validateGatewayReference} from '../../server/experimental-gateway-config.mjs';
+import {reserveCaddyPorts,startCaddy,stopCaddy,caddyReady} from '../caddy-fixture-helper.mjs';
 const caddy=process.env.RELAY_TEST_CADDY;
-async function freePort(){const s=http.createServer();s.listen(0,'127.0.0.1');await once(s,'listening');const p=s.address().port;await new Promise(r=>s.close(r));return p;}
 for(const remote of [false,true])for(const defaultPort of [true,false])test(`real Caddy ${remote?'mTLS':'loopback HTTP'} ${defaultPort?'port-free':'nondefault-port'} login, bytes, Range, WebSockets, retirement and browser download`, {timeout:90000},async()=>{
  assert.ok(caddy,'Set RELAY_TEST_CADDY to a checksummed real Caddy binary');
- const dir=await realpath(await mkdtemp(tmpdir()+'/relay-caddy-')),bytes=Buffer.from('synthetic-file-contents-0123456789'),password=randomBytes(24).toString('hex');let relay,proxy,browser;const sockets=new Set();
+ const dir=await realpath(await mkdtemp(tmpdir()+'/relay-caddy-')),bytes=Buffer.from('synthetic-file-contents-0123456789'),password=randomBytes(24).toString('hex');let relay,proxy,browser,ports;const sockets=new Set();
  const upstream=http.createServer((req,res)=>{
   if(req.url==='/slow'){res.writeHead(200);res.write('active');const timer=setInterval(()=>res.write('data'),20);res.on('close',()=>clearInterval(timer));return;}
   if(req.url==='/redirect'){res.writeHead(302,{location:'/file'});res.end();return;}
   if(req.url==='/file'){res.setHeader('Content-Type','application/octet-stream');if(req.headers.range==='bytes=2-8'){res.writeHead(206,{'Content-Range':`bytes 2-8/${bytes.length}`});res.end(bytes.subarray(2,9));return;}res.end(bytes);return;}
   res.setHeader('Content-Type','text/html');res.end('<h1>Synthetic app</h1><a href="/file" download>Download</a>');
  });
- const wss=new WebSocketServer({server:upstream});wss.on('connection',ws=>{sockets.add(ws);ws.on('message',m=>ws.send(m));ws.on('close',()=>sockets.delete(ws));});upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+ const wss=new WebSocketServer({server:upstream});wss.on('connection',ws=>{sockets.add(ws);ws.on('message',m=>ws.send(m));ws.on('close',()=>sockets.delete(ws));});
  try{
-  const internal=await freePort(),external=await freePort(),origin=`https://desktop.example.test${defaultPort?'':':'+external}`;
+  upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+  ports=await reserveCaddyPorts();
+  const {internal,external}=ports,origin=`https://desktop.example.test${defaultPort?'':':'+external}`;
   await writeFile(dir+'/cert.cnf','[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=desktop.example.test\n[ext]\nsubjectAltName=DNS:desktop.example.test,DNS:*.apps.example.test,DNS:sibling.example.test\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,digitalSignature,keyEncipherment,keyCertSign\nextendedKeyUsage=serverAuth\n');
   execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-keyout',dir+'/key.pem','-out',dir+'/cert.pem','-config',dir+'/cert.cnf'],{stdio:'ignore'});
   const cert=await readFile(dir+'/cert.pem');
   const ref={version:2,mode:'reverse-proxy',bind:'127.0.0.1',port:internal,desktopOrigin:origin,appBaseDomain:'apps.example.test',trustedProxy:'127.0.0.1',targets:[{id:'files',label:'Synthetic Files',upstream:`http://127.0.0.1:${upstream.address().port}`,webSocketPaths:['/socket'],allowDownloads:true}]};
   const pki=remote?await remotePKI(dir):null;
   if(remote)Object.assign(ref,{...remoteReference(dir,internal),desktopOrigin:origin,targets:ref.targets});
-  relay=await createGateway({port:0,runtime:dir+'/state',profile:'standalone',experimentalGateway:await validateGatewayReference(ref)});
   const settings=await validateGatewayReference(ref);
+  // The edge stays reserved while Relay allocates its live management listener.
+  // The backend handoff is not atomic; createGateway must reject a lost bind.
+  await ports.releaseInternal();
+  relay=await createGateway({port:0,runtime:dir+'/state',profile:'standalone',experimentalGateway:settings});
+  assert.equal(new Set([internal,external,relay.server.address().port]).size,3,'live fixture listener ports must be distinct');
   const fixtureConfig=ranges=>`{\n admin off\n auto_https off\n https_port ${external}\n}\n`+caddySnippet(settings,ranges).replace(' {\n',` {\n bind 127.0.0.1\n tls ${dir}/cert.pem ${dir}/key.pem\n`)+`\nhttps://sibling.example.test:${external} {\n bind 127.0.0.1\n tls ${dir}/cert.pem ${dir}/key.pem\n respond "unrelated sibling"\n}\n`;
   await writeFile(dir+'/Caddyfile',fixtureConfig(['127.0.0.1/32']));
-  execFileSync(caddy,['validate','--config',dir+'/Caddyfile','--adapter','caddyfile'],{env:{...process.env,HOME:dir,XDG_DATA_HOME:dir+'/data',XDG_CONFIG_HOME:dir+'/config'},stdio:'ignore'});
-  proxy=spawn(caddy,['run','--config',dir+'/Caddyfile','--adapter','caddyfile'],{env:{...process.env,HOME:dir,XDG_DATA_HOME:dir+'/data',XDG_CONFIG_HOME:dir+'/config'},stdio:'ignore'});
-  function request(url,path,method='GET',body,headers={}){const u=new URL(url);return new Promise((resolve,reject)=>{const q=https.request({hostname:'127.0.0.1',port:external,servername:u.hostname,ca:cert,path,method,headers:{host:u.host,'sec-fetch-site':'same-origin',...headers}},r=>{const chunks=[];r.on('data',c=>chunks.push(c));r.on('end',()=>resolve({status:r.statusCode,headers:r.headers,bytes:Buffer.concat(chunks),json:()=>JSON.parse(Buffer.concat(chunks))}));});q.on('error',reject);q.end(body===undefined?undefined:JSON.stringify(body));});}
-  let ready=false,lastStatus='no response';for(let i=0;i<100;i++){try{lastStatus=(await request(origin,'/api/auth')).status;if(lastStatus===200){ready=true;break;}}catch(e){lastStatus=e.code;}await new Promise(r=>setTimeout(r,50));}assert.ok(ready,'disposable Caddy ready: '+lastStatus);
+  execFileSync(caddy,['validate','--config',dir+'/Caddyfile','--adapter','caddyfile'],{env:{...process.env,HOME:dir,XDG_DATA_HOME:dir+'/data',XDG_CONFIG_HOME:dir+'/config'},stdio:['ignore','pipe','pipe']});
+  // Caddy cannot inherit the reservation FD. A contender here is a visible
+  // bind/readiness failure, never an allocation retry or TLS exception.
+  await ports.releaseExternal();
+  proxy=startCaddy(caddy,dir);
+  function request(url,path,method='GET',body,headers={},signal){const u=new URL(url);return new Promise((resolve,reject)=>{const q=https.request({hostname:'127.0.0.1',port:external,servername:u.hostname,ca:cert,path,method,signal,headers:{host:u.host,'sec-fetch-site':'same-origin',...headers}},r=>{const chunks=[];r.on('data',c=>chunks.push(c));r.on('end',()=>resolve({status:r.statusCode,headers:r.headers,bytes:Buffer.concat(chunks),json:()=>JSON.parse(Buffer.concat(chunks))}));});q.on('error',reject);q.end(body===undefined?undefined:JSON.stringify(body));});}
+  await caddyReady(proxy,signal=>request(origin,'/api/auth','GET',undefined,{},signal));
   assert.equal((await request(`https://sibling.example.test:${external}`,'/')).bytes.toString(),'unrelated sibling');
   const info=(await request(origin,'/api/auth')).json(),setup=new URL(await readFile(dir+'/state/setup-url.txt','utf8')).hash.slice(1);
   const enrolled=await request(origin,'/api/enroll','POST',{username:'admin',password,setup},{origin,'content-type':'application/json','x-csrf-token':info.csrf});assert.equal(enrolled.status,200);
@@ -85,11 +94,11 @@ for(const remote of [false,true])for(const defaultPort of [true,false])test(`rea
   await browser.close();browser=undefined;
   if(remote&&defaultPort){
    async function restartWith(text){
-    proxy.kill('SIGTERM');await once(proxy,'exit');await writeFile(dir+'/Caddyfile',text);
-    proxy=spawn(caddy,['run','--config',dir+'/Caddyfile','--adapter','caddyfile'],{env:{...process.env,HOME:dir,XDG_DATA_HOME:dir+'/data',XDG_CONFIG_HOME:dir+'/config'},stdio:'ignore'});
+    await stopCaddy(proxy);await writeFile(dir+'/Caddyfile',text);
+    proxy=startCaddy(caddy,dir);
    }
    async function backendDenied(expected){
-    for(let i=0;i<100;i++){try{const status=(await request(origin,'/api/auth')).status;if(expected.includes(status))return;}catch{}await new Promise(r=>setTimeout(r,30));}assert.fail('Caddy must reject invalid backend identity');
+    await caddyReady(proxy,signal=>request(origin,'/api/auth','GET',undefined,{},signal),expected,30);
    }
    const good=fixtureConfig(['127.0.0.1/32']),authLine=`tls_client_auth ${dir}/client.pem ${dir}/client.key`;
    for(const credential of ['wrong-ca','wrong-name','wrong-usage','expired-client']){
@@ -100,13 +109,24 @@ for(const remote of [false,true])for(const defaultPort of [true,false])test(`rea
    await restartWith(good.replace('tls_server_name backend.example.test','tls_server_name wrong.example.test'));await backendDenied([502]);
    let expiredRequests=0;const expiredBackend=https.createServer(pki['expired-server'],(q,r)=>{expiredRequests++;r.end('must not reach an expired server');});await new Promise(r=>expiredBackend.listen(0,'127.0.0.1',r));
    try{await restartWith(good.replace(`reverse_proxy 127.0.0.1:${internal}`,`reverse_proxy 127.0.0.1:${expiredBackend.address().port}`));await backendDenied([502]);assert.equal(expiredRequests,0,'Caddy never sends HTTP credentials to an expired backend');}finally{expiredBackend.closeAllConnections();await new Promise(r=>expiredBackend.close(r));}
-   await restartWith(good);let restored=false;for(let i=0;i<100;i++){try{if((await request(origin,'/api/auth')).status===200){restored=true;break;}}catch{}await new Promise(r=>setTimeout(r,30));}assert.ok(restored,'valid backend restored after negative cases');
+   await restartWith(good);await caddyReady(proxy,signal=>request(origin,'/api/auth','GET',undefined,{},signal),[200],30);
   }
-  proxy.kill('SIGTERM');await once(proxy,'exit');
+  await stopCaddy(proxy);
   await writeFile(dir+'/Caddyfile',fixtureConfig(['192.0.2.0/24']));
-  proxy=spawn(caddy,['run','--config',dir+'/Caddyfile','--adapter','caddyfile'],{env:{...process.env,HOME:dir,XDG_DATA_HOME:dir+'/data',XDG_CONFIG_HOME:dir+'/config'},stdio:'ignore'});
-  let denied=false;for(let i=0;i<100;i++){try{if((await request(origin,'/api/auth')).status===403){denied=true;break;}}catch{}await new Promise(r=>setTimeout(r,50));}assert.ok(denied,'explicit source policy denies with intended Host/SNI, without public DNS');
+  proxy=startCaddy(caddy,dir);
+  await caddyReady(proxy,signal=>request(origin,'/api/auth','GET',undefined,{},signal),[403]);
   assert.equal((await request(origin,'/api/auth','GET',undefined,{'x-forwarded-for':'192.0.2.1'})).status,403);
   assert.equal((await request(`https://sibling.example.test:${external}`,'/')).bytes.toString(),'unrelated sibling');
- }finally{await browser?.close();if(proxy&&proxy.exitCode===null){proxy.kill('SIGTERM');await once(proxy,'exit');}await relay?.close();for(const s of sockets)s.terminate();wss.close();upstream.closeAllConnections();await new Promise(r=>upstream.close(r));await rm(dir,{recursive:true,force:true});}
+ }finally{
+  // A failed closer must not skip the other owned resources. Keep state on an
+  // unacknowledged close instead of erasing the evidence and claiming cleanup.
+  const results=await Promise.allSettled([
+   Promise.resolve().then(()=>browser?.close()),Promise.resolve().then(()=>proxy&&stopCaddy(proxy)),
+   Promise.resolve().then(()=>relay?.close()),Promise.resolve().then(()=>ports?.close()),
+   Promise.resolve().then(async()=>{for(const s of sockets)s.terminate();wss.close();upstream.closeAllConnections();if(upstream.listening)await new Promise((resolve,reject)=>upstream.close(e=>e?reject(e):resolve()));})
+  ]);
+  const errors=results.filter(r=>r.status==='rejected').map(r=>r.reason);
+  if(errors.length)throw new AggregateError(errors,'Caddy fixture cleanup not acknowledged');
+  await rm(dir,{recursive:true,force:true});
+ }
 });

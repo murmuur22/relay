@@ -10,7 +10,13 @@ macOS fixture establishes that these units, Chromium or provenance verification
 work on a Linux machine. The qualification command below must actually succeed
 before recording that evidence.
 
-## Corrective 0.6.10 preparation (unpublished)
+## Corrective 0.6.11 preparation (unpublished)
+
+Root source 0.6.11 integrates only the accepted Caddy test-fixture ownership/diagnostics correction plus intentional version/docs updates relative to immutable v0.6.10. No runtime, dependency or workflow feature changes are included. The handoff remains non-atomic; distinct reservations and bounded truthful failure do not eliminate races. Immutable v0.6.10 is a failed publisher tag with no release/assets at readback; v0.6.8 remains stable/latest and historical failure evidence is retained. Local macOS suites, local Linux readiness and unsigned Linux-byte packaging are distinct from official hosted Ubuntu/browser/systemd and signed provenance qualification; the earlier Linux openssl helper failure remains failed, with historical publisher cause unknown.
+
+Before a new immutable tag, inspect the exact 0.6.11 workflow closure and route for v0.6.8 enabled-v3 Gateway upgrade and matching-state rollback in both loopback and private-LAN modes, retaining that installed old control plane. Execute those signed hosted gates after public prerelease/provenance, before promotion; local route mapping is not execution. Optional Parcels/development hybrid and v0.6.5-only presentation bridge/bootstrap are not expanded into standalone runtime-release prerequisites. Independent exact-version review is next; sourceAccepted=false and releaseReady=false until their separate gates clear. This preparation does not stage, commit, push, tag, dispatch, mutate releases, access production or replace an updater. Publication approval does not authorize production, private Caddy/DNS/trust/OS changes or deployment.
+
+## Historical corrective 0.6.10 preparation (unpublished at that phase)
 
 Root source version 0.6.10 is a corrective qualification candidate, not a published or installation-ready artifact. Immutable v0.6.9 remains unchanged after its failed publication qualification; its historical initial exception is not attributed to the accepted local test-fixture correction. The intended signed runtime upgrade/matching-state rollback baseline is v0.6.8 in both loopback and private-LAN modes, preserving that installed control plane and enabled v3 mTLS Gateway policy. A stock v0.6.4 compatibility run is a separate ledger, not evidence for an operator's mixed installation. The optional v0.6.5-only presentation bootstrap does not execute for 0.6.10 and is not part of this runtime release. Official Linux, signed artifact/provenance and installation gates remain unexecuted until separately recorded. Preparation/publication never authorizes production access, deployment, network/trust changes or updater replacement.
 
