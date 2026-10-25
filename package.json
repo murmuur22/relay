@@ -17,8 +17,10 @@
     "demo:jellyfin": "node tools/demo-jellyfin.mjs",
     "demo:jellyfin:verify": "node --test tests/demo-jellyfin.test.mjs",
     "open": "node tools/open-local.mjs",
+    "test:security:consumers": "node --test --test-concurrency=1 --test-timeout=90000 tests/backend/consumer-selection.test.mjs tests/backend/dependency-regressions.test.mjs tests/backend/vite-boundaries.test.mjs",
+    "test:optional:parcels": "node --test --test-concurrency=1 --test-timeout=90000 tests/optional/parcels-security.test.mjs",
     "test:backend": "node --test --test-concurrency=1 --test-timeout=100000 tests/backend/*.test.mjs",
-    "test": "npm run test:backend && node --test --test-concurrency=1 --test-timeout=90000 tests/frontend/*.test.mjs && node tests/integration/experience.mjs",
+    "test": "npm run test:backend && node --test --test-concurrency=1 --test-timeout=90000 tests/frontend/*.test.mjs && npm run test:optional:parcels && node tests/integration/experience.mjs",
     "benchmark": "node tools/benchmark.mjs"
   },
   "dependencies": {

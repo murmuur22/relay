@@ -17,7 +17,7 @@ npm run test:http
 npm run test:fixture
 ```
 
-Pinned: three 0.186.0, vite 8.3.0, @playwright/test 1.63.0. Node 26.8.1 was exercised. If the matching Chromium is absent, install it with `npx playwright install chromium` first. Tests use sandboxed Chromium.
+Pinned: three 0.186.0, vite 8.3.5, @playwright/test 1.63.0. Node 26.8.1 was exercised. If the matching Chromium is absent, install it with `npx playwright install chromium` first. Tests use sandboxed Chromium.
 
 - `test:unit`: pure byte/phase-to-geometry behavior.
 - `test`: real browser against Vite, with explicitly synthetic HTTP responses. Captures `screenshots/updater-synthetic-*.png` at repository root. It tests UI behavior, not the broker.

@@ -139,6 +139,16 @@ This project is on a Desktop that may sync through iCloud. Runtime files and the
 
 ## Tests
 
+### Standalone dependency-security gate (no optional app installation)
+
+Install the two required, independently locked consumers with `npm ci --ignore-scripts` and `npm --prefix updater/ui ci --ignore-scripts`, then run `npm run test:security:consumers`. This fast loopback/unit group checks Vite file/CORS boundaries and bounded source-map handling in both Relay and the independent updater UI, plus Relay's devalue regression. A selected package missing its dependencies is an error, never an implicit skip or fallback to another package. Both release workflows select this command; neither installs Parcels or Keepsakes.
+
+Parcels is a separate optional development integration, not a standalone release prerequisite or payload. To select its equivalent dependency-security coverage explicitly, run `npm --prefix integrations/parcels ci --ignore-scripts` followed by `npm run test:optional:parcels`. That command also fails if its selected dependencies are absent. Its entry point lives under `tests/optional/`, outside the backend glob. No separate upstream repository is changed.
+
+### Full development/hybrid experience (optional apps required)
+
+The existing `npm test` remains the full development-profile suite, including explicitly selected `npm run test:optional:parcels` security coverage, native Parcels/Keepsakes and synthetic streamed apps through `tests/integration/experience.mjs`; it is not a standalone-only gate. The optional security command can also be run separately after development setup. Keepsakes uses its frozen uv environment. Exterminator coverage is a separate opt-in, read-only external-source fixture documented in [form compatibility](docs/gateway-form-compatibility.md); no installed Exterminator is part of Relay's runtime archive. Updater unit, compiled HTTP/HMAC browser, lifecycle, and signed Linux install/upgrade/rollback gates remain distinct evidence tiers. Counts describe coverage, not quality or a test-removal target.
+
 After setup/build, provision a checksummed temporary Caddy binary and set `RELAY_TEST_CADDY` to its absolute path as described in [Caddy qualification](docs/caddy-gateway.md), then run:
 
 ```sh

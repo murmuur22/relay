@@ -267,7 +267,6 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  for(const method of ['patch','delete'])app[method]('/api/windows/:id',operation(async(req,m)=>{await permit(req,req.params.id);if(method==='patch')return m.patch(req.params.id,req.body||{});if(!m.windows.has(req.params.id)&&!m.resources.has(req.params.id)&&!m.pendingRetirement.has(req.params.id)&&![...m.pendingCleanup.keys()].some(w=>w.id===req.params.id))throw Error();experimental?.closeWindow(req.session,req.params.id);await m.remove(req.params.id);return {closed:true};}));
  let health={checkedAt:0,keepsakes:false,parcels:false},probing;
  const webHealth=new HealthProbes({gatewayOrigin:origin});
- const appHealth=a=>webHealth.probe(a);
  app.get('/api/status',wrap(async(req,res)=>{
   if(req.session.user.preferences?.showAppStatus===false)return res.json({});
   const session=req.session;

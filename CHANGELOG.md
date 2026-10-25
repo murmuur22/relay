@@ -5,6 +5,12 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
+- Align current guides with implemented status modes: personal Native bookmarks are not monitored, managed/Gateway status uses bounded Relay-side checks, and Native device CORS checks belong to explicit wizard tests. Correct the development enrollment path and independently pinned updater UI tooling version. Runtime, recovery, supported baselines and dependency pins are unchanged.
+
+- Remove the unused internal gateway status pass-through helper; active status probes retain their live-observer, preference and definition checks. Add an authenticated two-observer regression for a hidden observer during a held managed Native check. No API, state schema, resource lifecycle or dependency pin changes.
+
+- Separate standalone dependency-security qualification (Relay and independent updater UI) from explicitly selected optional Parcels coverage. Reuse the same Vite file/CORS and source-map assertions across all three consumers; missing selected dependencies still fail. Release workflows install only required consumers. Keep native/hybrid demos and compatibility/security/lifecycle/rollback tests; no runtime feature, dependency pin or state format is removed.
+
 - Local 0.6.9 helper-repair candidate only: let Relay own SIGTERM-driven streamed-browser shutdown instead of racing Playwright's default handler, which treats a second close as forced escalation. Browser sandbox, existing assertions and shutdown deadlines remain unchanged; SIGINT behavior is not qualified by this change.
 - Give the updater UI's POSIX Playwright test server direct Vite ownership and bounded SIGTERM teardown. Pinned Vite intentionally exits 143 after acknowledged close; qualification requires identity-bound functional completion before TERM and complete closure evidence, never a blanket 143 waiver or conversion to zero. No installed updater/control-plane change is included.
 - Independent review of this isolated candidate remains required before source acceptance or publication.

@@ -4,7 +4,7 @@ For the 0.6.0 installed opt-in configuration path, see [gateway deployment](gate
 
 ## Unreleased scoped follow-up
 
-The redundant Add Jellyfin target button is removed, not the configured service/target or its default options. Numbered target headings and generic target creation retain in-memory drafts, normal selection and administrator ACLs. Gateway status exposes passive real HTTP response observations only for the calling live session/app route, without disclosing fixed upstream addresses or generating new probes. HTTP challenges/errors mean Reached with readiness unknown; no observed traffic remains Unknown with an explicit explanation.
+The redundant Add Jellyfin target button is removed, not the configured service/target or its default options. Numbered target headings and generic target creation retain in-memory drafts, normal selection and administrator ACLs. Gateway status actively makes bounded HEAD checks to each authorized app's validated fixed upstream plus entryPath, without launching a route, using private route credentials or disclosing upstream addresses. Checks use bounded caching and live observer/grant/preference/definition checks. HTTP challenges/errors mean a server responded with readiness unknown; policy/admission failures or unavailable monitoring remain Unknown / Not monitored, not proof of an outage. See [server status](server-status.md) for the current contract; the original local-only evidence below remains historical.
 
 Experimental branding remains. Scoped source regression/review evidence cannot establish ordinary Safari trust, public DNS/TLS, all upstream apps or long-running media/load compatibility; the limitations below remain accessible. No production target was deleted or edited.
 
