@@ -23,7 +23,9 @@ async function fixture(fn){
    await page.route('**/api/windows',async route=>{if(once||route.request().method()!=='POST'){await route.continue();return;}once=true;try{const response=await route.fetch();assert.equal(response.status(),200);const body=await response.json();assert.equal(body.url,address+'/before');observed(body);await held;await route.fulfill({response});}finally{done();}});
    await page.getByRole('button',{name:'Open Race app',exact:true}).dblclick();return ready;
   }
-  async function settle(){release();await routeDone;await page.unrouteAll({behavior:'wait'});
+  async function settle(){release();await routeDone;
+   // Keep the one-shot route passing through until browser teardown: fulfillment
+   // acknowledgement does not mean the page's post-launch session fetch settled.
    // Browser-side fetch consumption plus a bounded negative observation window.
    await page.waitForFunction(()=>!document.querySelector('[aria-label="Open Race app"]:disabled'));
    await page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,300)));
