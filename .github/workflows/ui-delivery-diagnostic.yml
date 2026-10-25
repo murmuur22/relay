@@ -25,10 +25,10 @@ jobs:
     env:
       DIAGNOSTIC_SHA: ${{ inputs['diagnostic-sha'] }}
       ACKNOWLEDGE: ${{ inputs.acknowledge }}
-      RUNNER_KIND: ${{ runner.environment }}
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-launch-browsers
     steps:
       - name: Exact admission before checkout or provisioning
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
         shell: bash
         run: |
           set -euo pipefail
@@ -62,6 +62,8 @@ jobs:
         with:
           python-version: '3.11'
       - name: Locked minimal prerequisites and exact kit admission
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-launch-browsers
         shell: bash
         run: |
           set -euo pipefail
@@ -78,6 +80,9 @@ jobs:
           # Only the existing reviewed preflight policy, on this admitted hosted VM.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 > "$RUNNER_TEMP/relay-launch-private/namespaces.log"
       - name: One bounded six-mode instrumented diagnostic
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-launch-browsers
         shell: bash
         run: |
           set -euo pipefail
@@ -85,6 +90,8 @@ jobs:
           python3 route/diagnostics/launch-linux/supervise.py run
       - name: Owned cgroup cleanup and sanitized payload inspection
         if: always()
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
         shell: bash
         run: |
           set -euo pipefail
