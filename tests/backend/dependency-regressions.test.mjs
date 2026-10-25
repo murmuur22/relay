@@ -12,7 +12,7 @@ test('devalue rejects shared-pool Buffer rather than serializing unrelated backi
  const decoded=parse(serialized);assert.equal(decoded.byteLength,2);assert.equal(decoded.buffer.byteLength,2,'shared backing bytes must not escape');
  assert.deepEqual([...parse(stringify(new Uint8Array([7,8])))],[7,8]);
 });
-for(const base of ['../../node_modules/source-map-js','../../updater/ui/node_modules/source-map-js'])test('indexed source-map offsets are bounded with valid maps retained: '+base,()=>{
+for(const base of ['../../node_modules/source-map-js','../../updater/ui/node_modules/source-map-js','../../integrations/parcels/node_modules/source-map-js'])test('indexed source-map offsets are bounded with valid maps retained: '+base,()=>{
  const {SourceMapConsumer}=require(base);
  assert.throws(()=>new SourceMapConsumer(indexed(10000001)),/must not exceed/);
  assert.throws(()=>new SourceMapConsumer(indexed(5000000,indexed(5000001))),/nested/);

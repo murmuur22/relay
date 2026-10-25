@@ -2,6 +2,10 @@
  import {tick,onDestroy,onMount} from 'svelte';
  import Icon from './Icon.svelte';
  import IconPicker from './IconPicker.svelte';
+ import GatewaySettings from './GatewaySettings.svelte';
+ let creatingTarget=$state(false),savedTarget=$state('');
+ async function targetSaved(id){await loadGateway();if(!gatewayLive)return;if(!gateway.targets.some(t=>t.id===id))throw Error('Target saved, but options could not be refreshed. Refresh Gateway options before saving the app.');draft.gatewayTarget=id;savedTarget=id;creatingTarget=false;await tick();document.querySelector('.app-wizard select')?.focus();}
+ async function cancelTarget(){creatingTarget=false;await tick();document.querySelector('.app-wizard .create-target')?.focus();}
  import {pixelIcons} from '../server/pixel-icons.mjs';
  const icons=['globe','folder','notes','media','terminal',...Object.keys(pixelIcons)];
  import {webAddress,nativeAddress,origins,checkDevice,statusLabel,statusDetail} from './webapps.js';
@@ -30,6 +34,10 @@
  <p class="muted">Step {draft.step} of 5</p><h2 tabindex="-1" bind:this={heading}>{steps[draft.step-1]}</h2>
  {#if error}<p role="alert">{error}</p>{/if}
  {#if draft.mode==='gateway'&&gatewayError}<p role="alert">{gatewayError}</p><button type="button" onclick={loadGateway} disabled={gatewayLoading}>Refresh Gateway options</button>{/if}
+ {#if creatingTarget}
+  <GatewaySettings {api} {onbusy} targetOnly={true} onsaved={targetSaved} oncancel={cancelTarget}/>
+ {:else}
+ {#if savedTarget}<p role="status">Target {savedTarget} was saved separately. Cancel app leaves this target saved. Saving a target does not create an app or grant access.</p>{/if}
  <form onsubmit={e=>{e.preventDefault();draft.step===5?action(()=>onsave(payload()),false):go(draft.step+1);}}>
  <fieldset disabled={busy} class="form-grid"><legend class="sr-only">{steps[draft.step-1]}</legend>
  {#if draft.step===1}
@@ -40,7 +48,7 @@
   <p class="full-width muted">Native runs in your device's browser and connects directly to the app. Streamed runs in an isolated, ephemeral browser on Relay. Each login has its own cookies; login storage is not shared or permanent.</p>
  {:else if draft.step===2}
   <label>App name<input bind:value={draft.label} required maxlength="64"/></label>
-  {#if draft.mode==='gateway'}<label>Gateway target<select bind:value={draft.gatewayTarget} required><option value="">Choose configured target</option>{#each gateway.targets as target}<option value={target.id}>{target.label}</option>{/each}</select></label><p class="full-width muted">Only administrator-configured targets are available. No upstream address or credential is stored in this app definition.</p>{:else}<label>Address<input bind:value={draft.address} required placeholder="https://app.example" autocomplete="off"/></label>
+  {#if draft.mode==='gateway'}<label>Gateway target<select bind:value={draft.gatewayTarget} required><option value="">Choose configured target</option>{#each gateway.targets as target}<option value={target.id}>{target.label} · {target.id}</option>{/each}</select></label><div class="full-width"><button class="create-target" type="button" disabled={gatewayLoading||!gateway.enabled||gateway.targets.length>=8} onclick={()=>creatingTarget=true}>Create new target</button></div><p class="full-width muted">Targets are shared Gateway configuration, saved separately from this app. No upstream address or credential is stored in this app definition.</p>{:else}<label>Address<input bind:value={draft.address} required placeholder="https://app.example" autocomplete="off"/></label>
   <p class="full-width muted">Enter an explicit http:// or https:// address. For a bare IP, choose the protocol yourself. No URL credentials or fragments.</p>{/if}
   <label>Icon<select bind:value={draft.icon}>{#each icons as icon}<option value={icon}>{pixelIcons[icon]?.label||icon}</option>{/each}</select></label><div class="icon-preview"><Icon name={draft.icon}/></div><div class="full-width"><IconPicker choices={icons} selected={draft.icon} onchoose={id=>draft.icon=id}/></div>
  {:else if draft.step===3}
@@ -60,7 +68,8 @@
   {#if image}<img class="app-preview full-width" src={image} alt="Streamed preview"/>{/if}
  {:else if draft.step===4}
   <p class="full-width muted">Admins can access all enabled apps. Choose active users to grant access at save time.</p>
-  {#each users.filter(u=>u.role!=='admin'&&!u.disabled) as u}<label class="check"><input type="checkbox" bind:group={draft.userIds} value={u.id}/>Allow {u.username}</label>{/each}
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div class="grant-table full-width" role="region" aria-label="App access table" tabindex="0"><table aria-label="App access"><thead><tr><th scope="col">User</th><th scope="col">Access</th></tr></thead><tbody>{#each users.filter(u=>u.role!=='admin'&&!u.disabled) as u (u.id)}<tr><th scope="row"><label for={'app-grant-'+u.id}>{u.username}</label>{#if u.displayName!==u.username}<small>{u.displayName}</small>{/if}</th><td><input id={'app-grant-'+u.id} type="checkbox" bind:group={draft.userIds} value={u.id}/></td></tr>{/each}</tbody></table></div>
   {#if !users.some(u=>u.role!=='admin'&&!u.disabled)}<p class="full-width">No active non-admin users. You can grant access later in Users.</p>{/if}
  {:else}
   <dl class="wizard-review full-width"><dt>Name</dt><dd>{draft.label}</dd><dt>{draft.mode==='gateway'?'Gateway target':'Address'}</dt><dd>{draft.mode==='gateway'?draft.gatewayTarget:draft.address}</dd><dt>Browser</dt><dd>{draft.mode==='gateway'?'Gateway · experimental desktop window':draft.mode==='stream'?'Streamed · isolated ephemeral browser':'Native · '+(draft.openMode==='tab'?'new tab':'desktop window')}</dd><dt>Icon</dt><dd>{draft.icon}</dd><dt>Additional origins</dt><dd>{draft.originText||'None'}</dd><dt>Access</dt><dd>Admins{#each users.filter(u=>draft.userIds.includes(u.id)) as u}, {u.username}{/each}</dd></dl>
@@ -68,4 +77,8 @@
  {/if}
  <div class="full-width wizard-actions">{#if draft.step>1}<button type="button" onclick={()=>go(draft.step-1)}>Back</button>{/if}<button disabled={draft.mode==='gateway'&&!gateway.enabled}>{draft.step===5?'Save app':'Next'}</button>{#if busy}<span role="status">Working…</span>{/if}</div>
  </fieldset><button type="button" disabled={busy&&!cancellable} onclick={cancel}>Cancel</button></form>
+ {/if}
 </section>
+<style>
+ .grant-table{min-width:0;max-width:100%;overflow-x:auto}.grant-table table{width:100%;border-collapse:collapse;text-align:left;font-size:12px}.grant-table th,.grant-table td{padding:8px 12px;border-bottom:1px solid #57534e}.grant-table th{overflow-wrap:anywhere}.grant-table label{cursor:pointer}.grant-table small{display:block;color:#a8a29e;font-weight:normal}.grant-table input{width:18px;height:18px;accent-color:#d6d3d1}.grant-table:focus-visible,.grant-table input:focus-visible{outline:1px dashed #fafaf9;outline-offset:3px}
+</style>

@@ -161,7 +161,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   const s=getSession(req);if(!s)return res.status(401).json({error:'Authentication required'});req.session=s;next();
  });
  app.use('/api',(req,res,next)=>{if(!['GET','HEAD'].includes(req.method)&&(req.headers.origin!==origin||req.headers['x-csrf-token']!==req.session.csrf))return res.status(403).json({error:'Origin and CSRF required'});next();});
- app.get('/api/session',wrap(async(req,res)=>{const s=req.session,apps=await personalFor(req);res.json({csrf:s.csrf,user:publicUser(s.user),apps:[...apps.map(a=>({...publicApp(a),...(a.personal?{personal:true}:{})})),...systemApps(s.user)],windows:[...s.manager.windows.values()].filter(w=>apps.some(a=>a.id===w.appId)),limits:{maxStreams:2}});}));
+ app.get('/api/session',wrap(async(req,res)=>{const s=req.session,apps=await personalFor(req);res.json({csrf:s.csrf,user:publicUser(s.user),apps:[...apps.map(a=>({...publicApp(a),...(a.personal?{personal:true}:{})})),...systemApps(s.user)],windows:[...s.manager.windows.values()].filter(w=>apps.some(a=>a.id===w.appId)).map(w=>personalLaunches.has(w)?{...w,personalLaunchId:personalLaunches.get(w)}:w),limits:{maxStreams:2}});}));
  updaterRoutes(app,{config:updaterSettings,wrap,getSession,admit});
  app.get('/api/gateway/config',(req,res)=>res.json(experimental?.available()??{enabled:false,targets:[]}));
  for(const action of ['launch','end'])app.post('/api/gateway/'+action,wrap(async(req,res)=>{if(!experimental)throw fail(503,'Experimental gateway is not configured');res.json(experimental[action](req.session,req.body));},{queued:false}));
@@ -172,7 +172,11 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  app.post('/api/desktop/folders',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s)=>desktop.folder(s,req.body)))));
  app.post('/api/desktop/move',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.batch(s,apps,req.body))),{queued:false}));
  app.post('/api/desktop/sort',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.sort(s,apps,req.body))),{queued:false}));
- app.patch('/api/desktop/items/:id',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.patch(s,apps,req.params.id,req.body)))));
+ app.patch('/api/desktop/items/:id',wrap(async(req,res)=>{
+  const data=await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.patch(s,apps,req.params.id,req.body));
+  if(data.updatedAppId){const retired=await Promise.allSettled([...sessions.values()].filter(s=>s.userId===req.session.userId).map(s=>s.manager.remove(data.updatedAppId)));if(retired.some(r=>r.status==='rejected'))throw fail(503,'Personal app saved; old window cleanup incomplete. Reload your desktop before reopening.');}
+  res.json(data);
+ }));
  app.delete('/api/desktop/items/:id',wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.remove(s,apps,req.params.id)))));
  app.get('/api/desktop/icons/:id',wrap(async(req,res)=>{const bytes=await desktop.readIcon(req.session.userId,desktopAuthority(req),req.params.id);res.set({'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}).send(bytes);}));
  const commitIcon=wrap(async(req,res)=>res.json(await desktop.run(req.session.userId,desktopAuthority(req),(s,apps)=>desktop.upload(req.session.userId,s,apps,req.params.id,req.normalizedIcon))));
@@ -242,7 +246,16 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  app.post('/api/logout',wrap(async(req,res)=>{const complete=await revoke(req.session);res.clearCookie('relay_session',{path:'/',httpOnly:true,sameSite:'strict'});if(!complete)throw cleanupError();res.json({ok:true});}));
  const operation=fn=>wrap(async(req,res)=>{try{res.json(await fn(req,req.session.manager));}catch(e){throw fail(e.status||400,e.status?e.message:'Invalid window operation');}});
  const permit=async(req,id)=>{if(!(await personalFor(req)).some(a=>a.id===id))throw fail(403,'Service access denied');};
- app.post('/api/windows',operation(async(req,m)=>{await permit(req,req.body?.appId);if(accounts.state.services.find(a=>a.id===req.body.appId)?.mode==='gateway'&&!experimental)throw fail(503,'Experimental gateway is not configured');return m.open(req.body.appId);}));
+ const personalLaunches=new WeakMap();
+ app.post('/api/windows',operation(async(req,m)=>{await permit(req,req.body?.appId);if(accounts.state.services.find(a=>a.id===req.body.appId)?.mode==='gateway'&&!experimental)throw fail(503,'Experimental gateway is not configured');const w=await m.open(req.body.appId);if(!req.body.appId.startsWith('personal-'))return w;if(!personalLaunches.has(w))personalLaunches.set(w,token());return {...w,personalLaunchId:personalLaunches.get(w)};}));
+ // Internal late-outcome cleanup: exact original session/window, never an ID-only
+ // DELETE that could retire a newer reopen. Valid current definitions stay owned.
+ app.post('/api/windows/:id/retire-personal-launch',operation(async(req,m)=>{
+  const body=req.body;if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length!==1||typeof body.personalLaunchId!=='string'||!/^[a-f0-9]{64}$/.test(body.personalLaunchId)||!req.params.id.startsWith('personal-'))throw fail(400,'Invalid personal launch cleanup');
+  const apps=await personalFor(req),w=m.windows.get(req.params.id);
+  if(!w||personalLaunches.get(w)!==body.personalLaunchId||apps.some(a=>a.id===w.appId&&a.address===w.url&&a.openMode===w.openMode))return {retired:false};
+  await m.remove(w.id);return {retired:true};
+ }));
  for(const action of ['navigate','reload'])app.post('/api/windows/:id/'+action,wrap(async(req,res)=>{
   await permit(req,req.params.id);
   if(action==='navigate'&&(!req.body||Object.keys(req.body).length!==1||!['back','forward'].includes(req.body.direction)))throw fail(400,'Expected a back or forward direction only');
@@ -279,15 +292,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   wss.handleUpgrade(req,socket,head,ws=>{ws.on('error',()=>{});s.sockets.add(ws);ws.once('close',()=>s.sockets.delete(ws));s.manager.attach(match[1],ws);});
  });
  if(profile==='development')app.use('/native/:service',(req,res,next)=>{const s=req.session;const service=accounts.state.services.find(a=>a.template===req.params.service&&a.mode==='native'&&accounts.allowed(s.user,a));if(!service)return res.status(403).json({error:'Service access denied'});res.serviceId=service.id;s.responses.add(res);res.once('close',()=>s.responses.delete(res));next();});
- let nativeService;
- try{if(native)nativeService=await installNative(app,{root:ROOT,origin,port:keepsakesPort,data});}catch(e){await new Promise(r=>server.close(r));throw e;}
- app.use(express.static(ROOT+'dist',{index:'index.html'}));app.use((req,res)=>res.status(404).json({error:'Not found'}));
- app.use((err,req,res,next)=>res.status(err.status||500).json({error:err.status?err.message:'Request rejected'}));
- await rm(runtime+'/bootstrap-url.txt',{force:true});
- if(setup){await writeFile(runtime+'/setup-url.txt',origin+'/#'+setup,{mode:0o600});await chmod(runtime+'/setup-url.txt',0o600);}
- await writeFile(runtime+'/open-url.txt',origin+'/',{mode:0o600});await chmod(runtime+'/open-url.txt',0o600);
- if(gatewaySettings)try{experimental=await startPersonalSafeEdge(gatewaySettings);}catch(e){await nativeService?.close();await webHealth.close();await transport.close();await new Promise(r=>server.close(r));throw e;}
- let closing;
+ let nativeService,closing;
  const close=()=>{
   // Irreversible, including failed cleanup and explicit retries, before any await.
   shutdownIntent=true;
@@ -303,5 +308,19 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
    if(complete.some(ok=>!ok)||services.some(r=>r.status==='rejected'))throw cleanupError();
   })().finally(()=>{closing=null;});
  };
+ try{
+  if(native)nativeService=await installNative(app,{root:ROOT,origin,port:keepsakesPort,data});
+  app.use(express.static(ROOT+'dist',{index:'index.html'}));app.use((req,res)=>res.status(404).json({error:'Not found'}));
+  app.use((err,req,res,next)=>res.status(err.status||500).json({error:err.status?err.message:'Request rejected'}));
+  await rm(runtime+'/bootstrap-url.txt',{force:true});
+  if(setup){await writeFile(runtime+'/setup-url.txt',origin+'/#'+setup,{mode:0o600});await chmod(runtime+'/setup-url.txt',0o600);}
+  await writeFile(runtime+'/open-url.txt',origin+'/',{mode:0o600});await chmod(runtime+'/open-url.txt',0o600);
+  if(gatewaySettings)experimental=await startPersonalSafeEdge(gatewaySettings);
+ }catch(error){
+  // Startup has already accepted management connections, possibly sessions.
+  // Use the same irreversible admission/revocation/socket cleanup as shutdown.
+  try{await close();}catch(cleanup){throw new AggregateError([error,cleanup],'Relay startup failed; cleanup incomplete',{cause:error});}
+  throw error;
+ }
  return {origin,app,server,accounts,sessions,retiringSessions,get experimentalGateway(){return experimental;},get manager(){return [...sessions.values()][0]?.manager;},nativeService,authorized:req=>!!getSession(req),close};
 }

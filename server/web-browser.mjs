@@ -11,7 +11,9 @@ export async function launchBrowser(){
  await new Promise((resolve,reject)=>{deny.once('error',reject);deny.listen(0,'127.0.0.1',resolve);});
  const shutdown=()=>{deny.closeAllConnections();return new Promise(resolve=>deny.close(resolve));};
  try{
-  const browser=await chromium.launch({headless:true,chromiumSandbox:true,timeout:10000,args:['--disable-background-networking','--disable-quic','--force-webrtc-ip-handling-policy=disable_non_proxied_udp','--host-resolver-rules=MAP * ~NOTFOUND'],proxy:{server:`http://127.0.0.1:${deny.address().port}`,bypass:'<-loopback>'}});
+  // Relay's SIGTERM handler awaits manager/browser closure; a second Playwright
+  // signal owner would interpret that close as escalation and force-kill Chromium.
+  const browser=await chromium.launch({headless:true,chromiumSandbox:true,handleSIGTERM:false,timeout:10000,args:['--disable-background-networking','--disable-quic','--force-webrtc-ip-handling-policy=disable_non_proxied_udp','--host-resolver-rules=MAP * ~NOTFOUND'],proxy:{server:`http://127.0.0.1:${deny.address().port}`,bypass:'<-loopback>'}});
   browser.once('disconnected',()=>void shutdown());return browser;
  }catch(e){await shutdown();throw e;}
 }

@@ -17,6 +17,127 @@ def qualifier():
 
 
 class UpgradeQualificationTests(unittest.TestCase):
+    def workflow_upgrade(self):
+        workflow = (ROOT / '.github/workflows/release.yml').read_text()
+        job = workflow.split('  qualify-upgrade:\n', 1)[1]
+        guard = job.split('      - name: Require explicit old baseline and stable-form published target\n', 1)[1]
+        guard = guard.split('        run: |\n', 1)[1].split('      - uses:', 1)[0]
+        return job, '\n'.join(line[10:] for line in guard.splitlines())
+
+    def workflow_admits(self, old, target):
+        import os
+        import subprocess
+        _, guard = self.workflow_upgrade()
+        # Check each literal predicate exit separately: macOS Bash 3.2 does not
+        # reliably apply errexit to a failed [[ ... || ... ]] compound command.
+        return all(subprocess.run(['bash', '-eu', '-c', predicate],
+                                  env=dict(os.environ, UPGRADE_FROM=old, RELEASE_TAG=target),
+                                  capture_output=True, text=True, timeout=5).returncode == 0
+                   for predicate in guard.splitlines() if predicate.strip())
+
+    def test_v068_immediate_predecessor_harness_admission(self):
+        q = qualifier()
+        q.validate_versions('v0.6.8', 'v0.6.9')
+        self.assertEqual(q.baseline_gateway_mode('v0.6.8'), 'remote')
+        config = q.gateway_reference(Path('/synthetic/backend'), remote=True)
+        self.assertEqual(config['version'], 3)
+        self.assertEqual(config['mode'], 'reverse-proxy')
+        self.assertEqual(config['trustedProxy'], '127.0.0.1')
+        self.assertEqual(config['backendTLS']['serverName'], 'backend.example.test')
+        self.assertEqual(config['backendTLS']['clientName'], 'caddy.example.test')
+        self.assertFalse(q.delivery_release('v0.6.8', 'v0.6.9'))
+        self.assertFalse(q.delivery_release('v0.6.4', 'v0.6.9'))
+
+    def test_v068_workflow_admission(self):
+        self.assertTrue(self.workflow_admits('v0.6.8', 'v0.6.9'))
+        self.assertTrue(self.workflow_admits('v0.6.4', 'v0.6.9'))
+
+    def test_predecessor_exact_allowlist_and_version_refusals(self):
+        q = qualifier()
+        expected = {'v0.4.2': None, 'v0.6.1': 'direct', 'v0.6.2': 'reverse',
+                    'v0.6.3': 'remote', 'v0.6.4': 'remote', 'v0.6.8': 'remote'}
+        self.assertEqual(set(q.BASELINES), set(expected))
+        for old, mode in expected.items():
+            with self.subTest(old=old):
+                q.validate_versions(old, 'v0.6.9')
+                self.assertEqual(q.baseline_gateway_mode(old), mode)
+                self.assertTrue(self.workflow_admits(old, 'v0.6.9'))
+        for old in ('v0.6.5', 'v0.6.6', 'v0.6.7', 'v0.6.9', 'v0.06.8', 'v0.6.8\n',
+                    '0.6.8', 'refs/tags/v0.6.8', 'v0.6.8-rc1', ''):
+            with self.subTest(old=old):
+                self.assertFalse(self.workflow_admits(old, 'v0.6.9'))
+                with self.assertRaises(q.install.InstallError):
+                    q.validate_versions(old, 'v0.6.9')
+                with self.assertRaises(q.install.InstallError):
+                    q.baseline_gateway_mode(old)
+        for target in ('v0.6.9-rc1', 'v0.06.9', 'v0.6.9\n', '0.6.9', 'refs/tags/v0.6.9', ''):
+            with self.subTest(target=target):
+                self.assertFalse(self.workflow_admits('v0.6.8', target))
+                with self.assertRaises(q.install.InstallError):
+                    q.validate_versions('v0.6.8', target)
+        # Ordering is enforced by the harness; the shell guard only checks tag syntax.
+        for target in ('v0.6.8', 'v0.6.7', 'v0.4.2'):
+            with self.subTest(target=target), self.assertRaises(q.install.InstallError):
+                q.validate_versions('v0.6.8', target)
+
+    def test_predecessor_dispatch_is_exact_repository_opt_in_and_two_modes(self):
+        import os
+        import subprocess
+        job, _ = self.workflow_upgrade()
+        condition = job.splitlines()[0].strip().removeprefix('if: ')
+        condition = condition.replace('github.repository', '"$REPO"').replace('github.event_name', '"$EVENT"')
+        condition = condition.replace("inputs['upgrade-from']", '"$UPGRADE_FROM"')
+        for repo, event, old, expected in [('murmuur22/relay', 'workflow_dispatch', 'v0.6.8', True),
+                                          ('murmuur22/relay', 'workflow_dispatch', 'v0.6.4', True),
+                                          ('other/relay', 'workflow_dispatch', 'v0.6.8', False),
+                                          ('murmuur22/relay', 'push', 'v0.6.8', False),
+                                          ('murmuur22/relay', 'workflow_dispatch', '', False)]:
+            with self.subTest(repo=repo, event=event, old=old):
+                result = subprocess.run(['bash', '-eu', '-c', '[[ ' + condition + ' ]]'],
+                                        env=dict(os.environ, REPO=repo, EVENT=event, UPGRADE_FROM=old),
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode == 0, expected, result.stderr)
+        self.assertIn('network-mode: [loopback, private-lan]', job)
+        self.assertIn('ref: ${{ inputs.version }}', job)
+        self.assertIn('contents: read', job)
+        self.assertNotIn('contents: write', job)
+        q = qualifier()
+        for address in (None, '10.20.30.40'):
+            command = q.worker_command('v0.6.8', 'v0.6.9', address)
+            self.assertEqual(command[command.index('--upgrade-from') + 1], 'v0.6.8')
+            self.assertEqual(command[command.index('--version') + 1], 'v0.6.9')
+            self.assertNotIn('--delivery-worker', command)
+            self.assertIn('--property=ProtectSystem=strict', command)
+            self.assertEqual('--private-lan' in command, address is not None)
+
+    def test_predecessor_ack_and_existing_host_refuse_before_install(self):
+        from types import SimpleNamespace
+        q = qualifier()
+        args = SimpleNamespace(apply=True, upgrade_from='v0.6.8', version='v0.6.9',
+                               private_lan=None, release_dir='/unused')
+        for missing in q.UPGRADE_ENV:
+            env = dict(q.UPGRADE_ENV)
+            del env[missing]
+            with self.subTest(missing=missing), patch.dict(q.os.environ, env, clear=True), \
+                    patch.object(q.base, 'guard') as fresh, patch.object(q.install, 'prepare') as prepare:
+                with self.assertRaises(q.install.InstallError):
+                    q.qualify(args)
+                fresh.assert_not_called()
+                prepare.assert_not_called()
+        with patch.dict(q.os.environ, q.UPGRADE_ENV, clear=True), \
+                patch.object(q.base, 'guard_environment'), \
+                patch.object(q.install, 'preflight_host', side_effect=q.install.InstallError('existing host')) as preflight, \
+                patch.object(q.install, 'prepare') as prepare, patch.object(q.install, 'write_new') as write:
+            with self.assertRaisesRegex(q.install.InstallError, 'existing host'):
+                q.qualify(args)
+            preflight.assert_called_once_with(None)
+            prepare.assert_not_called()
+            write.assert_not_called()
+        with patch.dict(q.os.environ, {}, clear=True), patch.object(q, 'load_installed') as load:
+            with self.assertRaises(q.install.InstallError):
+                q.installed_worker(True, 'v0.6.8', 'v0.6.9', None)
+            load.assert_not_called()
+
     def test_frontend_qualification_keeps_timeouts_and_reports_finished_failures(self):
         for filename in ('check.yml', 'release.yml'):
             workflow = (ROOT / '.github/workflows' / filename).read_text()
