@@ -6,6 +6,12 @@ on:
         description: 'Exact validated diagnostic route commit (not third-party review)'
         required: true
         type: string
+      mode:
+        description: 'Only the bounded interception lifetime continuation'
+        required: true
+        type: choice
+        options:
+          - interception-lifetime
       acknowledge:
         description: 'DIAGNOSTIC_FRESH_HOST_ONLY'
         required: true
@@ -17,7 +23,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   diagnostic:
-    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/diag/relay-0611-launch-linux' && inputs['diagnostic-sha'] == github.sha
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/diag/relay-0611-launch-linux' && inputs['diagnostic-sha'] == github.sha && inputs.mode == 'interception-lifetime'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -25,6 +31,7 @@ jobs:
     env:
       DIAGNOSTIC_SHA: ${{ inputs['diagnostic-sha'] }}
       ACKNOWLEDGE: ${{ inputs.acknowledge }}
+      DIAGNOSTIC_MODE: ${{ inputs.mode }}
     steps:
       - name: Exact admission before checkout or provisioning
         env:
@@ -39,6 +46,7 @@ jobs:
           [[ "$RUNNER_KIND" = github-hosted && "$RUNNER_OS" = Linux && "$RUNNER_ARCH" = X64 ]] || exit 1
           [[ "$DIAGNOSTIC_SHA" =~ ^[0-9a-f]{40}$ && "$DIAGNOSTIC_SHA" = "$GITHUB_SHA" ]] || exit 1
           [[ "$ACKNOWLEDGE" = DIAGNOSTIC_FRESH_HOST_ONLY ]] || exit 1
+          [[ "$DIAGNOSTIC_MODE" = interception-lifetime ]] || exit 1
           [[ "$ImageOS" = ubuntu24 ]] || exit 1
           test ! -e /etc/relay || exit 1
           test ! -e /var/lib/relay || exit 1
@@ -76,10 +84,10 @@ jobs:
           python3 -m pip install Pillow==11.3.0 > "$RUNNER_TEMP/relay-launch-private/pillow.log" 2>&1
           node node_modules/playwright/cli.js install --with-deps chromium > "$RUNNER_TEMP/relay-launch-private/chromium.log" 2>&1
           export RELAY_ICON_PYTHON="$(command -v python3)"
-          python3 ../route/diagnostics/launch-linux/linux-boundary-runner.py --source "$PWD" --check-only > "$RUNNER_TEMP/relay-launch-private/input-check.log" 2>&1
+          python3 ../route/diagnostics/launch-linux/interception-runner.py --source "$PWD" --check-only > "$RUNNER_TEMP/relay-launch-private/input-check.log" 2>&1
           # Only the existing reviewed preflight policy, on this admitted hosted VM.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 > "$RUNNER_TEMP/relay-launch-private/namespaces.log"
-      - name: One bounded six-mode instrumented diagnostic
+      - name: Bounded original-fixed observation and corrected two-file tests
         env:
           RUNNER_KIND: ${{ runner.environment }}
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-launch-browsers

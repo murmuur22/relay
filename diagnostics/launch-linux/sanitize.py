@@ -41,8 +41,8 @@ def main():
  files=[P/n for n in names if (P/n).is_file()]
  E=P/'experiment'
  files += [E/'EXPERIMENT.json'] if (E/'EXPERIMENT.json').is_file() else []
- for i,mode in enumerate(['original','retain','retain','original','original','retain'],1):
-  f=E/(str(i).zfill(2)+'-'+mode+'.log')
+ for name in ['01-original','02-fixed','03-launch-fixed','04-aba-fixed']:
+  f=E/(name+'.log')
   if f.is_file():files.append(f)
  records=[]
  for f in files:
@@ -53,12 +53,12 @@ def main():
   assert '/Users/' not in out
   (O/f.name).write_text(out)
   records.append({'name':f.name,'rawSHA256':hashlib.sha256(raw).hexdigest(),'sanitizedSHA256':hashlib.sha256(out.encode()).hexdigest(),'bytes':len(out.encode())})
-  if f.name.endswith(('-original.log','-retain.log')):
+  if f.name in ['01-original.log','02-fixed.log']:
    traces=[json.loads(x[len('BOUNDARY-TRACE '):]) for x in out.splitlines() if x.startswith('BOUNDARY-TRACE ')]
    (O/(f.stem+'.trace.json')).write_text(json.dumps(traces,indent=2)+'\n')
  (O/'INPUTS.json').write_bytes((Path(__file__).parent/'INPUTS.json').read_bytes())
  info: dict={k:os.environ.get(k) for k in ['GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA','GITHUB_REF','GITHUB_EVENT_NAME','GITHUB_REPOSITORY','RUNNER_KIND','RUNNER_OS','RUNNER_ARCH','ImageOS','ImageVersion']}
- info.update(sourceSHA='abe681a2837fa4b9b5236ea34970019c0b8934d1',sandbox=True,contentsPermission='read',kitUnmodified=True,supervisionDelta='durable prelaunch journal; systemd owned control-group; 360s runtime / 10s cleanup; independent always cleanup',thirdPartyRouteReview=False)
+ info.update(sourceSHA='abe681a2837fa4b9b5236ea34970019c0b8934d1',sandbox=True,contentsPermission='read',kitUnmodified=False,mode='interception-lifetime',patchSHA256=hashlib.sha256((Path(__file__).parent/'interception-lifetime.patch').read_bytes()).hexdigest(),supervisionDelta='durable prelaunch journal; systemd owned control-group; 360s runtime / 10s cleanup; independent always cleanup',thirdPartyRouteReview=False)
  (O/'runner-info.json').write_text(json.dumps(info,indent=2)+'\n')
  (O/'payload-inspection.json').write_text(json.dumps({'allowlistInspected':True,'rawPrivateEvidenceUploaded':False,'opaqueAliases':len(aliases),'files':records},indent=2)+'\n')
  print('Inspected sanitized payload: '+str(len(list(O.iterdir())))+' allowlisted files; no runtime or checkout archive.')
