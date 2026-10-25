@@ -1,0 +1,36 @@
+Parent review/route ownership required. Prepared payload only; NOT dispatched.
+
+Use an isolated fresh ubuntu-24.04 hosted VM, exact source
+abe681a2837fa4b9b5236ea34970019c0b8934d1 (all 366 source-file hashes in INPUTS.json).
+Node 26.8.1, locked Playwright 1.63.0, compiled root dist, Python/Pillow 11.3.0,
+and sandbox-capable Chromium under the already-approved hosted admission policy.
+Do not change sandbox/product guards or use local blocked Docker user namespaces.
+The payload itself changes no host security settings. Admission failure is a
+blocked prerequisite, never a test pass or permission to disable the sandbox.
+
+Minimal prerequisites in the disposable checkout, not canonical/local source:
+  npm ci --ignore-scripts
+  npm run build
+  python3 -m pip install Pillow==11.3.0
+  node node_modules/playwright/cli.js install --with-deps chromium
+Set PLAYWRIGHT_BROWSERS_PATH and RELAY_ICON_PYTHON to actual provisioned paths.
+No updater build, Caddy, Docker, old signed broker downloads or full-suite step.
+
+Payload execution after independent parent review:
+  python3 linux-boundary-runner.py --source /absolute/disposable/checkout --output /absolute/new/evidence-root
+
+The runner validates source/kit hashes and versions, makes a disposable copied
+source, reuses read-only dependencies/dist, and runs only combined ABA with
+original 4000ms settle/25000ms test deadlines, modes original/retain/retain/
+original/original/retain. Original security and fresh-reopen assertions remain.
+It records original logs and receipts even on failure. Use hosted always() upload
+for the evidence root, plus exact runner image/source/kit and prerequisite logs;
+never blanket-rerun the existing failed check or publisher.
+
+This kit was locally input/syntax checked only, not Linux executed. All local
+instrumented schedules passed, which cannot establish Linux cause. A failing
+hosted trace must distinguish server arrival, response finish, client headers,
+Fetch.requestPaused and teardown acknowledgements. If all hosted controls pass,
+report inconclusive and let parent choose a different route; no automatic retries.
+Any source branch, workflow route and dispatch is parent-owned. No payload code
+creates a branch, invokes GitHub APIs, publishes, signs or deploys.

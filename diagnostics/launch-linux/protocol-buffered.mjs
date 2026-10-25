@@ -1,0 +1,8 @@
+import {registerHooks} from 'node:module';
+registerHooks({load(url,context,next){const result=next(url,context);if(!url.endsWith('/playwright-core/lib/coreBundle.js'))return result;let source=String(result.source);
+const replacements=[
+ ['      _onRequestWillBeSent(sessionInfo, event) {',`      _onRequestWillBeSent(sessionInfo, event) { if(event.request.url.includes('/api/')) (globalThis.__relayProtocol??=[]).push({event:'willSend',url:event.request.url,id:event.requestId,enabled:this._protocolRequestInterceptionEnabled,at:Date.now()});`],
+ ['      _onRequestPaused(sessionInfo, event) {',`      _onRequestPaused(sessionInfo, event) { if(event.request.url.includes('/api/'))(globalThis.__relayProtocol??=[]).push({event:'paused',url:event.request.url,id:event.networkId,enabled:this._protocolRequestInterceptionEnabled,hasWill:this._requestIdToRequestWillBeSentEvent.has(event.networkId),hasRequest:this._requestIdToRequest.has(event.networkId),at:Date.now()});`],
+ ['            fetchPromise = info.session.send("Fetch.disable");',`            fetchPromise = (async()=>{(globalThis.__relayProtocol??=[]).push({event:'disable-start',delay:Number(process.env.DIAG_DISABLE_DELAY||0),at:Date.now()});if(Number(process.env.DIAG_DISABLE_DELAY||0))await new Promise(r=>setTimeout(r,Number(process.env.DIAG_DISABLE_DELAY)));await info.session.send("Fetch.disable");(globalThis.__relayProtocol??=[]).push({event:'disable-ack',at:Date.now()});})();`]
+];
+for(const [old,replacement] of replacements){if(source.split(old).length!==2)throw Error('Observer seam not unique: '+old);source=source.replace(old,replacement);}return {...result,source};}});

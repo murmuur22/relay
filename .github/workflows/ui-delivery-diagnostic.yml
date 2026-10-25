@@ -1,0 +1,106 @@
+name: Relay 0.6.11 isolated Linux launch diagnosis
+on:
+  workflow_dispatch:
+    inputs:
+      diagnostic-sha:
+        description: 'Exact validated diagnostic route commit (not third-party review)'
+        required: true
+        type: string
+      acknowledge:
+        description: 'DIAGNOSTIC_FRESH_HOST_ONLY'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: relay-0611-launch-linux
+  cancel-in-progress: false
+jobs:
+  diagnostic:
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/diag/relay-0611-launch-linux' && inputs['diagnostic-sha'] == github.sha
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      DIAGNOSTIC_SHA: ${{ inputs['diagnostic-sha'] }}
+      ACKNOWLEDGE: ${{ inputs.acknowledge }}
+      RUNNER_KIND: ${{ runner.environment }}
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/relay-launch-browsers
+    steps:
+      - name: Exact admission before checkout or provisioning
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" = workflow_dispatch ]] || exit 1
+          [[ "$GITHUB_REPOSITORY" = murmuur22/relay ]] || exit 1
+          [[ "$GITHUB_REF" = refs/heads/diag/relay-0611-launch-linux ]] || exit 1
+          [[ "$GITHUB_WORKFLOW_REF" = "murmuur22/relay/.github/workflows/ui-delivery-diagnostic.yml@refs/heads/diag/relay-0611-launch-linux" ]] || exit 1
+          [[ "$RUNNER_KIND" = github-hosted && "$RUNNER_OS" = Linux && "$RUNNER_ARCH" = X64 ]] || exit 1
+          [[ "$DIAGNOSTIC_SHA" =~ ^[0-9a-f]{40}$ && "$DIAGNOSTIC_SHA" = "$GITHUB_SHA" ]] || exit 1
+          [[ "$ACKNOWLEDGE" = DIAGNOSTIC_FRESH_HOST_ONLY ]] || exit 1
+          [[ "$ImageOS" = ubuntu24 ]] || exit 1
+          test ! -e /etc/relay || exit 1
+          test ! -e /var/lib/relay || exit 1
+          test ! -e /opt/relay || exit 1
+      - name: Checkout exact diagnostic route payload
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: route
+          persist-credentials: false
+      - name: Checkout literal approved target source separately
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: abe681a2837fa4b9b5236ea34970019c0b8934d1
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26.8.1'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Locked minimal prerequisites and exact kit admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C route rev-parse HEAD)" = "$DIAGNOSTIC_SHA" ]] || exit 1
+          [[ "$(git -C source rev-parse HEAD)" = abe681a2837fa4b9b5236ea34970019c0b8934d1 ]] || exit 1
+          mkdir -m 700 "$RUNNER_TEMP/relay-launch-private"
+          cd source
+          npm ci --ignore-scripts > "$RUNNER_TEMP/relay-launch-private/npm-ci.log" 2>&1
+          npm run build > "$RUNNER_TEMP/relay-launch-private/build.log" 2>&1
+          python3 -m pip install Pillow==11.3.0 > "$RUNNER_TEMP/relay-launch-private/pillow.log" 2>&1
+          node node_modules/playwright/cli.js install --with-deps chromium > "$RUNNER_TEMP/relay-launch-private/chromium.log" 2>&1
+          export RELAY_ICON_PYTHON="$(command -v python3)"
+          python3 ../route/diagnostics/launch-linux/linux-boundary-runner.py --source "$PWD" --check-only > "$RUNNER_TEMP/relay-launch-private/input-check.log" 2>&1
+          # Only the existing reviewed preflight policy, on this admitted hosted VM.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 > "$RUNNER_TEMP/relay-launch-private/namespaces.log"
+      - name: One bounded six-mode instrumented diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          export RELAY_ICON_PYTHON="$(command -v python3)"
+          python3 route/diagnostics/launch-linux/supervise.py run
+      - name: Owned cgroup cleanup and sanitized payload inspection
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f route/diagnostics/launch-linux/supervise.py; then
+            rc=0
+            python3 route/diagnostics/launch-linux/supervise.py cleanup || rc=$?
+            python3 route/diagnostics/launch-linux/sanitize.py || rc=$?
+            exit "$rc"
+          fi
+      - name: Only inspected sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: relay-0611-launch-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/relay-launch-public/*
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: false
+          include-hidden-files: false
