@@ -90,7 +90,18 @@ try{
  if(auth){
   await new Promise(r=>originalListen.call(server,port,'127.0.0.1',r));
   const origin='http://127.0.0.1:'+port;
-  const csrf=(await(await fetch(origin+'/api/auth')).json()).csrf;
+  // Do not reuse authentication's pooled sockets: startup cleanup destroyed them.
+  // This observation must reach the reopened listener on a fresh connection.
+  let request,csrf;
+  try{
+   csrf=await bound(new Promise((resolve,reject)=>{
+    request=http.get(origin+'/api/auth',{agent:false},res=>{
+     let body='';res.setEncoding('utf8');res.on('data',chunk=>body+=chunk);
+     res.on('error',reject);res.once('aborted',()=>reject(Error('fresh auth response aborted')));
+     res.once('end',()=>{try{resolve(JSON.parse(body).csrf);}catch(error){reject(error);}});
+    });request.on('error',reject);
+   }),'fresh auth deadline');
+  }finally{request?.destroy();}
   const status=await new Promise((resolve,reject)=>{const q=http.request(origin+'/api/login',{agent:false,method:'POST',headers:{Origin:origin,'Content-Type':'application/json','X-CSRF-Token':csrf}},r=>{r.resume();r.once('end',()=>resolve({status:r.statusCode,cookie:r.headers['set-cookie']}));});q.on('error',reject);q.setTimeout(2000,()=>q.destroy(Error('fresh login deadline')));q.end(JSON.stringify({username:'admin',password}));});
   assert.equal(status.status,503);assert.equal(status.cookie,undefined);record('fresh-admission-denied',{status:status.status});
  }
