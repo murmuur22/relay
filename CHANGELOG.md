@@ -5,6 +5,10 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [Unreleased]
 
+- CLEANUP-1 follow-up to the isolated proposal below: retain pending updater-embedding fixture acquisitions before starting setup, deny post-retirement use, and await acknowledged disposal of late browser/web/listener results. Listener acquisition errors reject explicitly. Add bounded fixture regressions; original framing/API assertions, sandbox and deadlines remain unchanged. This test-only candidate still requires independent review; it does not qualify a release or explain the historical hosted failure.
+
+- Isolated publication-diagnostic proposal: register updater-embedding fixture ownership before listener/browser setup, settle every owned cleanup and retain cleanup rejections. Controlled setup failures now exit with their original failure instead of leaving listeners alive. Original framing/API security assertions, Chromium sandbox and deadlines are unchanged. Historical publisher attribution and hosted qualification remain unresolved; no tagged bytes are replaced.
+
 - Align current guides with implemented status modes: personal Native bookmarks are not monitored, managed/Gateway status uses bounded Relay-side checks, and Native device CORS checks belong to explicit wizard tests. Correct the development enrollment path and independently pinned updater UI tooling version. Runtime, recovery, supported baselines and dependency pins are unchanged.
 
 - Remove the unused internal gateway status pass-through helper; active status probes retain their live-observer, preference and definition checks. Add an authenticated two-observer regression for a hidden observer during a held managed Native check. No API, state schema, resource lifecycle or dependency pin changes.
@@ -15,7 +19,17 @@ Versions describe the source/application, not a production deployment or a GitHu
 - Give the updater UI's POSIX Playwright test server direct Vite ownership and bounded SIGTERM teardown. Pinned Vite intentionally exits 143 after acknowledged close; qualification requires identity-bound functional completion before TERM and complete closure evidence, never a blanket 143 waiver or conversion to zero. No installed updater/control-plane change is included.
 - Independent review of this isolated candidate remains required before source acceptance or publication.
 
-## [0.6.9] — 2026-10-24 (publication pending)
+## [0.6.10] — corrective preparation (unpublished)
+
+- Prepare a new root package/lock version rather than changing immutable v0.6.9 source/tag. Shared `version.js`, independent consumer versions/locks and the accepted dependency closure are unchanged.
+- Integrate the independently accepted test-only updater-embedding fixture repair: register pending acquisitions before setup, retire admission synchronously and retain ownership until acknowledged late-resource disposal. Preserve original framing/API assertions, Chromium sandbox and internal deadlines; never turn an expected failed/cancelled probe into a passing test.
+- Include the accepted documentation/status, standalone-versus-optional-consumer and Relay-owned SIGTERM/Vite test-server corrections described above. The v0.6.9 predecessor route already admits signed v0.6.8 and retains its unchanged control plane; v0.6.4 stock compatibility is a separate ledger, not a production mixed-installation claim.
+- Full exact-version export, local suites/audits/package/extracted-runtime qualification and independent integration/version/publication review are required for this candidate. Earlier 0.6.9 local evidence is historical, not a 0.6.10 pass. Official Linux preflight, signed artifacts, anonymous provenance, both-mode install/upgrade/rollback and promotion remain separate gates. No production or updater replacement is included.
+- Historical v0.6.9 publisher failure is retained with its original source and evidence. Its initial exception remains unknown; acceptance of a local fixture correction does not establish that historical cause or a universal cleanup-time guarantee.
+
+## [0.6.9] — 2026-10-24 (historical preparation; immutable tag)
+
+Later status: the v0.6.9 tag remains immutable; official publication qualification failed and no release/assets were published at the corrective preparation readback. The original preparation record follows, not current release readiness.
 
 Prepared source only. The accepted integrated 0.6.8-version source and reviewed immediate-predecessor qualification route are grouped here for versioned rebuilding. New 0.6.9 clean-export/full-suite, package, independent review and hosted/signing/install/upgrade/rollback/discovery gates remain separate; no publication or deployment is claimed.
 

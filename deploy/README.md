@@ -10,6 +10,10 @@ macOS fixture establishes that these units, Chromium or provenance verification
 work on a Linux machine. The qualification command below must actually succeed
 before recording that evidence.
 
+## Corrective 0.6.10 preparation (unpublished)
+
+Root source version 0.6.10 is a corrective qualification candidate, not a published or installation-ready artifact. Immutable v0.6.9 remains unchanged after its failed publication qualification; its historical initial exception is not attributed to the accepted local test-fixture correction. The intended signed runtime upgrade/matching-state rollback baseline is v0.6.8 in both loopback and private-LAN modes, preserving that installed control plane and enabled v3 mTLS Gateway policy. A stock v0.6.4 compatibility run is a separate ledger, not evidence for an operator's mixed installation. The optional v0.6.5-only presentation bootstrap does not execute for 0.6.10 and is not part of this runtime release. Official Linux, signed artifact/provenance and installation gates remain unexecuted until separately recorded. Preparation/publication never authorizes production access, deployment, network/trust changes or updater replacement.
+
 ## Unreleased deployment changes
 
 Fresh installer and qualification defaults now use Relay **4180** and independent
