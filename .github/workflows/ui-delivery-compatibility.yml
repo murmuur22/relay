@@ -111,10 +111,19 @@ jobs:
           review_status=0
           python3 -B route/diagnostics/mixed-bridge/review.py --final "$RUNNER_TEMP/relay-mixed-public" || review_status=$?
           if test -f /opt/relay-mixed-kit/rehearse.py; then
-            sudo env -i PATH=/usr/bin:/bin /usr/bin/python3 -B /opt/relay-mixed-kit/rehearse.py dispose
+            sudo env -i PATH=/usr/bin:/bin /usr/bin/python3 -B /opt/relay-mixed-kit/rehearse.py dispose > "$RUNNER_TEMP/relay-mixed-public/private-disposal.json"
           fi
           sudo test ! -e /var/lib/relay-mixed-private
           sudo test ! -e /opt/relay-mixed-kit
+          sudo test ! -e /var/lib/relay-mixed-browser
+          python3 -B - "$RUNNER_TEMP/relay-mixed-public/private-disposal.json" <<'PY'
+          import json,sys
+          from pathlib import Path
+          p=Path(sys.argv[1]);r=json.loads(p.read_text())
+          assert r['schema']==1 and all(r.get(k) is True for k in ('passed','ownedAdmission','privateKitAbsent','privateInputsAbsent','browserInputRootAbsent','fixtureRootsAbsent'))
+          r['independentAbsenceReadback']=True
+          p.write_text(json.dumps(r,indent=2)+'\n')
+          PY
           exit "$review_status"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

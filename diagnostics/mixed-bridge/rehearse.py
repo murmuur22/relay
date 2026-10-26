@@ -5,7 +5,7 @@ The unchanged stock installer/bootstrap guards are recipes, never bypassed.
 Only this fresh-host producer constructs synthetic configuration and signed mixed
 code. All stdout, secrets, backups and state remain private to the owned VM.
 """
-import os,sys,json,hashlib,shutil,stat,signal,subprocess,time,importlib.util,pwd,grp,socket,threading,traceback
+import os,sys,json,hashlib,shutil,stat,signal,subprocess,time,importlib.util,pwd,grp,socket,threading,traceback,re,resource
 from pathlib import Path
 sys.dont_write_bytecode=True
 K=Path(__file__).resolve().parent
@@ -23,9 +23,63 @@ def gate(n,**fields):
  R['gates'][n]=dict(fields,passed=True);save()
 def require(value,message):
  if not value:raise RuntimeError(message)
+def boundary_failure(stderr,exit_code):
+ # Prefix observations only, not syscall tracing. No variable message text escapes.
+ # Locale is fixed by cmd; an unfamiliar/localized/child message stays unknown.
+ prefixes=(('pam','pam-open-session',b'cannot open session: '),
+           ('pam','pam-establish-credentials',b'failed to establish user credentials: '),
+           ('group','initgroups-or-setgroups',b'cannot set groups: '),
+           ('group','setgid',b'cannot set group id: '),
+           ('user','setuid',b'cannot set user id: '),
+           ('fork','fork',b'cannot create child process: '),
+           ('exec','exec',b'failed to execute '))
+ # util-linux 2.39.3 sanitize_prlimits ignores setrlimit return values; there
+ # is no reliable resource-limit prefix. Never infer it from EPERM alone.
+ observed=[]
+ lines=stderr[:65536].splitlines()
+ for stage,operation,prefix in prefixes:
+  if any(line.startswith(b'runuser: '+prefix) for line in lines):
+   observed.append(dict(stage=stage,operation=operation))
+ if any(re.fullmatch(rb'runuser: user [^\r\n]{1,256} does not exist or the user entry does not contain all the required fields',line) for line in lines):
+  observed.append(dict(stage='user',operation='user-lookup'))
+ if any(line==b'runuser: may not be used by non-root users' for line in lines):
+  observed.append(dict(stage='user',operation='caller-not-root'))
+ symptoms=[name for name,token in (('operation-not-permitted',b'Operation not permitted'),('permission-denied',b'Permission denied'),('resource-unavailable',b'Resource temporarily unavailable'),('not-found',b'No such file or directory')) if any(line.endswith(b': '+token) for line in lines)]
+ return dict(schema=1,exit=exit_code,passed=exit_code==0,classification=observed[0]['stage'] if len(observed)==1 else 'unknown',prefixObservations=observed,symptoms=symptoms,attribution='fixed-prefix-observation-not-syscall-proof',resourceLimitCause='unknown',stderrTruncated=len(stderr)>65536)
+
+def boundary_context():
+ # Fixed proc fields only; never environment, raw PAM policy, logs or config.
+ fields={}
+ for line in Path('/proc/self/status').read_text().splitlines():
+  key,_,value=line.partition(':');value=value.strip()
+  if key in ('Uid','Gid','Groups') and re.fullmatch(r'[0-9\t ]*',value):fields[key]=[int(x) for x in value.split()][:256]
+  elif key in ('CapInh','CapPrm','CapEff','CapBnd','CapAmb') and re.fullmatch(r'[0-9a-f]{16}',value):fields[key]=value
+  elif key in ('NoNewPrivs','Seccomp') and re.fullmatch(r'[0-9]',value):fields[key]=int(value)
+ target=None
+ try:
+  u=pwd.getpwnam('runner');target=dict(uid=u.pw_uid,gid=u.pw_gid,groups=sorted(os.getgrouplist('runner',u.pw_gid))[:256])
+ except KeyError:pass
+ limits={}
+ for name in ('RLIMIT_NICE','RLIMIT_RTPRIO','RLIMIT_FSIZE','RLIMIT_AS','RLIMIT_NOFILE','RLIMIT_NPROC'):
+  limits[name]=list(resource.getrlimit(getattr(resource,name))) if hasattr(resource,name) else None
+ pam={}
+ for name in ('runuser','common-session','common-session-noninteractive'):
+  p=Path('/etc/pam.d')/name
+  tokens=set()
+  if p.is_file():
+   for line in p.read_text()[:65536].splitlines():
+    if not line.lstrip().startswith('#'):tokens.update(line.split())
+  pam[name]=dict(present=p.is_file(),modules={module:module in tokens for module in ('pam_rootok.so','pam_keyinit.so','pam_limits.so','pam_unix.so','pam_systemd.so','pam_deny.so','pam_permit.so')},includes={inc:inc in tokens for inc in ('common-auth','common-account','common-session','common-session-noninteractive')})
+ v=subprocess.run(['/usr/sbin/runuser','--version'],capture_output=True,timeout=5,env=dict(PATH='/usr/bin:/bin',LANG='C'))
+ match=re.fullmatch(rb'runuser from util-linux ([0-9]+\.[0-9]+\.[0-9]+)\n',v.stdout)
+ effective=int(fields.get('CapEff','0'),16)
+ return dict(schema=1,stage='immediately-before-runuser',proc=fields,targetRunner=target,capabilities={name:bool(effective&(1<<bit)) for name,bit in (('SETGID',6),('SETUID',7),('SYS_RESOURCE',24),('AUDIT_WRITE',29))},limits=limits,pamPolicy=pam,runuserVersion=match.group(1).decode() if match else 'unknown',pamExecution='not-observed; prefix diagnostics follow',rawConfigurationExported=False)
+
 def cmd(args,timeout=120,cwd=None,env=None):
  r=subprocess.run(args,cwd=cwd,env=env or dict(PATH='/usr/bin:/bin',LANG='C.UTF-8',HOME='/nonexistent',GH_CONFIG_DIR='/nonexistent',PYTHONDONTWRITEBYTECODE='1'),stdin=subprocess.DEVNULL,capture_output=True,timeout=timeout)
  record=dict(tool=Path(args[0]).name,argv=args,exit=r.returncode,stage=STAGE)
+ if Path(args[0]).name=='runuser':
+  record['boundaryFailure']=boundary_failure(r.stderr,r.returncode)
  if r.returncode and Path(args[0]).name=='runuser':
   # Fixed symptom vocabulary only: never publish raw child stderr/spec/secrets.
   record['browserBootstrapSymptoms']=[s for s in ('ERR_MODULE_NOT_FOUND','MODULE_NOT_FOUND','EACCES','EPERM','ENOENT','Permission denied','Operation not permitted','cannot open session','failed to execute','SyntaxError','ERR_REQUIRE_ASYNC_MODULE') if s.encode() in r.stderr]
@@ -198,6 +252,8 @@ def lifecycle(conf,password):
  cmd(['/usr/bin/systemctl','start','relay-updater-broker.service']);base.wait_control()
 
 def worker():
+ global STAGE
+ STAGE='signed-lifecycle'
  for name in tuple(sys.modules):
   if name=='updater' or name.startswith('updater.'):del sys.modules[name]
  sys.path.insert(0,str(C));from updater.broker.engine import Engine
@@ -220,6 +276,8 @@ def worker():
   # Browser drives real compiled native launcher, password denial, immediate install,
   # original monitor reads through shutdown, genuine re-login, and matching rollback.
   runenv=dict(PATH='/usr/bin:/bin',HOME=str(H),TMPDIR=str(H),PLAYWRIGHT_BROWSERS_PATH='/opt/relay/current/browsers')
+  result['preRunuser']=boundary_context()
+  (P/'lifecycle.json').write_text(json.dumps(result))
   cmd(['/usr/sbin/runuser','-u','runner','--','/usr/bin/env','-i',*(k+'='+v for k,v in runenv.items()),'/usr/bin/node',str(K/'browser.mjs'),str(H/'input.json')],timeout=420)
   browser=json.loads((H/'browser-result.json').read_text());require(browser.get('passed') is True,'browser-not-passed')
   engine.thread.join(30);require(not engine.thread.is_alive(),'engine-thread-live')
@@ -278,7 +336,9 @@ def cleanup():
  for u in UNITS:require(cmd(['/usr/bin/systemctl','show',u,'-p','LoadState','--value'])=='not-found','owned-unit-remains')
  for port in (4180,4191):
   with socket.socket() as s:require(s.connect_ex((own['ip'],port))!=0,'owned-listener-remains')
- (P/'cleanup.json').write_text(json.dumps(dict(passed=True,pathsRemoved=True,identitiesRemoved=True,unitsUnloaded=True,listenersClosed=True,privateBackupsRetainedThroughFinalRestoreThenDisposed=True)))
+ prior=json.loads((P/'result.json').read_text())
+ final_restore=prior.get('gates',{}).get('finalExactBaselineRestore',{}).get('passed') is True
+ (P/'cleanup.json').write_text(json.dumps(dict(passed=True,pathsRemoved=True,identitiesRemoved=True,unitsUnloaded=True,listenersClosed=True,privateBackupsDisposed=True,finalBaselineRestoreReached=final_restore,privateBackupsRetainedThroughFinalRestoreThenDisposed=True if final_restore else None)))
  return 0
 
 def run():
@@ -327,9 +387,12 @@ def dispose():
  require(os.geteuid()==0 and K==Path('/opt/relay-mixed-kit'),'dispose-scope-refused')
  require(all(not os.path.lexists(p) for p in ROOTS),'fixture-resources-not-cleaned')
  if (P/'ownership.json').exists():require(json.loads((P/'cleanup.json').read_text()).get('passed') is True,'cleanup-not-acknowledged')
+ admitted=(P/'ownership.json').exists()
+ cleanup_receipt=json.loads((P/'cleanup.json').read_text()) if admitted else {}
  for p in (P,K):
   if p.exists():require(p.lstat().st_uid==0 and not p.is_symlink(),'dispose-ownership-refused');shutil.rmtree(p)
- require(not P.exists() and not K.exists(),'private-inputs-retained')
+ require(not os.path.lexists(P) and not os.path.lexists(K) and not os.path.lexists(H),'private-inputs-retained')
+ print(json.dumps(dict(schema=1,passed=True,ownedAdmission=admitted,privateKitAbsent=True,privateInputsAbsent=True,browserInputRootAbsent=True,fixtureRootsAbsent=True,finalBaselineRestoreReached=cleanup_receipt.get('finalBaselineRestoreReached'),backupRetentionThroughFinalRestore=cleanup_receipt.get('privateBackupsRetainedThroughFinalRestoreThenDisposed'))))
  return 0
 
 if __name__=='__main__':
