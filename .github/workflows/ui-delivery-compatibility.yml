@@ -30,9 +30,10 @@ jobs:
       DIAGNOSTIC_SHA: ${{ inputs['diagnostic-sha'] }}
       SOURCE_SHA: ${{ inputs['source-sha'] }}
       ACKNOWLEDGE: ${{ inputs.acknowledge }}
-      RUNNER_KIND: ${{ runner.environment }}
     steps:
       - name: Exact bounded hosted admission before checkout
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
         shell: bash
         run: |
           set -euo pipefail
@@ -64,6 +65,8 @@ jobs:
         with:
           node-version: '26.8.1'
       - name: Admission and real cleanup controls before production of fixture resources
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
         shell: bash
         run: |
           set -euo pipefail
