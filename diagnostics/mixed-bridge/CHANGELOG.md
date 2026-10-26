@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Retain failed browser transient-service status instead of collecting it before observation; save the last status snapshot before assertions. Distinguish context, page, navigation and compiled-login stages, retaining only fixed exception vocabulary including TimeoutError. No browser/worker security, identity, acceptance assertion or deadline changes.
+
 - Move browser execution out of the hardened lifecycle worker: the existing trusted fixture owner starts one transient systemd service with User=runner, zero capability bounding set and NoNewPrivileges. Chromium sandbox remains enabled. No production code, service capability or security policy changes.
 - Use private bounded, no-follow receipt acquisition, explicit input UID/GID binding, atomic completion receipts, exact service invocation readback, process-exit status and empty-cgroup acknowledgement. Browser shutdown precedes worker shutdown. Failed, cancelled, timed-out and missing-result executions cannot qualify.
 - Retain real portable process/listener success, failure, repeated-TERM, timeout and no-result controls, plus descriptor admission negatives. These are not native systemd or browser qualification; the hosted execution remains a separate gate.

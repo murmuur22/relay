@@ -264,7 +264,7 @@ def browser_service():
  # Called only by the existing trusted fixture owner, never the hardened worker.
  runner=pwd.getpwnam('runner');require(runner.pw_uid>0 and runner.pw_gid>0,'root-browser-refused')
  properties=['User=runner','Group='+grp.getgrgid(runner.pw_gid).gr_name,'WorkingDirectory=/opt/relay-updater','UMask=0077','NoNewPrivileges=true','CapabilityBoundingSet=','ProtectSystem=strict','ProtectHome=true','ReadWritePaths='+str(H),'PrivateTmp=true','MemoryMax=2G','TasksMax=256','LimitNOFILE=8192','LimitFSIZE=8M','RuntimeMaxSec=420','TimeoutStopSec=30','SendSIGKILL=no','KillMode=control-group','Type=exec','RemainAfterExit=yes','BindsTo=relay-mixed-lifecycle.service','After=relay-mixed-lifecycle.service','PartOf=relay-mixed-owner.service']
- args=['/usr/bin/systemd-run','--unit=relay-mixed-browser','--collect',*('--property='+p for p in properties),'/usr/bin/env','-i','PATH=/usr/bin:/bin','HOME='+str(H),'TMPDIR='+str(H),'PLAYWRIGHT_BROWSERS_PATH=/opt/relay/current/browsers','/usr/bin/node',str(K/'browser.mjs'),str(H/'input.json')]
+ args=['/usr/bin/systemd-run','--unit=relay-mixed-browser',*('--property='+p for p in properties),'/usr/bin/env','-i','PATH=/usr/bin:/bin','HOME='+str(H),'TMPDIR='+str(H),'PLAYWRIGHT_BROWSERS_PATH=/opt/relay/current/browsers','/usr/bin/node',str(K/'browser.mjs'),str(H/'input.json')]
  record=dict(passed=False,expectedUid=runner.pw_uid,expectedGid=runner.pw_gid)
  try:
   cmd(args,timeout=15)
@@ -273,7 +273,7 @@ def browser_service():
   invocation=initial['InvocationID'];require(re.fullmatch('[0-9a-f]{32}',invocation),'browser-invocation-missing')
   end=time.monotonic()+425
   while True:
-   current=unit_snapshot('relay-mixed-browser.service')
+   current=unit_snapshot('relay-mixed-browser.service');record['lastObserved']=current
    require(current['InvocationID']==invocation,'browser-invocation-changed')
    if current['SubState']=='exited' or current['ActiveState']=='failed':break
    require(time.monotonic()<end,'browser-service-deadline');time.sleep(.2)

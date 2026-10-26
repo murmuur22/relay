@@ -45,9 +45,9 @@ try{
  result.bootstrap.executableInConfiguredCache=executable.startsWith('/opt/relay/current/browsers/');
  result.bootstrap.executable=await probe(executable);
  stage='launch';browser=await chromium.launch({headless:true,chromiumSandbox:true,handleSIGTERM:false});if(cancelled){closing=undefined;await closeBrowser();throw Error('cancelled');}
- context=await browser.newContext({viewport:{width:1440,height:1050}});page=await context.newPage();
+ stage='new-context';context=await browser.newContext({viewport:{width:1440,height:1050}});stage='new-page';page=await context.newPage();
  context.on('request',r=>{const p=new URL(r.url()).pathname;if(r.method()==='POST'&&p.startsWith('/updater/api/'))result.requests.push(p);});
- await page.goto(spec.origin);await login();result.gates.compiledLogin=true;
+ stage='navigation';await page.goto(spec.origin);stage='compiled-login';await login();result.gates.compiledLogin=true;
  stage='native-launch';await page.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
  const browse=page.locator('[data-window-id="system-updater"]');await wait(async()=>await browse.getByLabel('Available release').inputValue()==='v0.6.8','signed-selection');
  await browse.getByRole('button',{name:'Start update',exact:true}).click();
@@ -74,7 +74,7 @@ try{
  assert.ok(result.monitorDuringRuntimeUnavailable>0,'no actual runtime-unavailability monitoring sample');result.gates.originalMonitorDuringRealRuntimeLoss=true;
  assert.equal(result.requests.filter(p=>p==='/updater/api/install').length,2);assert.equal(result.requests.filter(p=>p==='/updater/api/rollback').length,1);assert.equal(result.requests.filter(p=>/prepare|apply/.test(p)).length,0);result.gates.actualCompiledLegacyInstallNotStaged=true;
  result.gates.matchingRollbackThroughOriginalMonitor=true;passed=true;
-}catch(e){result.error={stage,type:['Error','TypeError','SyntaxError','AssertionError'].includes(e.name)?e.name:'OTHER',code:['ERR_MODULE_NOT_FOUND','MODULE_NOT_FOUND','EACCES','EPERM','ENOENT','ENOTDIR','ERR_REQUIRE_ASYNC_MODULE'].includes(e.code)?e.code:null,symptoms:symptoms.filter(s=>String(e.message).includes(s)),modulePathMentioned:String(e.message).includes(modulePath)};}
+}catch(e){result.error={stage,type:['Error','TypeError','SyntaxError','AssertionError','TimeoutError'].includes(e.name)?e.name:'OTHER',code:['ERR_MODULE_NOT_FOUND','MODULE_NOT_FOUND','EACCES','EPERM','ENOENT','ENOTDIR','ERR_REQUIRE_ASYNC_MODULE'].includes(e.code)?e.code:null,symptoms:symptoms.filter(s=>String(e.message).includes(s)),modulePathMentioned:String(e.message).includes(modulePath)};}
 finally{
  observerStop=true;try{await observer;}catch{passed=false;result.observerFailed=true;}
  try{result.browserStarted=Boolean(browser);if(browser){await closeBrowser();result.browserCloseAcknowledged=true;}else result.browserCloseAcknowledged=false;}catch{passed=false;result.browserCloseAcknowledged=false;}
