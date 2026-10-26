@@ -233,6 +233,10 @@ def worker():
   for r in pin:
    status,raw,_=base.raw_http(4191,'/updater/presentation/v0.6.8/'+r['path']);require(status==200 and hashlib.sha256(raw).hexdigest()==r['sha256'],'lazy-pin-lost-after-prune')
   result.update(browser,passed=True,signedBaseline='v0.6.11',signedExplicitTarget='v0.6.8',matchingRollback='v0.6.11',notForwardUpgrade=True,originalEngineBytes=True,matchingAccountsAndState=True,prunedTargetLazyAssetsRetained=True,webConfigUnitsUnchanged=True)
+ except BaseException as e:
+  result['error']=dict(type=type(e).__name__,frames=[dict(file=Path(f.filename).name,line=f.lineno,function=f.name) for f in traceback.extract_tb(e.__traceback__)])
+  result['commands']=R['commands']
+  raise
  finally:
   if (H/'browser-result.json').exists():result['browserAttempt']=json.loads((H/'browser-result.json').read_text())
   if broker:broker.shutdown();t.join(10);broker.server_close();require(not t.is_alive(),'broker-thread-live')
