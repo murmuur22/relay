@@ -3,7 +3,7 @@ import os,sys,json,hashlib,re,subprocess,ast,copy
 from pathlib import Path
 from test_controls import accepted
 BASE='f477a9d8f227d42e83308d45c37e689d085649b7'
-REQUIRED={'anonymousSourceAndPayloadVerification','exactMixedBaseline','partialOperationRestore','unprivilegedStartupFailureRestore','protectedBackupAndApply','presentationAndHardening','signedLifecycle','finalExactBaselineRestore','ownedCleanup'}
+REQUIRED={'anonymousSourceAndPayloadVerification','exactMixedBaseline','partialOperationRestore','unprivilegedStartupFailureRestore','protectedBackupAndApply','presentationAndHardening','separateBrowserService','signedLifecycle','finalExactBaselineRestore','ownedCleanup'}
 def final_ok(r):
  return (r.get('passed') is True and r.get('supervisorExit')==0 and r.get('supervisorCancelled') is False and r.get('workflowCleanupExit')==0 and REQUIRED<=set(r.get('gates',{})) and all(r['gates'][g].get('passed') is True for g in REQUIRED) and accepted(dict(functional=r.get('passed'),childExit=r.get('supervisorExit'),signal='SIGTERM' if r.get('supervisorCancelled') else None,cleanup=r.get('gates',{}).get('ownedCleanup',{}).get('passed'),evidenceWritten=True)))
 def scan(raw):

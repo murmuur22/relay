@@ -235,18 +235,87 @@ def bootstrap(dirs,password):
  gate('presentationAndHardening',version='v0.6.11',allDescriptorAssetsAndFontsExact=True,exactFrameAncestor=True,anonymousHostOriginDenied=True,actualUnprivilegedNoNewPrivsZeroCapEff=True)
  return expected
 
+def private_json(path,uid,limit=65536):
+ # Fixed owned parent; descriptor no-follow and a hard read bound before JSON.
+ fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+ try:
+  s=os.fstat(fd);require(stat.S_ISREG(s.st_mode) and s.st_uid==uid and stat.S_IMODE(s.st_mode)==0o600 and s.st_nlink==1 and s.st_size<=limit,'unsafe-private-receipt')
+  raw=os.read(fd,limit+1);require(len(raw)<=limit,'oversized-private-receipt')
+  value=json.loads(raw);require(isinstance(value,dict),'invalid-private-receipt');return value
+ finally:os.close(fd)
+def private_write(path,value):
+ tmp=path.with_suffix('.next')
+ fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+ try:
+  with os.fdopen(fd,'w') as f:json.dump(value,f);f.flush();os.fsync(f.fileno())
+  os.replace(tmp,path)
+ finally:
+  if tmp.exists():tmp.unlink()
+def unit_snapshot(unit):
+ fields=('LoadState','ActiveState','SubState','Result','ExecMainPID','MainPID','ExecMainCode','ExecMainStatus','InvocationID','ControlGroup','User','Group','NoNewPrivileges','CapabilityBoundingSet')
+ raw=cmd(['/usr/bin/systemctl','show',unit,*('-p'+f for f in fields)])
+ return dict(line.split('=',1) for line in raw.splitlines() if '=' in line)
+def stop_fixture_unit(unit):
+ if cmd(['/usr/bin/systemctl','show',unit,'-p','LoadState','--value'])=='not-found':return
+ cmd(['/usr/bin/systemctl','stop',unit],timeout=130)
+ require(cmd(['/usr/bin/systemctl','show',unit,'-p','MainPID','--value'])=='0','fixture-process-live')
+ if cmd(['/usr/bin/systemctl','show',unit,'-p','ActiveState','--value'])=='failed':cmd(['/usr/bin/systemctl','reset-failed',unit])
+def browser_service():
+ # Called only by the existing trusted fixture owner, never the hardened worker.
+ runner=pwd.getpwnam('runner');require(runner.pw_uid>0 and runner.pw_gid>0,'root-browser-refused')
+ properties=['User=runner','Group='+grp.getgrgid(runner.pw_gid).gr_name,'WorkingDirectory=/opt/relay-updater','UMask=0077','NoNewPrivileges=true','CapabilityBoundingSet=','ProtectSystem=strict','ProtectHome=true','ReadWritePaths='+str(H),'PrivateTmp=true','MemoryMax=2G','TasksMax=256','LimitNOFILE=8192','LimitFSIZE=8M','RuntimeMaxSec=420','TimeoutStopSec=30','SendSIGKILL=no','KillMode=control-group','Type=exec','RemainAfterExit=yes','BindsTo=relay-mixed-lifecycle.service','After=relay-mixed-lifecycle.service','PartOf=relay-mixed-owner.service']
+ args=['/usr/bin/systemd-run','--unit=relay-mixed-browser','--collect',*('--property='+p for p in properties),'/usr/bin/env','-i','PATH=/usr/bin:/bin','HOME='+str(H),'TMPDIR='+str(H),'PLAYWRIGHT_BROWSERS_PATH=/opt/relay/current/browsers','/usr/bin/node',str(K/'browser.mjs'),str(H/'input.json')]
+ record=dict(passed=False,expectedUid=runner.pw_uid,expectedGid=runner.pw_gid)
+ try:
+  cmd(args,timeout=15)
+  initial=unit_snapshot('relay-mixed-browser.service');record['initial']=initial
+  require(initial['User']=='runner' and initial['NoNewPrivileges']=='yes' and initial['CapabilityBoundingSet']=='','browser-service-security-mismatch')
+  invocation=initial['InvocationID'];require(re.fullmatch('[0-9a-f]{32}',invocation),'browser-invocation-missing')
+  end=time.monotonic()+425
+  while True:
+   current=unit_snapshot('relay-mixed-browser.service')
+   require(current['InvocationID']==invocation,'browser-invocation-changed')
+   if current['SubState']=='exited' or current['ActiveState']=='failed':break
+   require(time.monotonic()<end,'browser-service-deadline');time.sleep(.2)
+  record['final']=current
+  require(current['Result']=='success' and current['ExecMainCode']=='1' and current['ExecMainStatus']=='0','browser-service-failed')
+  browser=private_json(H/'browser-result.json',runner.pw_uid)
+  require(browser.get('passed') is True and browser.get('browserCloseAcknowledged') is True and browser.get('cancelled') is False,'browser-result-not-passed')
+  evidence=browser['bootstrap'];require(evidence['uid']==runner.pw_uid and evidence['euid']==runner.pw_uid and evidence['gid']==runner.pw_gid and evidence['procStatus']['CapEff']=='0000000000000000' and evidence['procStatus']['NoNewPrivs']=='1','browser-process-security-mismatch')
+  cg=Path('/sys/fs/cgroup')/current['ControlGroup'].lstrip('/')
+  require((cg/'cgroup.events').exists() and 'populated 0' in (cg/'cgroup.events').read_text(),'browser-cgroup-not-empty')
+  record.update(passed=True,cgroupEmpty=True)
+ finally:
+  stop_fixture_unit('relay-mixed-browser.service')
+  record['stopped']=True
+  R['browserService']=record;private_write(P/'browser-service.json',record);save()
+
 def lifecycle(conf,password):
  global STAGE
  STAGE='signed-lifecycle'
  # This separately labelled phase stops the original broker and opens one exact
  # installed Engine/Broker in a broker-equivalent hardened worker. Not bootstrap.
  cmd(['/usr/bin/systemctl','stop','relay-updater-broker.service'])
- spec=H/'input.json';spec.write_text(json.dumps(dict(password=password,origin=base.NETWORK['relayOrigin'],uiOrigin=base.NETWORK['uiOrigin'])));os.chown(spec,pwd.getpwnam('runner').pw_uid,pwd.getpwnam('runner').pw_gid);spec.chmod(0o600)
+ spec=H/'input.json';private_write(spec,dict(password=password,origin=base.NETWORK['relayOrigin'],uiOrigin=base.NETWORK['uiOrigin'],expectedUid=pwd.getpwnam('runner').pw_uid,expectedGid=pwd.getpwnam('runner').pw_gid));os.chown(spec,pwd.getpwnam('runner').pw_uid,pwd.getpwnam('runner').pw_gid)
  properties=['User=root','Group=root','WorkingDirectory=/opt/relay-updater','UMask=0077','NoNewPrivileges=true','ProtectHome=true','ProtectSystem=strict','ReadWritePaths=/opt/relay /var/lib/relay /var/lib/relay-updater /var/lib/relay-updater-control /run/relay-updater-control /var/lib/relay-mixed-private /var/lib/relay-mixed-browser','PrivateTmp=true','ProtectKernelTunables=true','ProtectKernelModules=true','ProtectControlGroups=true','RestrictSUIDSGID=true','RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK','LockPersonality=true','MemoryMax=3G','TasksMax=512','LimitNOFILE=8192','RuntimeMaxSec=600','TimeoutStopSec=120','SendSIGKILL=no']
+ args=['/usr/bin/systemd-run','--unit=relay-mixed-lifecycle','--wait','--pipe','--collect',*('--property='+p for p in properties),'/usr/bin/python3','-B',str(K/'rehearse.py'),'worker']
+ child=None
  try:
-  cmd(['/usr/bin/systemd-run','--unit=relay-mixed-lifecycle','--wait','--pipe','--collect',*('--property='+p for p in properties),'/usr/bin/python3','-B',str(K/'rehearse.py'),'worker'],timeout=740)
+  child=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,env=dict(PATH='/usr/bin:/bin',LANG='C.UTF-8',PYTHONDONTWRITEBYTECODE='1'))
+  end=time.monotonic()+90
+  while not (P/'browser-ready.json').exists():
+   require(child.poll() is None,'worker-exited-before-browser-ready');require(time.monotonic()<end,'worker-ready-deadline');time.sleep(.1)
+  ready=private_json(P/'browser-ready.json',0);require(ready.get('ready') is True,'worker-not-ready')
+  worker_unit=unit_snapshot('relay-mixed-lifecycle.service');require(str(ready.get('pid'))==worker_unit['MainPID'] and worker_unit['User']=='root' and worker_unit['NoNewPrivileges']=='yes','worker-ready-identity-mismatch');R['workerService']=worker_unit
+  browser_service()
+  gate('separateBrowserService',**R['browserService'])
+  code=child.wait(timeout=120);R['commands'].append(dict(tool='systemd-run',argv=args,exit=code,stage=STAGE));require(code==0,'worker-failed')
  finally:
-  if (P/'lifecycle.json').exists():R['lifecycleAttempt']=json.loads((P/'lifecycle.json').read_text());save()
+  # Browser first: no synthetic user traffic may outlive its broker fixture.
+  stop_fixture_unit('relay-mixed-browser.service')
+  stop_fixture_unit('relay-mixed-lifecycle.service')
+  if child:child.wait(timeout=15)
+  if (P/'lifecycle.json').exists():R['lifecycleAttempt']=private_json(P/'lifecycle.json',0);save()
  result=json.loads((P/'lifecycle.json').read_text());require(result.get('passed') is True,'signed-lifecycle-failed')
  gate('signedLifecycle',**result)
  cmd(['/usr/bin/systemctl','start','relay-updater-broker.service']);base.wait_control()
@@ -263,7 +332,10 @@ def worker():
  engine=Engine(conf);broker=None;t=None
  before={str(p):inventory(p) for p in [C,Path('/etc/relay-updater'),*(Path('/etc/systemd/system')/u for u in UNITS)]}
  web=identity('relay-updater-web.service');initial=engine.current_release();state={n:helper.inventory(Path('/var/lib/relay')/n,uid=pwd.getpwnam('relay').pw_uid) for n in ('accounts.json','users')}
- result=dict(passed=False)
+ result:dict=dict(passed=False)
+ def term(*_):
+  signal.signal(signal.SIGTERM,signal.SIG_IGN);raise InterruptedError('owned-worker-cancellation')
+ signal.signal(signal.SIGTERM,term)
  try:
   work=P/'runtime-selection';work.mkdir(mode=0o700)
   m=engine.releases.verified_manifest('v0.6.8',work)
@@ -275,11 +347,14 @@ def worker():
   broker=Broker(engine);t=threading.Thread(target=broker.serve_forever,kwargs={'poll_interval':.1},daemon=True);t.start();base.wait_control()
   # Browser drives real compiled native launcher, password denial, immediate install,
   # original monitor reads through shutdown, genuine re-login, and matching rollback.
-  runenv=dict(PATH='/usr/bin:/bin',HOME=str(H),TMPDIR=str(H),PLAYWRIGHT_BROWSERS_PATH='/opt/relay/current/browsers')
-  result['preRunuser']=boundary_context()
-  (P/'lifecycle.json').write_text(json.dumps(result))
-  cmd(['/usr/sbin/runuser','-u','runner','--','/usr/bin/env','-i',*(k+'='+v for k,v in runenv.items()),'/usr/bin/node',str(K/'browser.mjs'),str(H/'input.json')],timeout=420)
-  browser=json.loads((H/'browser-result.json').read_text());require(browser.get('passed') is True,'browser-not-passed')
+  result['workerSecurity']=boundary_context();result['workerSecurity']['stage']='broker-worker-before-browser-ready'
+  private_write(P/'browser-ready.json',dict(ready=True,pid=os.getpid()))
+  private_write(P/'lifecycle.json',result)
+  deadline=time.monotonic()+460
+  while not (P/'browser-service.json').exists():
+   require(time.monotonic()<deadline,'browser-service-result-deadline');time.sleep(.1)
+  service=private_json(P/'browser-service.json',0);require(service.get('passed') is True and service.get('stopped') is True,'browser-service-not-passed')
+  browser=private_json(H/'browser-result.json',pwd.getpwnam('runner').pw_uid);require(browser.get('passed') is True,'browser-not-passed')
   engine.thread.join(30);require(not engine.thread.is_alive(),'engine-thread-live')
   require(engine.data['currentVersion']=='v0.6.11' and engine.current_release()==initial,'matching-runtime-not-restored')
   successful=[j for j in engine.data['history'] if j.get('version')=='v0.6.8' and j.get('phase')=='succeeded'];require(len(successful)==1,'signed-install-history-missing')
@@ -309,7 +384,7 @@ def cleanup():
  if not (P/'ownership.json').exists():return 0
  own=json.loads((P/'ownership.json').read_text());require(own.get('admitted') is True,'ownership-not-admitted')
  errors=[]
- for unit in ('relay-mixed-lifecycle.service',*UNITS):
+ for unit in ('relay-mixed-browser.service','relay-mixed-lifecycle.service',*UNITS):
   try:
    if cmd(['/usr/bin/systemctl','show',unit,'-p','LoadState','--value'])=='not-found':continue
    cmd(['/usr/bin/systemctl','stop',unit],timeout=130)
@@ -333,7 +408,7 @@ def cleanup():
   except KeyError:continue
   cmd(['/usr/sbin/groupdel',group])
  require(all(not os.path.lexists(p) for p in ROOTS),'owned-paths-remain')
- for u in UNITS:require(cmd(['/usr/bin/systemctl','show',u,'-p','LoadState','--value'])=='not-found','owned-unit-remains')
+ for u in ('relay-mixed-browser.service','relay-mixed-lifecycle.service',*UNITS):require(cmd(['/usr/bin/systemctl','show',u,'-p','LoadState','--value'])=='not-found','owned-unit-remains')
  for port in (4180,4191):
   with socket.socket() as s:require(s.connect_ex((own['ip'],port))!=0,'owned-listener-remains')
  prior=json.loads((P/'result.json').read_text())
@@ -350,6 +425,10 @@ def run():
  import ipaddress
  ip=next(a['local'] for i in addresses for a in i.get('addr_info',[]) if ipaddress.ip_address(a['local']).is_private and not ipaddress.ip_address(a['local']).is_loopback)
  base.guard(True,ip)
+ for unit in ('relay-mixed-browser.service','relay-mixed-lifecycle.service'):
+  require(cmd(['/usr/bin/systemctl','show',unit,'-p','LoadState','--value'])=='not-found','existing-fixture-unit-refused')
+  for root in ('/etc/systemd/system','/run/systemd/system','/run/systemd/transient'):
+   require(not os.path.lexists(Path(root)/unit) and not os.path.lexists(Path(root)/(unit+'.d')),'existing-fixture-unit-file-refused')
  for n in (*ROOTS,str(P)):require(not os.path.lexists(n),'existing-resource-refused')
  P.mkdir(mode=0o700);save()
  try:

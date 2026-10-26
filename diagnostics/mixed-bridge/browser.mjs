@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import {readFile,writeFile,access,stat} from 'node:fs/promises';
+import {readFile,writeFile,access,stat,open} from 'node:fs/promises';
 import {constants} from 'node:fs';
 const root='/var/lib/relay-mixed-browser';
 const modulePath='/opt/relay/current/node_modules/playwright/index.mjs';
-let spec,chromium,browser,context,page,stage='bootstrap',passed=false,observerStop=false,observer;
+let spec,chromium,browser,context,page,stage='bootstrap',passed=false,observerStop=false,observer,cancelled=false,closing;
+const closeBrowser=()=>closing??=(browser?browser.close():Promise.resolve());
+process.on('SIGTERM',()=>{cancelled=true;observerStop=true;void closeBrowser().catch(()=>{});});
 const result={passed:false,gates:{},requests:[],monitorSamples:0,monitorDuringRuntimeUnavailable:0};
 // Fixed paths/keys and vocabulary only. Never retain arbitrary exception text,
 // environment, browser launch logs, input spec, cookies or credential-bearing URLs.
@@ -35,11 +37,14 @@ async function login(){
 try{
  result.bootstrap=await bootstrapEvidence();
  stage='module-import';({chromium}=await import(modulePath));
- stage='input-read';spec=JSON.parse(await readFile(process.argv[2],'utf8'));
+ stage='input-read';assert.equal(process.argv[2],root+'/input.json');const input=await open(process.argv[2],constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+ try{const s=await input.stat();assert.ok(s.isFile()&&s.uid===process.getuid()&&(s.mode&0o7777)===0o600&&s.nlink===1&&s.size<=4096);const b=Buffer.alloc(4097);const {bytesRead}=await input.read(b,0,b.length,0);assert.ok(bytesRead<=4096);spec=JSON.parse(b.subarray(0,bytesRead).toString('utf8'));}finally{await input.close();}
+ assert.ok(spec.expectedUid>0&&spec.expectedGid>0);assert.equal(process.getuid(),spec.expectedUid);assert.equal(process.geteuid(),spec.expectedUid);assert.equal(process.getgid(),spec.expectedGid);
+ assert.equal(result.bootstrap.procStatus.CapEff,'0000000000000000');assert.equal(result.bootstrap.procStatus.NoNewPrivs,'1');assert.equal(cancelled,false);
  stage='executable-probe';const executable=chromium.executablePath();
  result.bootstrap.executableInConfiguredCache=executable.startsWith('/opt/relay/current/browsers/');
  result.bootstrap.executable=await probe(executable);
- stage='launch';browser=await chromium.launch({headless:true,chromiumSandbox:true});
+ stage='launch';browser=await chromium.launch({headless:true,chromiumSandbox:true,handleSIGTERM:false});if(cancelled){closing=undefined;await closeBrowser();throw Error('cancelled');}
  context=await browser.newContext({viewport:{width:1440,height:1050}});page=await context.newPage();
  context.on('request',r=>{const p=new URL(r.url()).pathname;if(r.method()==='POST'&&p.startsWith('/updater/api/'))result.requests.push(p);});
  await page.goto(spec.origin);await login();result.gates.compiledLogin=true;
@@ -72,7 +77,7 @@ try{
 }catch(e){result.error={stage,type:['Error','TypeError','SyntaxError','AssertionError'].includes(e.name)?e.name:'OTHER',code:['ERR_MODULE_NOT_FOUND','MODULE_NOT_FOUND','EACCES','EPERM','ENOENT','ENOTDIR','ERR_REQUIRE_ASYNC_MODULE'].includes(e.code)?e.code:null,symptoms:symptoms.filter(s=>String(e.message).includes(s)),modulePathMentioned:String(e.message).includes(modulePath)};}
 finally{
  observerStop=true;try{await observer;}catch{passed=false;result.observerFailed=true;}
- try{result.browserStarted=Boolean(browser);if(browser){await browser.close();result.browserCloseAcknowledged=true;}else result.browserCloseAcknowledged=false;}catch{passed=false;result.browserCloseAcknowledged=false;}
- result.passed=passed;await writeFile(root+'/browser-result.json',JSON.stringify(result,null,2)+'\n');
+ try{result.browserStarted=Boolean(browser);if(browser){await closeBrowser();result.browserCloseAcknowledged=true;}else result.browserCloseAcknowledged=false;}catch{passed=false;result.browserCloseAcknowledged=false;}
+ result.cancelled=cancelled;passed=passed&&!cancelled;result.passed=passed;await writeFile(root+'/browser-result.next',JSON.stringify(result,null,2)+'\n',{mode:0o600,flag:'wx'});await (await import('node:fs/promises')).rename(root+'/browser-result.next',root+'/browser-result.json');
 }
 process.exitCode=passed?0:1;

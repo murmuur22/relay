@@ -14,7 +14,7 @@ def probe(mode,d):
  try:
   (d/'owned').mkdir();s=socket.socket();s.bind(('127.0.0.1',0));s.listen()
   (d/'ready.json').write_text(json.dumps(dict(pid=os.getpid(),port=s.getsockname()[1])))
-  if mode=='cancel':
+  if mode in ('cancel','timeout'):
    end=time.monotonic()+8
    while not cancelled and time.monotonic()<end:time.sleep(.01)
    if not cancelled:raise RuntimeError('cancellation never delivered')
@@ -27,7 +27,7 @@ def probe(mode,d):
   shutil.rmtree(d/'owned');r['cleanup']=not (d/'owned').exists()
   signal.signal(signal.SIGTERM,old)
   r['childExit']=0 if r['functional'] and r['evidenceWritten'] and not cancelled else 1
-  (d/'receipt.json').write_text(json.dumps(r))
+  if mode!='no-result':(d/'receipt.json').write_text(json.dumps(r))
  return r['childExit']
 
 def run():
