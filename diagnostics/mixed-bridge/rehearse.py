@@ -25,7 +25,7 @@ def require(value,message):
  if not value:raise RuntimeError(message)
 def cmd(args,timeout=120,cwd=None,env=None):
  r=subprocess.run(args,cwd=cwd,env=env or dict(PATH='/usr/bin:/bin',LANG='C.UTF-8',HOME='/nonexistent',GH_CONFIG_DIR='/nonexistent',PYTHONDONTWRITEBYTECODE='1'),stdin=subprocess.DEVNULL,capture_output=True,timeout=timeout)
- R['commands'].append(dict(tool=Path(args[0]).name,exit=r.returncode,stage=STAGE))
+ R['commands'].append(dict(tool=Path(args[0]).name,argv=args,exit=r.returncode,stage=STAGE))
  if r.returncode:raise RuntimeError('command-failed')
  return r.stdout.decode().strip()
 def load(name,file):
@@ -131,7 +131,9 @@ def bootstrap(dirs,password):
   with socket.socket() as s:require(s.connect_ex((base.NETWORK['bind'],4191))!=0,'stopped-web-listener-live')
   stable()
  def start():
-  cmd(['/usr/bin/systemctl','reset-failed','relay-updater-web.service']);cmd(['/usr/bin/systemctl','start','relay-updater-web.service']);base.wait_control();stable()
+  if cmd(['/usr/bin/systemctl','show','relay-updater-web.service','-p','ActiveState','--value'])=='failed':
+   cmd(['/usr/bin/systemctl','reset-failed','relay-updater-web.service'])
+  cmd(['/usr/bin/systemctl','start','relay-updater-web.service']);base.wait_control();stable()
   status,_,_=base.raw_http(4191,'/updater/');require(status==200,'web-index-not-ready')
   R['downtimeSeconds'].append(round(time.monotonic()-downtime[0],6));downtime[0]=None
  def restore(backup):
