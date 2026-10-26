@@ -1,0 +1,140 @@
+{
+  "v0.4.2": {
+    "source": "5466bd50b3a756955ae9dbd6ceb3f5fde29e7af1",
+    "manifestSha256": "5fd771f95a3d74aed53c564a7a89a53a32ab484fc40d2ef726c8e64429228ec6",
+    "manifest": {
+      "protocol": 1,
+      "repository": "murmuur22/relay",
+      "version": "v0.4.2",
+      "platform": "linux-x64",
+      "stateSchema": 1,
+      "rollbackCompatible": true,
+      "minimumNode": "26.8.1",
+      "artifact": {
+        "name": "relay-linux-x64.tar.gz",
+        "sha256": "95051d4c58493d626936485784ac7a9c69a398f9b02cb4e1bfc38cde438a1d94",
+        "size": 301893902
+      },
+      "updaterArtifact": {
+        "name": "relay-updater-linux-x64.tar.gz",
+        "sha256": "572af0ff4795f1466802e84840ffc5b2b30856d23a6c0f625a5d13f5f63116c0",
+        "size": 187987
+      }
+    }
+  },
+  "v0.6.11": {
+    "source": "f477a9d8f227d42e83308d45c37e689d085649b7",
+    "manifestSha256": "ab9fe39842adf38096f571c0f3ceb9bc4a0a0afe5baf80d308a82f700efa3977",
+    "manifest": {
+      "protocol": 1,
+      "repository": "murmuur22/relay",
+      "version": "v0.6.11",
+      "platform": "linux-x64",
+      "stateSchema": 1,
+      "rollbackCompatible": true,
+      "minimumNode": "26.8.1",
+      "artifact": {
+        "name": "relay-linux-x64.tar.gz",
+        "sha256": "ffee1b605d2ce2e48bd34576ce80cda37de8e5d4c913ff977912a436e6e6d6fa",
+        "size": 302964043
+      },
+      "updaterArtifact": {
+        "name": "relay-updater-linux-x64.tar.gz",
+        "sha256": "562451b94582450938ea8d10ac9973d8b4847a9bc8cc772aff7ab46e31a6bfb6",
+        "size": 244763
+      }
+    }
+  },
+  "v0.6.3": {
+    "source": "220553aa557d0d6b4a442a11f2f1ee7ed88625ab",
+    "manifestSha256": "a2db0d118b7d1edcc7b0d2df6341c13a702f33c20911e1f2e5d41293c936cf03",
+    "manifest": {
+      "protocol": 1,
+      "repository": "murmuur22/relay",
+      "version": "v0.6.3",
+      "platform": "linux-x64",
+      "stateSchema": 1,
+      "rollbackCompatible": true,
+      "minimumNode": "26.8.1",
+      "artifact": {
+        "name": "relay-linux-x64.tar.gz",
+        "sha256": "1fcb5136cf64895293560a12c05eab09f951d11d55f74c97d23af3450ba4747a",
+        "size": 302720991
+      },
+      "updaterArtifact": {
+        "name": "relay-updater-linux-x64.tar.gz",
+        "sha256": "025caf18035adc8100e2338dd9b2dc583dfe8900bd10fb68c461c4f53648a2bf",
+        "size": 190499
+      }
+    }
+  },
+  "v0.6.4": {
+    "source": "0bf423eae6709b28fd5ace2a4b97e74924626fc8",
+    "manifestSha256": "83f63eac3b456b6569b626f1bf9683569d5aadce09e2289b2c8cb42c0ae9722b",
+    "manifest": {
+      "protocol": 1,
+      "repository": "murmuur22/relay",
+      "version": "v0.6.4",
+      "platform": "linux-x64",
+      "stateSchema": 1,
+      "rollbackCompatible": true,
+      "minimumNode": "26.8.1",
+      "artifact": {
+        "name": "relay-linux-x64.tar.gz",
+        "sha256": "054f3a3c6521de551b56f7d698d89a68a3156dbb02d19a9f0437d104125b4aff",
+        "size": 302726921
+      },
+      "updaterArtifact": {
+        "name": "relay-updater-linux-x64.tar.gz",
+        "sha256": "1cb69f20b7f4091a4e29c4eade6763606172ef254545c11fde5c24cedd83f687",
+        "size": 193483
+      }
+    }
+  },
+  "v0.6.5": {
+    "source": "3a13737d619cd832a29c25db3c2108a7b2c65998",
+    "manifestSha256": "18358070fe9f155454a4887af82bca7d6256fe99ca1b09455177b9ac7802d1a5",
+    "manifest": {
+      "protocol": 1,
+      "repository": "murmuur22/relay",
+      "version": "v0.6.5",
+      "platform": "linux-x64",
+      "stateSchema": 1,
+      "rollbackCompatible": true,
+      "minimumNode": "26.8.1",
+      "artifact": {
+        "name": "relay-linux-x64.tar.gz",
+        "sha256": "9adfde37782e5efebc6e10a6e5dc4360846d67e9d0c9315e455901438bd5d27b",
+        "size": 302927593
+      },
+      "updaterArtifact": {
+        "name": "relay-updater-linux-x64.tar.gz",
+        "sha256": "eba0d199630725ec15e51af1937669bf0d368cada3fb127875a1d56e476390ad",
+        "size": 243642
+      }
+    }
+  },
+  "v0.6.8": {
+    "source": "122d196725bd26b3e850a9ec8ed28dfcdc7b2bc2",
+    "manifestSha256": "f670a51ee016356ccf1e4dbb91eb62b7be6e73512078c19de3f722b3e4c90e5d",
+    "manifest": {
+      "protocol": 1,
+      "repository": "murmuur22/relay",
+      "version": "v0.6.8",
+      "platform": "linux-x64",
+      "stateSchema": 1,
+      "rollbackCompatible": true,
+      "minimumNode": "26.8.1",
+      "artifact": {
+        "name": "relay-linux-x64.tar.gz",
+        "sha256": "6138417587ed89009efd0890a4fdffc4fdb7ec1dec7294b46eb46c7e6c43f579",
+        "size": 302954503
+      },
+      "updaterArtifact": {
+        "name": "relay-updater-linux-x64.tar.gz",
+        "sha256": "eaf2bea736727f1ed855be2aef315d44131abe50583f60dff07215100da859fe",
+        "size": 243646
+      }
+    }
+  }
+}

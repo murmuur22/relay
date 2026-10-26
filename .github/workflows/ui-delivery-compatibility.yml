@@ -1,0 +1,124 @@
+name: Exact mixed presentation bridge disposable rehearsal
+on:
+  workflow_dispatch:
+    inputs:
+      diagnostic-sha:
+        description: Exact reviewed diagnostic commit
+        required: true
+        type: string
+      source-sha:
+        description: Literal public source closure pin
+        required: true
+        type: string
+      acknowledge:
+        description: MIXED_BRIDGE_DISPOSABLE_HOST_ONLY
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: relay-mixed-presentation-bridge
+  cancel-in-progress: false
+jobs:
+  rehearse:
+    if: github.repository == 'murmuur22/relay' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/diag/relay-mixed-presentation-bridge' && inputs['diagnostic-sha'] == github.sha && inputs['source-sha'] == 'f477a9d8f227d42e83308d45c37e689d085649b7' && inputs.acknowledge == 'MIXED_BRIDGE_DISPOSABLE_HOST_ONLY'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      DIAGNOSTIC_SHA: ${{ inputs['diagnostic-sha'] }}
+      SOURCE_SHA: ${{ inputs['source-sha'] }}
+      ACKNOWLEDGE: ${{ inputs.acknowledge }}
+      RUNNER_KIND: ${{ runner.environment }}
+    steps:
+      - name: Exact bounded hosted admission before checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" = workflow_dispatch ]] || exit 1
+          [[ "$GITHUB_REPOSITORY" = murmuur22/relay ]] || exit 1
+          [[ "$GITHUB_REF" = refs/heads/diag/relay-mixed-presentation-bridge ]] || exit 1
+          [[ "$GITHUB_WORKFLOW_REF" = murmuur22/relay/.github/workflows/ui-delivery-compatibility.yml@refs/heads/diag/relay-mixed-presentation-bridge ]] || exit 1
+          [[ "$RUNNER_KIND" = github-hosted && "$RUNNER_OS" = Linux && "$RUNNER_ARCH" = X64 ]] || exit 1
+          [[ "$DIAGNOSTIC_SHA" =~ ^[0-9a-f]{40}$ && "$DIAGNOSTIC_SHA" = "$GITHUB_SHA" ]] || exit 1
+          [[ "$SOURCE_SHA" = f477a9d8f227d42e83308d45c37e689d085649b7 ]] || exit 1
+          [[ "$ACKNOWLEDGE" = MIXED_BRIDGE_DISPOSABLE_HOST_ONLY ]] || exit 1
+          [[ "$ImageOS" = ubuntu24 ]] || exit 1
+          test ! -e /opt/relay-mixed-kit
+          test ! -e /var/lib/relay-mixed-private
+          test ! -e /opt/relay
+          test ! -e /opt/relay-updater
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: route
+      - name: Checkout immutable public prerequisite source separately
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: f477a9d8f227d42e83308d45c37e689d085649b7
+          persist-credentials: false
+          path: source
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26.8.1'
+      - name: Admission and real cleanup controls before production of fixture resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C route rev-parse HEAD)" = "$DIAGNOSTIC_SHA" ]] || exit 1
+          bash route/diagnostics/mixed-bridge/admit.sh
+          python3 -B route/diagnostics/mixed-bridge/test_controls.py
+          mkdir -m 700 "$RUNNER_TEMP/relay-mixed-public" "$RUNNER_TEMP/relay-mixed-prerequisites"
+          python3 -B route/diagnostics/mixed-bridge/review.py --source route
+      - name: Disposable prerequisites only, no operator endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd source
+          [[ "$(git rev-parse HEAD)" = "$SOURCE_SHA" ]] || exit 1
+          npm ci --ignore-scripts > "$RUNNER_TEMP/relay-mixed-prerequisites/npm.log" 2>&1
+          node node_modules/playwright/cli.js install-deps chromium > "$RUNNER_TEMP/relay-mixed-prerequisites/chromium-deps.log" 2>&1
+          sudo apt-get update > "$RUNNER_TEMP/relay-mixed-prerequisites/apt.log" 2>&1
+          sudo apt-get install -y python3-pil >> "$RUNNER_TEMP/relay-mixed-prerequisites/apt.log" 2>&1
+          sudo install -m 0755 "$(command -v node)" /usr/bin/node
+          sudo chmod 0755 /opt
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 > "$RUNNER_TEMP/relay-mixed-prerequisites/namespaces.log"
+          sudo install -d -m 0755 /opt/relay-mixed-kit /opt/relay-mixed-kit/updater /opt/relay-mixed-kit/updater/broker
+          for f in admit.sh baseline.json sources.json install-release.py qualify-systemd.py qualify-presentation-bootstrap.py rehearse.py browser.mjs; do
+            sudo install -m 0644 "../route/diagnostics/mixed-bridge/$f" "/opt/relay-mixed-kit/$f"
+          done
+          for f in auth driver engine enroll observe releases server; do
+            sudo install -m 0644 "updater/broker/$f.py" "/opt/relay-mixed-kit/updater/broker/$f.py"
+          done
+      - name: Native systemd exact mixed bootstrap and signed lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B route/diagnostics/mixed-bridge/supervise.py run
+      - name: Independent owned readback and sanitized finalizer
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f /opt/relay-mixed-kit/rehearse.py; then
+            sudo env -i PATH=/usr/bin:/bin /usr/bin/python3 -B /opt/relay-mixed-kit/rehearse.py cleanup
+          fi
+          review_status=0
+          python3 -B route/diagnostics/mixed-bridge/review.py --final "$RUNNER_TEMP/relay-mixed-public" || review_status=$?
+          if test -f /opt/relay-mixed-kit/rehearse.py; then
+            sudo env -i PATH=/usr/bin:/bin /usr/bin/python3 -B /opt/relay-mixed-kit/rehearse.py dispose
+          fi
+          sudo test ! -e /var/lib/relay-mixed-private
+          sudo test ! -e /opt/relay-mixed-kit
+          exit "$review_status"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: relay-mixed-bridge-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/relay-mixed-public/*.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: false
+          include-hidden-files: false

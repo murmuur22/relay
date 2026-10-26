@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict';
+import {readFile,writeFile} from 'node:fs/promises';
+import {chromium} from '/opt/relay/current/node_modules/playwright/index.mjs';
+const spec=JSON.parse(await readFile(process.argv[2],'utf8'));
+const root='/var/lib/relay-mixed-browser';
+let browser,context,page,stage='launch',passed=false,observerStop=false,observer;
+const result={passed:false,gates:{},requests:[],monitorSamples:0,monitorDuringRuntimeUnavailable:0};
+const pause=ms=>new Promise(r=>setTimeout(r,ms));
+async function wait(fn,label,timeout=45000){const end=Date.now()+timeout;let last;while(Date.now()<end){try{if(await fn())return;}catch(e){last=e;}await pause(100);}throw Error(label);}
+async function text(locator,value,timeout=45000){await wait(async()=>await locator.textContent()===value,'text-gate',timeout);}
+async function login(){
+ await page.getByLabel('username',{exact:true}).waitFor({state:'visible',timeout:30000});
+ if(await page.getByRole('button',{name:'Retry Relay connection',exact:true}).isVisible())await page.getByRole('button',{name:'Retry Relay connection',exact:true}).click();
+ await page.getByLabel('username',{exact:true}).fill('admin');await page.getByLabel('password',{exact:true}).fill(spec.password);await page.getByRole('button',{name:'Enter →',exact:true}).click();
+ await page.getByLabel('username',{exact:true}).waitFor({state:'hidden',timeout:30000});
+}
+try{
+ browser=await chromium.launch({headless:true,chromiumSandbox:true});
+ context=await browser.newContext({viewport:{width:1440,height:1050}});page=await context.newPage();
+ context.on('request',r=>{const p=new URL(r.url()).pathname;if(r.method()==='POST'&&p.startsWith('/updater/api/'))result.requests.push(p);});
+ await page.goto(spec.origin);await login();result.gates.compiledLogin=true;
+ stage='native-launch';await page.getByRole('button',{name:'Open Updater',exact:true}).dblclick();
+ const browse=page.locator('[data-window-id="system-updater"]');await wait(async()=>await browse.getByLabel('Available release').inputValue()==='v0.6.8','signed-selection');
+ await browse.getByRole('button',{name:'Start update',exact:true}).click();
+ const iframe=page.locator('iframe[title="Independent Relay updater"]');await iframe.waitFor({state:'visible'});const original=await iframe.elementHandle();
+ const app=page.frameLocator('iframe[title="Independent Relay updater"]');await text(app.locator('#current-version'),'v0.6.11');assert.equal(context.pages().length,1);result.gates.nativeCompiledStartAndTicketExchange=true;
+ const initialCookies=await context.cookies(spec.uiOrigin+'/updater/');const monitor=initialCookies.find(c=>c.name!=='relay_session');assert.ok(monitor);
+ stage='password-denial';await app.getByRole('button',{name:'Review installation',exact:true}).click();await app.locator('#confirmed').check();await app.getByLabel('Current Relay password').fill('deliberately invalid disposable password');await app.getByRole('button',{name:'Authorize installation',exact:true}).click();await app.locator('#confirm-error').waitFor({state:'visible'});
+ const denied=await context.request.get(spec.uiOrigin+'/updater/api/state');assert.equal(denied.status(),200);assert.equal((await denied.json()).job,null);await app.getByRole('button',{name:'Go back',exact:true}).click();result.gates.wrongPasswordCreatesNoJob=true;
+ stage='signed-install';
+ observer=(async()=>{while(!observerStop){let unavailable=false;try{const r=await context.request.get(spec.origin+'/health/ready',{timeout:600});unavailable=r.status()!==200;}catch{unavailable=true;}
+  const r=await context.request.get(spec.uiOrigin+'/updater/api/state',{timeout:5000});assert.equal(r.status(),200);result.monitorSamples++;if(unavailable)result.monitorDuringRuntimeUnavailable++;await pause(100);
+ }})();
+ await app.getByRole('button',{name:'Review installation',exact:true}).click();await app.locator('#confirmed').check();await app.getByLabel('Current Relay password').fill(spec.password);await app.getByRole('button',{name:'Authorize installation',exact:true}).click();
+ await text(app.locator('#current-version'),'v0.6.8',240000);await text(app.locator('#phase'),'Update complete',45000);result.gates.realSignedImmediateInstall=true;
+ assert.equal(await iframe.evaluate((el,old)=>el===old,original),true);assert.equal((await context.cookies(spec.uiOrigin+'/updater/')).find(c=>c.name===monitor.name)?.value,monitor.value);result.gates.originalMonitorRetained=true;
+ // Select v0.6.8 in the same web process; the reader eagerly pins its complete
+ // descriptor without requesting the lazy assets, then rollback/prune tests them.
+ const selected=await context.request.get(spec.uiOrigin+'/updater/');assert.equal(selected.status(),200);assert.equal(selected.headers()['x-relay-updater-presentation'],'v0.6.8');
+ const desc=JSON.parse(await readFile('/opt/relay/current/updater-presentation/presentation.json','utf8'));assert.equal(desc.version,'v0.6.8');await writeFile(root+'/retained-assets.json',JSON.stringify(desc.files.filter(f=>f.path!=='index.html')));
+ stage='genuine-relogin';await app.getByRole('button',{name:'Sign in to Relay',exact:true}).click();await login();await iframe.waitFor({state:'visible'});assert.equal(await iframe.evaluate((el,old)=>el===old,original),true);
+ const mutation=await page.evaluate(async()=>{const s=await(await fetch('/api/session')).json();const r=await fetch('/api/desktop/folders',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':s.csrf},body:JSON.stringify({label:'Signed lifecycle state must disappear on rollback',parentId:null})});return {status:r.status,body:await r.json()};});assert.equal(mutation.status,200);assert.ok(mutation.body.itemId);await writeFile(root+'/mutation.json',JSON.stringify({itemId:mutation.body.itemId}));result.gates.genuinePostInstallStateMutation=true;
+ stage='matching-state-rollback';await app.getByRole('button',{name:'Review rollback',exact:true}).click();await app.locator('#confirmed').check();await app.getByLabel('Current Relay password').fill(spec.password);await app.getByRole('button',{name:'Authorize rollback',exact:true}).click();await text(app.locator('#current-version'),'v0.6.11',90000);await text(app.locator('#phase'),'Rolled back',45000);
+ assert.equal(await iframe.evaluate((el,old)=>el===old,original),true);assert.equal((await context.cookies(spec.uiOrigin+'/updater/')).find(c=>c.name===monitor.name)?.value,monitor.value);
+ assert.ok(result.monitorDuringRuntimeUnavailable>0,'no actual runtime-unavailability monitoring sample');result.gates.originalMonitorDuringRealRuntimeLoss=true;
+ assert.equal(result.requests.filter(p=>p==='/updater/api/install').length,2);assert.equal(result.requests.filter(p=>p==='/updater/api/rollback').length,1);assert.equal(result.requests.filter(p=>/prepare|apply/.test(p)).length,0);result.gates.actualCompiledLegacyInstallNotStaged=true;
+ result.gates.matchingRollbackThroughOriginalMonitor=true;passed=true;
+}catch(e){result.error={stage,type:e.name};}
+finally{
+ observerStop=true;try{await observer;}catch{passed=false;result.observerFailed=true;}
+ try{await browser?.close();result.browserCloseAcknowledged=true;}catch{passed=false;result.browserCloseAcknowledged=false;}
+ result.passed=passed;await writeFile(root+'/browser-result.json',JSON.stringify(result,null,2)+'\n');
+}
+process.exitCode=passed?0:1;
