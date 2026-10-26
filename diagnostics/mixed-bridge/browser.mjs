@@ -1,10 +1,28 @@
 import assert from 'node:assert/strict';
-import {readFile,writeFile} from 'node:fs/promises';
-import {chromium} from '/opt/relay/current/node_modules/playwright/index.mjs';
-const spec=JSON.parse(await readFile(process.argv[2],'utf8'));
+import {readFile,writeFile,access,stat} from 'node:fs/promises';
+import {constants} from 'node:fs';
 const root='/var/lib/relay-mixed-browser';
-let browser,context,page,stage='launch',passed=false,observerStop=false,observer;
+const modulePath='/opt/relay/current/node_modules/playwright/index.mjs';
+let spec,chromium,browser,context,page,stage='bootstrap',passed=false,observerStop=false,observer;
 const result={passed:false,gates:{},requests:[],monitorSamples:0,monitorDuringRuntimeUnavailable:0};
+// Fixed paths/keys and vocabulary only. Never retain arbitrary exception text,
+// environment, browser launch logs, input spec, cookies or credential-bearing URLs.
+const symptoms=['ERR_MODULE_NOT_FOUND','MODULE_NOT_FOUND','EACCES','EPERM','ENOENT','Permission denied','Operation not permitted','Executable doesn\'t exist','No usable sandbox','Failed to move to new namespace','Target page, context or browser has been closed'];
+async function probe(path){
+ const row={};
+ try{const s=await stat(path);Object.assign(row,{uid:s.uid,gid:s.gid,mode:s.mode&0o7777,directory:s.isDirectory()});}catch(e){row.statCode=['EACCES','EPERM','ENOENT','ENOTDIR'].includes(e.code)?e.code:'OTHER';}
+ for(const [name,mode] of [['read',constants.R_OK],['execute',constants.X_OK],['write',constants.W_OK]]){
+  try{await access(path,mode);row[name]=true;}catch(e){row[name]=false;row[name+'Code']=['EACCES','EPERM','ENOENT','ENOTDIR','EROFS'].includes(e.code)?e.code:'OTHER';}
+ }
+ return row;
+}
+async function bootstrapEvidence(){
+ const paths={opt:'/opt',install:'/opt/relay',current:'/opt/relay/current',modules:'/opt/relay/current/node_modules',playwright:'/opt/relay/current/node_modules/playwright',module:modulePath,browsers:'/opt/relay/current/browsers',kit:'/opt/relay-mixed-kit',home:root,input:root+'/input.json',node:'/usr/bin/node'};
+ const evidence={uid:process.getuid(),euid:process.geteuid(),gid:process.getgid(),groups:process.getgroups(),homeMatches:process.env.HOME===root,tmpMatches:process.env.TMPDIR===root,cacheMatches:process.env.PLAYWRIGHT_BROWSERS_PATH==='/opt/relay/current/browsers',cwdMatches:process.cwd()==='/opt/relay-updater',paths:{}};
+ for(const [label,path] of Object.entries(paths))evidence.paths[label]=await probe(path);
+ try{const status=await readFile('/proc/self/status','utf8');evidence.procStatus=Object.fromEntries(['NoNewPrivs','CapEff','Seccomp'].map(key=>[key,status.match(new RegExp('^'+key+':\\s*([0-9a-f]+)$','m'))?.[1]??'unavailable']));}catch{evidence.procStatusUnavailable=true;}
+ return evidence;
+}
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 async function wait(fn,label,timeout=45000){const end=Date.now()+timeout;let last;while(Date.now()<end){try{if(await fn())return;}catch(e){last=e;}await pause(100);}throw Error(label);}
 async function text(locator,value,timeout=45000){await wait(async()=>await locator.textContent()===value,'text-gate',timeout);}
@@ -15,7 +33,13 @@ async function login(){
  await page.getByLabel('username',{exact:true}).waitFor({state:'hidden',timeout:30000});
 }
 try{
- browser=await chromium.launch({headless:true,chromiumSandbox:true});
+ result.bootstrap=await bootstrapEvidence();
+ stage='module-import';({chromium}=await import(modulePath));
+ stage='input-read';spec=JSON.parse(await readFile(process.argv[2],'utf8'));
+ stage='executable-probe';const executable=chromium.executablePath();
+ result.bootstrap.executableInConfiguredCache=executable.startsWith('/opt/relay/current/browsers/');
+ result.bootstrap.executable=await probe(executable);
+ stage='launch';browser=await chromium.launch({headless:true,chromiumSandbox:true});
  context=await browser.newContext({viewport:{width:1440,height:1050}});page=await context.newPage();
  context.on('request',r=>{const p=new URL(r.url()).pathname;if(r.method()==='POST'&&p.startsWith('/updater/api/'))result.requests.push(p);});
  await page.goto(spec.origin);await login();result.gates.compiledLogin=true;
@@ -45,10 +69,10 @@ try{
  assert.ok(result.monitorDuringRuntimeUnavailable>0,'no actual runtime-unavailability monitoring sample');result.gates.originalMonitorDuringRealRuntimeLoss=true;
  assert.equal(result.requests.filter(p=>p==='/updater/api/install').length,2);assert.equal(result.requests.filter(p=>p==='/updater/api/rollback').length,1);assert.equal(result.requests.filter(p=>/prepare|apply/.test(p)).length,0);result.gates.actualCompiledLegacyInstallNotStaged=true;
  result.gates.matchingRollbackThroughOriginalMonitor=true;passed=true;
-}catch(e){result.error={stage,type:e.name};}
+}catch(e){result.error={stage,type:['Error','TypeError','SyntaxError','AssertionError'].includes(e.name)?e.name:'OTHER',code:['ERR_MODULE_NOT_FOUND','MODULE_NOT_FOUND','EACCES','EPERM','ENOENT','ENOTDIR','ERR_REQUIRE_ASYNC_MODULE'].includes(e.code)?e.code:null,symptoms:symptoms.filter(s=>String(e.message).includes(s)),modulePathMentioned:String(e.message).includes(modulePath)};}
 finally{
  observerStop=true;try{await observer;}catch{passed=false;result.observerFailed=true;}
- try{await browser?.close();result.browserCloseAcknowledged=true;}catch{passed=false;result.browserCloseAcknowledged=false;}
+ try{result.browserStarted=Boolean(browser);if(browser){await browser.close();result.browserCloseAcknowledged=true;}else result.browserCloseAcknowledged=false;}catch{passed=false;result.browserCloseAcknowledged=false;}
  result.passed=passed;await writeFile(root+'/browser-result.json',JSON.stringify(result,null,2)+'\n');
 }
 process.exitCode=passed?0:1;

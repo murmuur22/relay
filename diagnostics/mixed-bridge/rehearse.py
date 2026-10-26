@@ -25,7 +25,11 @@ def require(value,message):
  if not value:raise RuntimeError(message)
 def cmd(args,timeout=120,cwd=None,env=None):
  r=subprocess.run(args,cwd=cwd,env=env or dict(PATH='/usr/bin:/bin',LANG='C.UTF-8',HOME='/nonexistent',GH_CONFIG_DIR='/nonexistent',PYTHONDONTWRITEBYTECODE='1'),stdin=subprocess.DEVNULL,capture_output=True,timeout=timeout)
- R['commands'].append(dict(tool=Path(args[0]).name,argv=args,exit=r.returncode,stage=STAGE))
+ record=dict(tool=Path(args[0]).name,argv=args,exit=r.returncode,stage=STAGE)
+ if r.returncode and Path(args[0]).name=='runuser':
+  # Fixed symptom vocabulary only: never publish raw child stderr/spec/secrets.
+  record['browserBootstrapSymptoms']=[s for s in ('ERR_MODULE_NOT_FOUND','MODULE_NOT_FOUND','EACCES','EPERM','ENOENT','Permission denied','Operation not permitted','cannot open session','failed to execute','SyntaxError','ERR_REQUIRE_ASYNC_MODULE') if s.encode() in r.stderr]
+ R['commands'].append(record)
  if r.returncode:raise RuntimeError('command-failed')
  return r.stdout.decode().strip()
 def load(name,file):
