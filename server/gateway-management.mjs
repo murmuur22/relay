@@ -1,4 +1,6 @@
 import {gatewayHTTPSOrigin} from './experimental-gateway-domains.mjs';
+import {isCockpitTarget} from './gateway-service-profiles.mjs';
+import {targetCheck} from './gateway-target-check.mjs';
 import {caddySnippet} from './gateway-caddy.mjs';
 import {open,rm,lstat} from 'node:fs/promises';
 import {renameSync} from 'node:fs';
@@ -18,11 +20,33 @@ export async function gatewayStartup(runtime,operatorPath,programmatic){
   return {source:'managed',reference,settings:await validateGatewayReference(reference)};
  }catch{throw Error('Invalid managed gateway configuration');}
 }
-export function gatewayManagementRoutes(app,{runtime,startup,getEdge,setEdge,startEdge,wrap,getSession,admit,accounts,sessions,managementPort,updaterPort,hostname}){
+export function gatewayManagementRoutes(app,{runtime,startup,getEdge,setEdge,startEdge,wrap,getSession,admit,accounts,sessions,managementPort,updaterPort,hostname,onChange=()=>{}}){
  let reference=startup.reference,settings=startup.settings,source=startup.source,busy=false,failures=0,resetAt=0;
  const status=()=>{const edge=getEdge();return {source,enabled:!!edge,desktopOrigin:edge?.desktopOrigin??null,appBaseDomain:edge?.available().appBaseDomain??null,config:source==='managed'?structuredClone(reference):null,limits:{maxTargets:8},...(edge?{notes}: {})};};
  const authority=req=>{admit();const s=getSession(req);if(!s||s!==req.session||s.user.role!=='admin'||s.user.mustChange)throw fail(403,'Active administrator required');return s;};
  const writable=()=>{if(source==='operator')throw fail(409,'Gateway is operator-owned and read-only.');};
+ const unchanged=req=>{if(Object.hasOwn(req.body??{},'baseConfig')&&JSON.stringify(req.body.baseConfig)!==JSON.stringify(reference))throw fail(409,'Gateway configuration changed. Refresh status and review the newer configuration before retrying.');};
+ let checks=0,checkReset=0;
+ app.post('/api/admin/gateway/check-target',wrap(async(req,res)=>{
+  const session=authority(req);writable();unchanged(req);
+  if(source!=='managed'||!getEdge())throw fail(409,'Configure the Gateway listener first.');
+  if(!Object.hasOwn(req.body??{},'baseConfig'))throw fail(400,'Current configuration required.');
+  if(busy)throw fail(429,'Gateway management busy.');
+  if(Date.now()>checkReset){checks=0;checkReset=Date.now()+60000;}
+  if(checks>=5)throw fail(429,'Check limit reached. Try again in one minute.');checks++;busy=true;
+  const controller=new AbortController();let finish;
+  const op={controller,done:new Promise(resolve=>finish=resolve)};session.operations.add(op);
+  const cancel=()=>controller.abort(fail(403,'Check cancelled.'));res.once('close',cancel);
+  const authorize=()=>{authority(req);unchanged(req);if(controller.signal.aborted||res.destroyed)throw fail(403,'Check cancelled.');};
+  try{
+   await confirmed(req);authorize();
+   const raw=req.body.config?.targets?.find(t=>t.id===req.body.targetId);
+   if(req.body.profileVersion!==1||!isCockpitTarget(raw))throw fail(400,'Expected the bounded Cockpit v1 profile and a fixed private destination.');
+   const config=await validate(req.body.config);authorize();
+   const target=config.targets.find(t=>t.id===raw.id);
+   const result=await targetCheck(target,{signal:controller.signal,authorize,identity:JSON.stringify(req.body.config)});authorize();res.json(result);
+  }finally{res.off('close',cancel);controller.abort();session.operations.delete(op);busy=false;finish();}
+ },{queued:false}));
  const validate=async value=>{
   if(Buffer.byteLength(JSON.stringify(value)??'')>16384)throw fail(413,'Gateway configuration exceeds 16 KiB');
   let config;try{config=await validateGatewayReference(value);}catch{throw fail(400,'Invalid gateway configuration. Check protected certificate/key files, certificate names, complete backend chain and validity, listener and target settings.');}
@@ -44,30 +68,28 @@ export function gatewayManagementRoutes(app,{runtime,startup,getEdge,setEdge,sta
   authority(req);writable();if(busy)throw fail(429,'Gateway management busy.');busy=true;
   try{const config=await validate(req.body?.config);authority(req);res.json({valid:true,desktopOrigin:config.proxy?.desktopOrigin??gatewayHTTPSOrigin(config.deployment.desktopHostname,config.port),caddySnippet:caddySnippet(config),notes});}finally{busy=false;}
  },{queued:false}));
- for(const method of ['put','delete'])app[method]('/api/admin/gateway',wrap(async(req,res)=>{
-  authority(req);writable();if(busy)throw fail(429,'Gateway management busy.');busy=true;
+ const replace=async(nextReference,authorize,actor)=>{
+  authorize();writable();if(busy)throw fail(429,'Gateway management busy.');busy=true;
   let temp,next,old,stopped=false,committed=false,earlyCleanup=[];
   try{
-   await confirmed(req);
-   const nextReference=method==='put'?structuredClone(req.body?.config):null;
-   const config=nextReference?await validate(nextReference):null;authority(req);
-   if(method==='put'&&!config)throw fail(400,'Gateway configuration required');
+   const config=nextReference?await validate(nextReference):null;authorize();
+   // Listener provisioning is shared with browser management, not duplicated by agents.
    // Stage and fsync protected bytes before touching a working listener.
    temp=resolve(runtime,'.gateway-managed-'+randomUUID()+'.tmp');
    const f=await open(temp,'wx',0o600);try{await f.writeFile(JSON.stringify(nextReference??{version:1,enabled:false})+'\n');await f.sync();}finally{await f.close();}
-   authority(req);old=getEdge();
+   authorize();old=getEdge();
    const samePort=old&&config&&settings.port===config.port;
    if(samePort){
     setEdge(undefined);stopped=true;
     const cleanup=[old.close({preserveManagement:true})];
     for(const s of sessions.values())for(const w of [...s.manager.windows.values()])if(w.mode==='gateway')cleanup.push(s.manager.remove(w.id));
     earlyCleanup=await Promise.allSettled(cleanup);
-    authority(req);
+    authorize();
    }
-   if(config){next=await startEdge(config);authority(req);}
+   if(config){next=await startEdge(config);authorize();}
    // No await between final authority check, atomic commit and published state.
-   authority(req);renameSync(temp,resolve(runtime,'gateway-managed.json'));temp=null;
-   reference=nextReference;settings=config;source=config?'managed':'disabled';committed=true;
+   authorize();renameSync(temp,resolve(runtime,'gateway-managed.json'));temp=null;
+   reference=nextReference;settings=config;source=config?'managed':'disabled';committed=true;onChange(actor);
    // Deny new launches until every old gateway window is retired; a stale
    // window must not mint a route against the replacement configuration.
    setEdge(undefined);
@@ -80,12 +102,25 @@ export function gatewayManagementRoutes(app,{runtime,startup,getEdge,setEdge,sta
    const results=await Promise.allSettled(cleanup);
    if([...earlyCleanup,...results].some(result=>result.status==='rejected'))throw Error('Gateway retirement cleanup failed');
    setEdge(next);
-   authority(req);res.json(status());
+   authorize(true);return status();
   }catch(e){
    if(committed){setEdge(next);throw e.status?e:fail(503,'Gateway configuration applied and old app windows retired, but cleanup could not be fully saved. Check protected layout storage.');}
    if(next&&getEdge()!==next)await next.close({preserveManagement:true});
    if(stopped&&!committed){try{setEdge(await startEdge(settings));}catch{setEdge(undefined);throw fail(503,'Gateway change failed and previous listener could not be restored. Restart using private management.');}}
    throw e.status?e:fail(503,'Gateway change failed. Previous configuration retained; check listener availability and protected storage.');
   }finally{if(temp)await rm(temp,{force:true});busy=false;}
+ };
+ for(const method of ['put','delete'])app[method]('/api/admin/gateway',wrap(async(req,res)=>{
+  authority(req);writable();unchanged(req);
+  await confirmed(req);unchanged(req);
+  if(method==='put'&&!req.body?.config)throw fail(400,'Gateway configuration required');
+  res.json(await replace(method==='put'?structuredClone(req.body.config):null,committed=>{authority(req);if(!committed)unchanged(req);},req.session.userId));
  }));
+ const targetReference=change=>{
+  writable();if(source!=='managed'||!getEdge())throw fail(409,'Configure the managed Gateway listener first');
+  const config=structuredClone(reference),existing=config.targets.find(t=>t.id===change.id);
+  if(existing)Object.assign(existing,change.set);else config.targets.push({id:change.id,...change.set});
+  return config;
+ };
+ return {status,async previewTarget(change,authorize){const config=targetReference(change);await validate(config);authorize();return config.targets.find(t=>t.id===change.id);},async changeTarget(change,authorize,actor){return replace(targetReference(change),authorize,actor);}};
 }

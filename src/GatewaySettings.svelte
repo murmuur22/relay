@@ -1,5 +1,7 @@
 <script>
+ import CockpitSetup from './CockpitSetup.svelte';
  import {onMount,tick} from 'svelte';
+ let guided=$state(false);
  import {gatewayForm,configFromForm,targetForm} from './gateway-settings.js';
  let {api,onrefresh=async()=>{},onaddapp,targetOnly=false,onsaved=async()=>{},oncancel=()=>{},onbusy=()=>{}}= $props();
  let selectedTarget=$state(null),targetElement=$state(),targetBackup=null,newTarget=false;
@@ -15,11 +17,12 @@
  let entry=$derived.by(()=>{try{const u=new URL(status?.desktopOrigin);return u.protocol==='https:'&&u.origin===status.desktopOrigin?u.origin:null;}catch{return null;}});
  function changed(){snippet='';validated='';confirmation='';password='';acknowledged=false;message='';}
  async function load(){
-  changed();const run=++generation;busy=true;error='';stale=true;confirmation='';password='';
+  guided=false;changed();const run=++generation;busy=true;error='';stale=true;confirmation='';password='';
   try{const next=await api('/admin/gateway');if(!alive||run!==generation)return;status=next;form=gatewayForm(next.config);selectedTarget=null;targetBackup=null;newTarget=false;if(targetOnly&&next.enabled&&next.source==='managed')addTarget('generic');else if(!next.enabled&&!targetOnly)selectedTarget=0;validated='';acknowledged=false;stale=false;}
-  catch(e){if(alive&&run===generation)error=e.message;}
+  catch(e){if(alive&&run===generation)error='Gateway state is stale/uncertain. Reconciliation failed; refresh gateway status before changing settings. '+e.message;}
   finally{if(alive&&run===generation)busy=false;}
  }
+ async function cancelGuided(needsReconciliation){if(needsReconciliation)await load();else guided=false;}
  async function check(){
   changed();busy=true;error='';
   try{const config=configFromForm(form),key=JSON.stringify(config);const result=await api('/admin/gateway/validate','POST',{config});if(!alive)return;if(result.valid!==true)throw Error('The server did not confirm this configuration.');if(key===draftKey){snippet=result.caddySnippet??'';validated=key;message='Server configuration valid. DNS and browser trust still need checking.';}}
@@ -32,7 +35,7 @@
   event.preventDefault();if(busy||stale||operator||!confirmation||!password)return;
   const action=confirmation;if(action==='apply'&&(!acknowledged||validated!==draftKey||!draft))return;
   const savedTarget=targetOnly?form.targets[selectedTarget]?.id:null;
-  const body=action==='apply'?{config:structuredClone(draft),password}:{password};
+  const body=action==='apply'?{config:structuredClone(draft),baseConfig:structuredClone($state.snapshot(status.config)),password}:{baseConfig:structuredClone($state.snapshot(status.config)),password};
   password='';busy=true;error='';
   try{
    await api('/admin/gateway',action==='apply'?'PUT':'DELETE',body);body.password='';
@@ -52,7 +55,10 @@
  {#if targetOnly}<button onclick={oncancel} disabled={busy}>Cancel target</button>{/if}
  {#if error}<p class="notice" role="alert">{error}</p>{/if}
  {#if message}<p class="notice" role="status">{message}</p>{/if}
- {#if !status}<p>Reading gateway status…</p>{:else}
+ {#if guided&&status}
+  <CockpitSetup {api} {status} {targetOnly} onbusy={value=>{busy=value;onbusy(value);}} oncancel={cancelGuided} onsaved={async id=>{guided=false;await load();if(!alive||stale)return;await onrefresh();if(targetOnly)await onsaved(id);else message='Cockpit target '+id+' saved separately. Use Add a gateway app to register a launchable app.';}}/>
+ {:else if !status}<p>Reading gateway status…</p>{:else}
+  {#if status.enabled&&status.source==='managed'}<button disabled={busy||stale||status.config.targets.length>=8} onclick={()=>{changed();guided=true;}}>Set up Cockpit</button><p class="small">Guided, typed settings using the shared engine. Other services remain unqualified; existing custom targets stay editable below.</p>{/if}
   {#if !targetOnly}<div class="status-card"><strong>{status.enabled?'Gateway listener is running':'Gateway is off'}</strong><p>{status.enabled?'The server is listening. This does not prove that visitors can resolve its names or trust its certificate.':'You can prepare and check the settings below before enabling it.'}</p>
    <p class="small">External HTTPS: Not verified</p><p class="small">Source access policy: Not verified. Local DNS is not access control.</p>
    {#if entry}<a href={entry} target="_blank" rel="noopener noreferrer">Open HTTPS desktop</a><p class="small">Sign in again there to open Gateway apps. Keep your existing private desktop address for Updater.</p>{/if}

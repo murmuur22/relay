@@ -25,7 +25,7 @@ CONTROL_FILES = tuple('updater/broker/' + name + '.py' for name in
     'deploy/install-release.py', 'deploy/qualify-systemd.py', 'deploy/relay.service',
     'deploy/qualify-presentation-bootstrap.py', 'docs/updater-ui-delivery-bootstrap.md',
     'docs/updater-ui-delivery.md',
-    'deploy/verify-standalone.mjs', 'deploy/README.md', 'LICENSE',
+    'deploy/verify-standalone.mjs', 'deploy/README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
     'updater/web/relay-updater-web.service',
     'updater/deploy/relay-updater-broker.service', 'updater/deploy/README.md',
 )
@@ -115,7 +115,7 @@ def build(source, browsers, output, version, allow_nonlinux=False):
                 if stat.S_ISREG(info.st_mode):
                     relative = prefix + '/' + path.relative_to(base).as_posix()
                     selected.append((relative, path))
-    selected.extend((name, source / name) for name in ('version.js', 'updater/web/broker-client.mjs', 'tools/icon-normalize.py', 'LICENSE'))
+    selected.extend((name, source / name) for name in ('version.js', 'updater/web/broker-client.mjs', 'tools/icon-normalize.py', 'tools/relay-agent.mjs', 'LICENSE', 'THIRD_PARTY_NOTICES.md'))
     # Browser-only files fit the old signed runtime extraction/preflight contract.
     # No descriptor key, opcode, privileged path or executable is added to manifests.
     presentation = source / 'updater/ui/presentation-dist'

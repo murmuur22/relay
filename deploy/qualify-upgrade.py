@@ -27,16 +27,16 @@ UPGRADE_ENV = {**base.DISPOSABLE_ENV,
                'RELAY_DISPOSABLE_SIGNED_UPGRADE': 'I_ACCEPT_FRESH_HOST_SIGNED_UPGRADE_AND_ROLLBACK'}
 
 
-BASELINES = ('v0.4.2', 'v0.6.1', 'v0.6.2', 'v0.6.3', 'v0.6.4', 'v0.6.8')
+BASELINES = ('v0.4.2', 'v0.6.1', 'v0.6.2', 'v0.6.3', 'v0.6.4', 'v0.6.8', 'v0.6.11')
 
 
 def baseline_gateway_mode(old):
     base.require(old in BASELINES, 'Unqualified baseline refused')
-    return {'v0.4.2': None, 'v0.6.1': 'direct', 'v0.6.2': 'reverse', 'v0.6.3': 'remote', 'v0.6.4': 'remote', 'v0.6.8': 'remote'}[old]
+    return {'v0.4.2': None, 'v0.6.1': 'direct', 'v0.6.2': 'reverse', 'v0.6.3': 'remote', 'v0.6.4': 'remote', 'v0.6.8': 'remote', 'v0.6.11': 'remote'}[old]
 
 
 def validate_versions(old, target):
-    base.require(old in BASELINES, 'Only explicit v0.4.2, v0.6.1, v0.6.2, v0.6.3, v0.6.4 or v0.6.8 baselines are admitted')
+    base.require(old in BASELINES, 'Only explicit v0.4.2, v0.6.1, v0.6.2, v0.6.3, v0.6.4, v0.6.8 or v0.6.11 baselines are admitted')
     base.require(isinstance(target, str) and re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', target),
                  'Exact stable-form target tag required')
     base.require(tuple(map(int, target[1:].split('.'))) > tuple(map(int, old[1:].split('.'))), 'Target must be newer than baseline')

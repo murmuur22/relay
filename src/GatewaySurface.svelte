@@ -3,7 +3,22 @@
  import {validateGatewayHandoff} from './gateway-handoff.js';
  let {appId,title,api,onactivate}=$props();
  let target=$state(null),frame=$state(),message=$state('Opening app…'),ending=$state(false),ended=$state(false);
- let generation=0,launchId=null,ticket=null,request,disposed=false;
+ let generation=0,launchId=null,ticket=null,request,disposed=false,popup=null;
+ let opening=$state(false);
+ async function openProtected(){
+  if(!target||ending||ended||opening)return;
+  const opened=window.open('about:blank','_blank');
+  if(!opened){message='Allow this protected app tab, then try again. No application credentials were transferred.';return;}
+  popup?.close();popup=opened;opening=true;
+  const oldId=launchId;launchId=null;generation++;ticket=null;target=null;ending=true;
+  try{
+   if(oldId)await request('/gateway/end','POST',{appId,launchId:oldId});
+   if(disposed||popup!==opened||opened.closed)return;
+   ending=false;await start();
+   if(!disposed&&popup===opened&&!opened.closed&&target?.presentation==='tab'&&ticket)opened.location.replace(target.origin+'/.relay/bootstrap');else opened.close();
+  }catch(e){opened.close();if(!disposed)message='Protected app launch could not be confirmed: '+e.message;}
+  finally{ending=false;opening=false;}
+ }
  const identity=()=>Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');
  async function start(){
   if(disposed||ending)return;const run=++generation;launchId=identity();const id=launchId;ticket=null;target=null;ended=false;message='Opening app…';
@@ -14,11 +29,12 @@
    const result=await request('/gateway/launch','POST',{appId,launchId:id});
    if(disposed||run!==generation)return;
    const validated=validateGatewayHandoff(result,config,location.origin,id);
-   ticket=validated.ticket;target={origin:validated.origin,allowDownloads:validated.allowDownloads,allowPopups:validated.allowPopups};message='';
+   ticket=validated.ticket;target={origin:validated.origin,allowDownloads:validated.allowDownloads,allowPopups:validated.allowPopups,presentation:validated.presentation};message='';
   }catch(e){if(run===generation&&!disposed){target=null;ticket=null;message=e.message;ended=true;}}
  }
  export async function end(){
-  const id=launchId;launchId=null;generation++;ticket=null;target=null;ended=true;message='App session ended. Reopening uses a fresh origin and login.';
+  try{popup?.close();}catch{/* Browser tab closure is best-effort; server retirement must still run. */}popup=null;
+  const id=launchId;launchId=null;generation++;ticket=null;target=null;ended=true;message='App session ended. A disconnected tab may remain open; close it manually. Reopening uses a fresh origin and login.';
   if(!id||!request)return;ending=true;
   try{await request('/gateway/end','POST',{appId,launchId:id});}
   catch(e){if(!disposed)message='Content removed. Could not confirm server session cleanup: '+e.message;}
@@ -28,7 +44,7 @@
  onMount(()=>{
   // Capture the epoch-bound API, never acquire a later account's credentials on cleanup.
   request=api;
-  const receive=event=>{if(!target||!frame||event.source!==frame.contentWindow||event.origin!==target.origin||event.data?.type!=='relay-gateway-ready'||!ticket)return;const value=ticket;ticket=null;frame.contentWindow.postMessage({type:'relay-gateway-ticket',ticket:value},target.origin);};
+  const receive=event=>{const destination=target?.presentation==='tab'?popup:frame?.contentWindow;if(!target||!destination||event.source!==destination||event.origin!==target.origin||event.data?.type!=='relay-gateway-ready'||!ticket)return;const value=ticket;ticket=null;destination.postMessage({type:'relay-gateway-ticket',ticket:value},target.origin);};
   const focus=()=>{if(document.activeElement===frame)onactivate();};
   window.addEventListener('message',receive);window.addEventListener('blur',focus);void start();
   return()=>{disposed=true;window.removeEventListener('message',receive);window.removeEventListener('blur',focus);void end();};
@@ -37,7 +53,7 @@
 <div class="gateway-surface">
  <div class="gateway-controls"><button onclick={end} disabled={ending||ended}>End app session</button>{#if ended}<button onclick={start} disabled={ending}>Reopen app</button>{/if}<span>Experimental · Close ends the session; minimize preserves it. The app's own Logout may not clear gateway identity.</span></div>
  {#if message}<p role="status">{message}</p>{/if}
- {#if target}<iframe bind:this={frame} src={target.origin+'/.relay/bootstrap'} {title} sandbox={'allow-scripts allow-same-origin allow-forms'+(target.allowDownloads?' allow-downloads':'')+(target.allowPopups?' allow-popups':'')} allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>{/if}
+ {#if target?.presentation==='tab'}<p>This service opens on an isolated, sandboxed app tab through Relay. Keep this window open; End or Close retires its connection.</p><button onclick={openProtected} disabled={opening||ending}>Open protected app tab</button>{:else if target}<iframe bind:this={frame} src={target.origin+'/.relay/bootstrap'} {title} sandbox={'allow-scripts allow-same-origin allow-forms'+(target.allowDownloads?' allow-downloads':'')+(target.allowPopups?' allow-popups':'')} allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>{/if}
 </div>
 <style>
  .gateway-surface{height:100%;display:flex;flex-direction:column;min-height:0;background:#1c1917;color:#e7e5e4}.gateway-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #57534e;font-size:11px}.gateway-controls span{flex:1;min-width:180px}.gateway-controls button{border:1px solid #a8a29e;padding:5px 8px;color:inherit;background:transparent}.gateway-controls button:focus-visible{outline:1px dashed #fafaf9;outline-offset:2px}p{padding:12px}iframe{flex:1;min-height:0;width:100%;border:0;background:#fff}

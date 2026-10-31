@@ -3,6 +3,7 @@
  import {onMount,tick} from 'svelte';
  import AppWizard from './AppWizard.svelte';
  import GatewaySettings from './GatewaySettings.svelte';
+ import AgentAccess from './AgentAccess.svelte';
  import IconPicker from './IconPicker.svelte';
  import {pixelIcons} from '../server/pixel-icons.mjs';
  const icons=['globe','folder','notes','media','terminal',...Object.keys(pixelIcons)];
@@ -71,7 +72,7 @@
   e?.preventDefault();const s=editor;
   const ok=await run(async()=>{await api('/admin/apps/'+s.id,remove?'DELETE':'PATCH',remove?{}:{label:s.label,enabled:s.enabled,...(s.kind==='web'?(s.mode==='gateway'?{gateway:{target:s.gateway.target},icon:s.icon}:{address:webAddress(s.address),icon:s.icon,openMode:s.openMode,allowedOrigins:origins(s.originText)}):{})});await load();await onrefresh();message=remove?'App removed.':'App saved.';});if(ok)await back();
  }
- async function createApp(data){await api('/admin/apps','POST',data);await load();await onrefresh();busy=false;await back();message='App registered.';}
+ async function createApp(data){if(data.mode==='gateway')data={...data,registrationId:editor.gatewayRegistrationId??=crypto.randomUUID()};await api('/admin/apps','POST',data);await load();await onrefresh();busy=false;await back();message='App registered.';}
  async function preference(event,key='showAppStatus'){const target=event.currentTarget,value=target.checked;const ok=await run(async()=>{await api('/preferences','PATCH',{[key]:value});await onrefresh();message=key==='showAppStatus'?'Status preference saved.':'Motion preference saved.';});if(!ok)target.checked=user.preferences?.[key]!==false;}
  const mib=value=>`${(value/1024/1024).toFixed(1)} MiB`;
 </script>
@@ -172,6 +173,7 @@
       <table class="limits-table" aria-label="Resource limits"><thead><tr><th scope="col">Resource</th><th scope="col">Per user</th><th scope="col">Global</th></tr></thead><tbody><tr><th scope="row">Sessions</th><td>{diagnostics.limits.sessionsPerUser}</td><td>{diagnostics.limits.sessionsGlobal}</td></tr><tr><th scope="row">Streams</th><td>{diagnostics.limits.streamsPerUser}</td><td>{diagnostics.limits.streamsGlobal}</td></tr></tbody></table>
       <p class="settings-note">External connections: {diagnostics.externalConnections}</p>
      {:else}<p>{busy?'Loading diagnostics…':'Diagnostics unavailable. Try refreshing.'}</p>{/if}
+     {#if page==='System'}<AgentAccess {api}/>{/if}
     {/if}
    </div>
   {/if}

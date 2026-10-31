@@ -16,7 +16,7 @@ class PresentationReleaseTests(unittest.TestCase):
             source.mkdir()
             (source / 'package.json').write_text('{"version":"1.2.3"}')
             for name in ('server/index.mjs', 'dist/index.html', 'version.js', 'node_modules/playwright/package.json',
-                         'browsers/chrome', 'tools/icon-normalize.py', 'updater/ui/dist/index.html', *CONTROL_FILES):
+                         'browsers/chrome', 'tools/icon-normalize.py', 'tools/relay-agent.mjs', 'updater/ui/dist/index.html', *CONTROL_FILES):
                 path = source / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('synthetic source')

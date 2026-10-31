@@ -17,6 +17,7 @@ import {validateDeployment} from './experimental-gateway-config.mjs';
 import {gatewayHTTPSOrigin,gatewayLaunchOrigin} from './experimental-gateway-domains.mjs';
 const secret=()=>randomBytes(32).toString('hex');
 const denied=()=>fail(403,'Gateway access denied');
+const adminOnlyDenied=Symbol('admin-only');
 const cookie=(req,name)=>{const matches=(req.headers.cookie||'').split(';').map(s=>s.trim()).filter(s=>s.startsWith(name+'='));return matches.length===1?matches[0].slice(name.length+1):null;};
 const send=(res,status,data)=>{if(status>=400){res.shouldKeepAlive=false;res.setHeader('Connection','close');}res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
 export function experimentalConfig(value){
@@ -32,7 +33,7 @@ export function experimentalConfig(value){
   else if(p.trustedProxy!=='127.0.0.1'||deployment.bind!=='127.0.0.1')throw Error('Invalid same-host proxy configuration');
  }else createSecureContext({key:value.key,cert:value.cert});
  const targets=value.targets.map(raw=>{
-  const allowed=['id','label','upstream','entryPath','cookieNames','requestHeaders','responseHeaders','webSocketPaths','allowDownloads','allowPopups','authProfile','maxResponseBytes',...(deployment?['tls']:[])];
+  const allowed=['id','label','upstream','entryPath','presentation','accessPolicy','cookieNames','requestHeaders','responseHeaders','webSocketPaths','webSocketProtocols','webSocketOrigin','allowDownloads','allowPopups','authProfile','maxResponseBytes',...(deployment?['tls']:[])];
   if(!raw||Object.keys(raw).some(k=>!allowed.includes(k))||! /^[a-z][a-z0-9-]{0,31}$/.test(raw.id)||typeof raw.label!=='string'||!raw.label.trim()||raw.label.length>64)throw Error('Invalid experimental gateway target');
   const u=new URL(raw.upstream);if(u.origin!==raw.upstream||(deployment?(!['http:','https:'].includes(u.protocol)||isIP(u.hostname)!==4||!safeIP(u.hostname)):(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||!u.port)))throw Error('Experimental gateway requires fixed approved literal upstream origins');
   if(raw.tls!==undefined&&(u.protocol!=='https:'||!raw.tls||typeof raw.tls!=='object'||Object.keys(raw.tls).some(k=>!['ca','serverName'].includes(k))||(raw.tls.ca!==undefined&&typeof raw.tls.ca!=='string')||(raw.tls.serverName!==undefined&&(typeof raw.tls.serverName!=='string'||raw.tls.serverName.length>253||!raw.tls.serverName.split('.').every(x=>/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(x))))))throw Error('Invalid upstream TLS configuration');
@@ -51,7 +52,7 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
  function authority(session,appId){
   admit();const user=accounts.state.users.find(u=>u.id===session?.userId),app=accounts.state.services.find(a=>a.id===appId);
   if(!session||sessions.get(session.id)!==session||session.revoked||session.expires<=Date.now()||!user||!accounts.allowed(user,app)||app.mode!=='gateway')throw denied();
-  validateDefinition(app);return app;
+  validateDefinition(app);if(config.targets.find(t=>t.id===app.gateway.target).accessPolicy==='admin-only'&&user.role!=='admin')throw Object.assign(denied(),{[adminOnlyDenied]:true});return app;
  }
  function current(route){const app=authority(route.session,route.appId);if(routes.get(new URL(route.origin).host)!==route||JSON.stringify(app)!==route.definition)throw denied();return route;}
  function retire(route){routes.delete(new URL(route.origin).host);forgetCredential(route);for(const [id,t] of tickets)if(t.route===route)tickets.delete(id);for(const [id,c] of caps)if(c.route===route)caps.delete(id);for(const op of [...active])if(op.cap.route===route)op.cancel();}
@@ -75,7 +76,7 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
   const target=config.targets.find(t=>t.id===app.gateway.target),origin=gatewayLaunchOrigin(randomBytes(16).toString('hex'),config.deployment?.appBaseDomain??'relay.test',desktopOrigin);
   const route={origin,session,appId:app.id,app:target,definition:JSON.stringify(app),launchId,expires:Math.min(session.expires,Date.now()+3600000)};
   routes.set(new URL(origin).host,route);const ticket=secret();tickets.set(ticket,{route,expires:Date.now()+10000});
-  return {origin,ticket,launchId,allowDownloads:target.allowDownloads,allowPopups:target.allowPopups};
+  return {origin,ticket,launchId,allowDownloads:target.allowDownloads,allowPopups:target.allowPopups,presentation:target.presentation};
  }
  function end(session,data){
   if(!data||Object.keys(data).some(k=>!['appId','launchId'].includes(k))||typeof data.appId!=='string')throw fail(400,'Invalid end request');
@@ -91,7 +92,13 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
   return {ended:true};
  }
  async function status(session,appId,observer=()=>true,epoch=0){
-  const app=authority(session,appId),definition=JSON.stringify(app),target=config.targets.find(t=>t.id===app.gateway.target);
+  let app;try{app=authority(session,appId);}catch(e){
+   // Only target policy can become an unavailable observation; live session,
+   // registry grant and admission failures must still escape.
+   if(e?.[adminOnlyDenied]!==true)throw e;
+   return {state:'Unknown',reachability:'not-monitored',reason:'not-authorized',source:'relay',checkedAt:0,detail:'Administrator-only Gateway target; upstream not observed.'};
+  }
+  const definition=JSON.stringify(app),target=config.targets.find(t=>t.id===app.gateway.target);
   const authorized=()=>{try{return !closed&&observer()===true&&JSON.stringify(authority(session,appId))===definition;}catch{return false;}};
   const result=await health.probe({address:target.upstream+target.entryPath,allowedOrigins:[],tls:target.tls,definition,epoch},authorized);
   if(!authorized())return {state:'Unknown',reachability:'unknown',reason:'observer-expired',source:'relay',checkedAt:0,detail:'No current authorised status observer.'};return result;
@@ -128,7 +135,7 @@ export async function startExperimentalGateway({config,relayOrigin,accounts,sess
   current(route);
   if(req.url==='/.relay/bootstrap'&&req.method==='GET'){
    const nonce=secret();res.setHeader('Content-Type','text/html');res.setHeader('Content-Security-Policy',`default-src 'none'; script-src 'nonce-${nonce}'; connect-src 'self'; frame-ancestors ${desktopOrigin}; base-uri 'none'; form-action 'none'`);
-   res.end(`<!doctype html><p>Opening app…</p><script nonce="${nonce}">let used=false;addEventListener('message',e=>{if(used||e.origin!==${JSON.stringify(desktopOrigin)}||e.source!==parent||e.data?.type!=='relay-gateway-ticket'||typeof e.data.ticket!=='string')return;used=true;fetch('/.relay/redeem',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket:e.data.ticket})}).then(r=>{if(r.ok)location.replace(${JSON.stringify(route.app.entryPath)});else document.body.textContent='Access denied';});});parent.postMessage({type:'relay-gateway-ready'},${JSON.stringify(desktopOrigin)});</script>`);return;
+   res.end(`<!doctype html><p>Opening app…</p><script nonce="${nonce}">let used=false;const owner=${route.app.presentation==='tab'?'window.opener':'window.parent'};addEventListener('message',e=>{if(used||e.origin!==${JSON.stringify(desktopOrigin)}||e.source!==owner||e.data?.type!=='relay-gateway-ticket'||typeof e.data.ticket!=='string')return;used=true;fetch('/.relay/redeem',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket:e.data.ticket})}).then(r=>{if(r.ok){window.opener=null;location.replace(${JSON.stringify(route.app.entryPath)});}else document.body.textContent='Access denied';});});owner?.postMessage({type:'relay-gateway-ready'},${JSON.stringify(desktopOrigin)});</script>`);return;
   }
   if(req.url==='/.relay/redeem'&&req.method==='POST'){
    let text='';for await(const chunk of req){text+=chunk;if(text.length>512)throw fail(413,'Ticket request too large');}

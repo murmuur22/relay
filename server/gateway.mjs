@@ -1,4 +1,5 @@
 import {VERSION} from '../version.js';
+import {agentManagement} from './agent-management.mjs';
 import {gatewayManagementRoutes,gatewayStartup} from './gateway-management.mjs';
 import {experimentalConfig,startExperimentalGateway} from './experimental-gateway.mjs';
 import {networkHost} from '../updater/web/broker-client.mjs';
@@ -155,6 +156,14 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
   authBusy++;
   try{const user=accounts.state.users.find(u=>u.username===req.body?.username);const valid=await verify(req.body?.password,user?.password||accounts.dummy);if(!user||!valid||user.disabled){failures++;throw fail(401,'Invalid username or password');}if(accounts.state.users.find(u=>u.id===user.id)!==user)throw fail(401,'Account changed. Sign in again.');await login(req,res,user);}finally{authBusy--;}
  }));
+ const agentHistory=[];let managementRevision=0;
+ const changed=record=>{managementRevision++;agentHistory.push({at:Date.now(),...record});if(agentHistory.length>128)agentHistory.shift();};
+ const agents=agentManagement({app,wrap,getSession,sessions,accounts,admit,
+  getState:()=>({source:management.status().source,targets:(management.status().config?.targets??[]).map(({id,label,upstream,entryPath,presentation,accessPolicy})=>({id,label,upstream,entryPath,presentation,accessPolicy})),apps:accounts.state.services.map(({id,label,kind,mode,enabled,icon,gateway})=>({id,label,kind,mode,enabled,icon,gateway})),history:agentHistory}),
+  revisionSeed:()=>JSON.stringify([managementRevision,management.status().config,accounts.state.services,accounts.state.users.map(publicUser)]),
+  previewTarget:(c,a)=>management.previewTarget(c,a),changeTarget:(c,a,actor)=>management.changeTarget(c,a,actor),
+  previewApp:async(c,a)=>{const old=accounts.state.services.find(s=>s.id===c.id);if(c.id&&(!old||old.kind!=='web'||old.mode!=='gateway'))throw fail(400,'Only Gateway web apps can be changed');const body=c.id?c.set:{kind:'web',mode:'gateway',...c.set};await validateDraft({...old,...body});accounts.mutateService(structuredClone(accounts.state),c.id,body);a();},
+  changeApp:(c,a,actor)=>mutateApp(c.id,c.id?c.set:{kind:'web',mode:'gateway',...c.set},false,a,actor)});
  app.get(/^\/desktop(?:\/.*)?$/, (req,res)=>{if(req.originalUrl.length>4096||req.path.split('/').length>131)return res.status(414).json({error:'Desktop path too long'});res.sendFile('index.html',{root:ROOT+'dist'});});
  app.use((req,res,next)=>{
   if(req.path==='/'||req.path.startsWith('/assets/')||req.path.startsWith('/fonts/'))return next();
@@ -187,7 +196,8 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  const revokeUser=async id=>{const results=await Promise.all([...sessions.values(),...retiringSessions.values()].filter(s=>s.userId===id).map(revoke));if(results.some(complete=>!complete))throw cleanupError();};
  app.patch('/api/profile',wrap(async(req,res)=>{const user=await accounts.profile(req.session.userId,req.body||{});if('password' in req.body)await revokeUser(user.id);res.json(user);}));
  app.use('/api/admin',(req,res,next)=>{if(req.session.user.role!=='admin'||req.session.user.mustChange)return res.status(403).json({error:'Admin access required'});next();});
- gatewayManagementRoutes(app,{runtime,startup,getEdge:()=>experimental,setEdge:value=>{experimental=value;},startEdge:startPersonalSafeEdge,wrap,getSession,admit,accounts,sessions,managementPort:server.address().port,updaterPort:updaterSettings?Number(new URL(updaterSettings.uiOrigin).port||80):null,hostname});
+ const management=gatewayManagementRoutes(app,{runtime,startup,getEdge:()=>experimental,setEdge:value=>{experimental=value;},startEdge:startPersonalSafeEdge,wrap,getSession,admit,accounts,sessions,managementPort:server.address().port,updaterPort:updaterSettings?Number(new URL(updaterSettings.uiOrigin).port||80):null,hostname,onChange:actor=>changed({actor,type:'targets',operation:'replace'})});
+ agents.installBrowser();
  app.get('/api/admin/users',(req,res)=>res.json(accounts.state.users.map(publicUser)));
  app.post('/api/admin/users',wrap(async(req,res)=>res.json(await accounts.createUser(req.body||{}))));
  app.patch('/api/admin/users/:id',wrap(async(req,res)=>{const user=await accounts.updateUser(req.params.id,req.body||{});await revokeUser(user.id);res.json(user);}));
@@ -229,19 +239,42 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  app.post('/api/admin/services/check',networkOperation('check'));
  app.post('/api/admin/services/preview',networkOperation('preview'));
  app.get('/api/admin/services',(req,res)=>res.json(accounts.state.services));
- app.post('/api/admin/services',wrap(async(req,res)=>{if(req.body?.kind==='web')await validateDraft(req.body);const service=await accounts.service(null,req.body||{});for(const s of sessions.values())s.manager.apps=accounts.apps(accounts.state.users.find(u=>u.id===s.userId));res.json(service);}));
- for(const method of ['patch','delete'])app[method]('/api/admin/services/:id',wrap(async(req,res)=>{
-  const service=accounts.state.services.find(s=>s.id===req.params.id);
-  if(method==='patch'&&service?.kind==='web')await validateDraft({...service,...req.body});
-  const affected=[...sessions.values()].filter(s=>s.user.role!=='admin'&&accounts.allowed(accounts.state.users.find(u=>u.id===s.userId),service));
-  const result=await accounts.service(req.params.id,req.body||{},method==='delete');
-  if(method==='delete')definitionEpochs.delete(req.params.id);else definitionEpochs.set(req.params.id,token());
-  experimental?.endApp(req.params.id);
-  const revoked=await Promise.all(affected.map(revoke));
-  const cleanup=await Promise.allSettled([...sessions.values()].map(s=>{for(const response of s.responses)if(response.serviceId===req.params.id)response.destroy();s.manager.apps=accounts.apps(accounts.state.users.find(u=>u.id===s.userId));return s.manager.remove(req.params.id);}));
-  if(revoked.some(complete=>!complete)||cleanup.some(r=>r.status==='rejected'))throw fail(503,'Service changed; stream cleanup incomplete. Sign out or retry Relay shutdown to finish cleanup.');
-  res.json(result);
+ const gatewayRegistrations=new WeakMap();
+ app.post('/api/admin/services',wrap(async(req,res)=>{
+  const session=req.session,body={...req.body},registrationId=body.registrationId;delete body.registrationId;
+  let registrations,signature;
+  if(registrationId!==undefined){
+   if(body.kind!=='web'||body.mode!=='gateway'||typeof registrationId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(registrationId))throw fail(400,'Invalid Gateway registration identity');
+   registrations=gatewayRegistrations.get(session);if(!registrations){registrations=new Map();gatewayRegistrations.set(session,registrations);}
+   signature=JSON.stringify(body);const previous=registrations.get(registrationId);
+   if(previous){const existing=accounts.state.services.find(s=>s.id===previous.id);if(previous.signature!==signature||JSON.stringify(existing)!==previous.definition)throw fail(409,'Registration already used for a different or changed app. Review Apps before creating another.');res.json(existing);return;}
+   if(registrations.size>=64)throw fail(429,'Gateway registration retry limit reached for this session.');
+  }
+  if(body.kind==='web')await validateDraft(body);
+  if(getSession(req)!==session||session.user.role!=='admin'||session.user.mustChange)throw fail(403,'Active administrator required');
+  const service=await mutateApp(null,body,false,browserAppAuthority(req),session.userId);
+  if(registrations)registrations.set(registrationId,{signature,id:service.id,definition:JSON.stringify(service)});
+  if(getSession(req)!==session||session.user.role!=='admin'||session.user.mustChange)throw fail(403,'App may be registered; session changed. Review Apps after signing in.');
+  res.json(service);
  }));
+ const mutateApp=async(id,body,remove,authorize,actor)=>{
+  authorize();const service=accounts.state.services.find(s=>s.id===id);
+  if(!remove&&(body.kind==='web'||service?.kind==='web'))await validateDraft({...service,...body});authorize();
+  const affected=id?[...sessions.values()].filter(s=>s.user.role!=='admin'&&accounts.allowed(accounts.state.users.find(u=>u.id===s.userId),service)):[];
+  const result=await accounts.service(id,body,remove,authorize);changed({actor,type:'app',operation:remove?'remove':id?'update':'create',objectId:id??result.id});
+  try{
+   if(id){
+    if(remove)definitionEpochs.delete(id);else definitionEpochs.set(id,token());
+    experimental?.endApp(id);
+    const revoked=await Promise.all(affected.map(revoke));
+    const cleanup=await Promise.allSettled([...sessions.values()].map(s=>{for(const response of s.responses)if(response.serviceId===id)response.destroy();s.manager.apps=accounts.apps(accounts.state.users.find(u=>u.id===s.userId));return s.manager.remove(id);}));
+    if(revoked.some(complete=>!complete)||cleanup.some(r=>r.status==='rejected'))throw fail(503,'Service changed; stream cleanup incomplete. Sign out or retry Relay shutdown to finish cleanup.');
+   }else for(const s of sessions.values())s.manager.apps=accounts.apps(accounts.state.users.find(u=>u.id===s.userId));
+   authorize(true);return result;
+  }catch(e){throw Object.assign(e,{objectId:id??result.id});}
+ };
+ const browserAppAuthority=req=>()=>{admit();if(getSession(req)!==req.session||req.session.user.role!=='admin'||req.session.user.mustChange)throw fail(403,'Active administrator required');};
+ for(const method of ['patch','delete'])app[method]('/api/admin/services/:id',wrap(async(req,res)=>res.json(await mutateApp(req.params.id,req.body||{},method==='delete',browserAppAuthority(req),req.session.userId))));
  app.get('/api/admin/diagnostics',(req,res)=>res.json({version:VERSION,uptimeSeconds:Math.floor(process.uptime()),sessions:sessions.size,users:accounts.state.users.length,services:accounts.state.services.length,streams:[...sessions.values()].reduce((n,s)=>n+s.manager.resources.size,0),memory:process.memoryUsage(),limits:{sessionsPerUser:4,sessionsGlobal:16,streamsPerUser:2,streamsGlobal:8},externalConnections:'HTTP(S) web apps with approved origins; WebSockets and streamed file transfers unsupported'}));
  app.post('/api/logout',wrap(async(req,res)=>{const complete=await revoke(req.session);res.clearCookie('relay_session',{path:'/',httpOnly:true,sameSite:'strict'});if(!complete)throw cleanupError();res.json({ok:true});}));
  const operation=fn=>wrap(async(req,res)=>{try{res.json(await fn(req,req.session.manager));}catch(e){throw fail(e.status||400,e.status?e.message:'Invalid window operation');}});

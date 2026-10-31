@@ -17,6 +17,8 @@ export async function gatewayLab(options={}){
   if(req.url==='/set'){res.setHeader('Set-Cookie','sid=synthetic-jar; Path=/; HttpOnly');res.end('set');return;}
   if(req.url==='/echo'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(seen.at(-1)));return;}
   if(req.url==='/slow'){res.writeHead(200);res.write('start');const t=setInterval(()=>res.write('tick'),30);res.on('close',()=>clearInterval(t));return;}
+  if(options.components&&req.url==='/self-frame'){res.writeHead(200,{'Content-Type':'text/html','Content-Security-Policy':"frame-ancestors 'self'",'X-Frame-Options':'SAMEORIGIN'});res.end('<h1>Same-origin component</h1>');return;}
+  if(options.components&&req.url==='/deny-frame'){res.writeHead(200,{'Content-Type':'text/html','Content-Security-Policy':"frame-ancestors 'none'",'X-Frame-Options':'DENY'});res.end('<h1>Must remain blocked</h1>');return;}
   if(req.url==='/private'){res.writeHead(req.headers.authorization==='Bearer synthetic-token'?200:401);res.end('private');return;}
   res.setHeader('Content-Type','text/html');res.end(`<!doctype html><h1>Synthetic Files</h1><input aria-label="Private text"><button id="login">App login</button><button id="logout">App Logout</button><p id="status">Fresh login</p><script>document.querySelector('#login').onclick=async()=>{await fetch('/login',{method:'POST'});document.querySelector('#status').textContent='App signed in';localStorage.setItem('app','yes')};document.querySelector('#logout').onclick=()=>{localStorage.clear();document.querySelector('#status').textContent='App signed out'};</script>`);
  });
@@ -29,6 +31,7 @@ export async function gatewayLab(options={}){
   const cert=await readFile(dir+'/cert.pem'),key=await readFile(dir+'/key.pem');
   const experimentalGateway={key,cert,targets:[{id:'files',label:'Synthetic Files',upstream:`http://127.0.0.1:${upstream.address().port}`,cookieNames:['sid'],webSocketPaths:['/socket'],allowDownloads:true,authProfile:{login:{method:'POST',path:'/login',status:200,contentType:'text/plain'},maxBytes:128,ttlMs:60000,headers:[{name:'authorization',prefix:'Bearer '}],stripHeaders:[]}}]};
   if(options.targets)experimentalGateway.targets=options.targets;
+  if(options.targetOptions)Object.assign(experimentalGateway.targets[0],options.targetOptions);
   if(options.gatewayConfig)experimentalGateway.deployment={bind:'127.0.0.1',...options.gatewayConfig};
   relay=await createGateway({port:0,runtime:dir+'/state',profile:'standalone',experimentalGateway});
   const admin=await authenticate(relay.origin,dir+'/state'),api=client(relay.origin,admin);

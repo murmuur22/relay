@@ -5,7 +5,7 @@
  import GatewaySettings from './GatewaySettings.svelte';
  let creatingTarget=$state(false),savedTarget=$state('');
  async function targetSaved(id){await loadGateway();if(!gatewayLive)return;if(!gateway.targets.some(t=>t.id===id))throw Error('Target saved, but options could not be refreshed. Refresh Gateway options before saving the app.');draft.gatewayTarget=id;savedTarget=id;creatingTarget=false;await tick();document.querySelector('.app-wizard select')?.focus();}
- async function cancelTarget(){creatingTarget=false;await tick();document.querySelector('.app-wizard .create-target')?.focus();}
+ async function cancelTarget(){await loadGateway();if(!gatewayLive)return;creatingTarget=false;await tick();document.querySelector('.app-wizard .create-target')?.focus();}
  import {pixelIcons} from '../server/pixel-icons.mjs';
  const icons=['globe','folder','notes','media','terminal',...Object.keys(pixelIcons)];
  import {webAddress,nativeAddress,origins,checkDevice,statusLabel,statusDetail} from './webapps.js';
@@ -68,6 +68,7 @@
   {#if image}<img class="app-preview full-width" src={image} alt="Streamed preview"/>{/if}
  {:else if draft.step===4}
   <p class="full-width muted">Admins can access all enabled apps. Choose active users to grant access at save time.</p>
+  {#if draft.mode==='gateway'}<p class="full-width muted">Target policy can restrict these grants further: the guided Cockpit profile is enforced administrators-only. Relay grants do not assign upstream roles or guarantee read-only access. Registration retries use this sign-in and in-memory draft; after reload or sign-out, inspect Apps before creating again.</p>{/if}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div class="grant-table full-width" role="region" aria-label="App access table" tabindex="0"><table aria-label="App access"><thead><tr><th scope="col">User</th><th scope="col">Access</th></tr></thead><tbody>{#each users.filter(u=>u.role!=='admin'&&!u.disabled) as u (u.id)}<tr><th scope="row"><label for={'app-grant-'+u.id}>{u.username}</label>{#if u.displayName!==u.username}<small>{u.displayName}</small>{/if}</th><td><input id={'app-grant-'+u.id} type="checkbox" bind:group={draft.userIds} value={u.id}/></td></tr>{/each}</tbody></table></div>
   {#if !users.some(u=>u.role!=='admin'&&!u.disabled)}<p class="full-width">No active non-admin users. You can grant access later in Users.</p>{/if}

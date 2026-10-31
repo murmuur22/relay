@@ -8,6 +8,45 @@ from updater.release.build import build
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_runtime_ships_standalone_agent_cli_without_source_fallback(self):
+        import shutil
+        import subprocess
+        from updater.release.build import CONTROL_FILES
+        from updater.release.presentation import describe
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'package.json').write_text(json.dumps(dict(name='we-relay', version='1.2.3', type='module')))
+            for name in (*CONTROL_FILES, 'server/index.mjs', 'dist/index.html', 'version.js',
+                         'node_modules/playwright/package.json', 'browsers/chrome',
+                         'tools/icon-normalize.py', 'tools/relay-agent.mjs', 'updater/ui/dist/index.html', 'tools/private.txt'):
+                path = source / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('synthetic packaging fixture')
+            cli = Path(__file__).resolve().parents[2] / 'tools/relay-agent.mjs'
+            shutil.copyfile(cli, source / 'tools/relay-agent.mjs')
+            presentation = source / 'updater/ui/presentation-dist'
+            (presentation / 'assets').mkdir(parents=True)
+            (presentation / 'index.html').write_text('<script src="/updater/presentation/v1.2.3/assets/index-ABC123.js"></script>')
+            (presentation / 'assets/index-ABC123.js').write_text('synthetic')
+            describe(presentation, 'v1.2.3')
+            output = root / 'out'
+            build(source, source / 'browsers', output, 'v1.2.3', allow_nonlinux=True)
+            extracted = root / 'extracted'
+            extracted.mkdir()
+            with tarfile.open(output / 'relay-linux-x64.tar.gz') as archive:
+                self.assertIn('tools/relay-agent.mjs', archive.getnames())
+                self.assertNotIn('tools/private.txt', archive.getnames())
+                raw = archive.extractfile('tools/relay-agent.mjs').read()
+                self.assertEqual(raw, cli.read_bytes())
+                (extracted / 'relay-agent.mjs').write_bytes(raw)
+            # Only the archive's client exists here; no server or node_modules fallback.
+            result = subprocess.run(['node', str(extracted / 'relay-agent.mjs'), '--help'],
+                                    cwd=extracted, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('--token-file PATH', result.stdout)
+
     def test_control_plane_packages_only_named_updater_fonts_and_exact_notices(self):
         from updater.release.build import control_bundle, CONTROL_FILES
         from updater.broker.auth import Denied
@@ -87,7 +126,7 @@ class ReleaseTests(unittest.TestCase):
             source = Path(tmp) / 'source'
             source.mkdir()
             (source / 'package.json').write_text('{"version":"1.2.3"}')
-            for name in ('server/index.mjs', 'dist/index.html', 'version.js', 'node_modules/playwright/package.json', 'browsers/chrome', 'tools/icon-normalize.py', 'updater/ui/dist/index.html', *CONTROL_FILES):
+            for name in ('server/index.mjs', 'dist/index.html', 'version.js', 'node_modules/playwright/package.json', 'browsers/chrome', 'tools/icon-normalize.py', 'tools/relay-agent.mjs', 'updater/ui/dist/index.html', *CONTROL_FILES):
                 path = source / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('synthetic')
@@ -133,7 +172,7 @@ class ReleaseTests(unittest.TestCase):
             source.mkdir()
             (source / 'package.json').write_text(json.dumps(dict(name='we-relay', version='1.2.3', type='module', license='MIT', scripts={'postinstall':'unsafe'})))
             (source / 'LICENSE').write_text('Synthetic MIT license fixture')
-            for name in ('server/index.mjs', 'dist/index.html', 'dist/fonts/private.woff2', 'version.js', 'node_modules/playwright/package.json', 'browsers/chromium/chrome', '.runtime/accounts.json', 'integrations/private.txt', 'updater/web/broker-client.mjs', 'tools/icon-normalize.py'):
+            for name in ('server/index.mjs', 'dist/index.html', 'dist/fonts/private.woff2', 'version.js', 'node_modules/playwright/package.json', 'browsers/chromium/chrome', '.runtime/accounts.json', 'integrations/private.txt', 'updater/web/broker-client.mjs', 'tools/icon-normalize.py', 'tools/relay-agent.mjs'):
                 path = source / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('synthetic')

@@ -7,6 +7,8 @@ import {WebSocket,WebSocketServer} from 'ws';
 import {FORGET_PATH,forgetCredential,profileHeaders,loginMatch,captureCredential,validateProfile} from './experimental-gateway-profile.mjs';
 const fail=status=>Object.assign(Error('Request denied'),{status});
 const REQUEST_LIMIT=1024*1024,RESPONSE_LIMIT=64*1024*1024,WS_LIMIT=65536;
+const protocolToken=value=>typeof value==='string'&&value.length>=1&&value.length<=64&&/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(value);
+const selectedProtocol=Symbol('verified upstream protocol');
 export function validateApp(app){
  if(app.maxResponseBytes===undefined)app.maxResponseBytes=RESPONSE_LIMIT;
  if(!Number.isSafeInteger(app.maxResponseBytes)||app.maxResponseBytes<1024*1024||app.maxResponseBytes>1024*1024*1024)throw Error('Invalid response bound');
@@ -15,6 +17,14 @@ export function validateApp(app){
  for(const key of ['requestHeaders','responseHeaders']){app[key]??=[];if(!Array.isArray(app[key])||app[key].length>16||app[key].some(n=>!safeHeader(n)))throw Error('Unsafe configured header');}
  app.cookieNames??=[];if(!Array.isArray(app.cookieNames)||app.cookieNames.length>16||app.cookieNames.some(n=>! /^[a-zA-Z0-9_-]+$/.test(n)||/^(?:proof_|relay|__Host-|__Secure-)/i.test(n)))throw Error('Unsafe cookie name');
  app.webSocketPaths??=[];if(!Array.isArray(app.webSocketPaths)||app.webSocketPaths.length>16||app.webSocketPaths.some(p=>!/^\/[a-zA-Z0-9/_.-]+$/.test(p)))throw Error('Unsafe WebSocket paths');
+ if(app.accessPolicy===undefined)app.accessPolicy='granted';
+ if(!['granted','admin-only'].includes(app.accessPolicy))throw Error('Unsafe gateway access policy');
+ if(app.presentation===undefined)app.presentation='frame';
+ if(!['frame','tab'].includes(app.presentation))throw Error('Unsafe gateway presentation');
+ if(app.webSocketOrigin===undefined)app.webSocketOrigin='omit';
+ if(!['omit','upstream'].includes(app.webSocketOrigin))throw Error('Unsafe WebSocket Origin policy');
+ if(app.webSocketProtocols===undefined)app.webSocketProtocols=[];
+ if(!Array.isArray(app.webSocketProtocols)||app.webSocketProtocols.length>8||app.webSocketProtocols.some(p=>!protocolToken(p))||new Set(app.webSocketProtocols).size!==app.webSocketProtocols.length)throw Error('Unsafe WebSocket protocols');
  app.entryPath??='/';if(!validPath(app.entryPath)||!/^\/[a-zA-Z0-9/_-]*(?:\.html)?$/.test(app.entryPath))throw Error('Unsafe entry path');
  for(const k of ['allowDownloads','allowPopups']){app[k]??=false;if(typeof app[k]!=='boolean')throw Error('Unsafe permission');}
 }
@@ -38,7 +48,7 @@ function storeCookies(c,lines=[]){
 }
 export function createTransport({active,desktopOrigin,stillAuthorized=async()=>{throw Error('No live authority check');}}){
  const stats={http:0,ranges:0,websockets:0,cancelled:0};
- const wss=new WebSocketServer({noServer:true,maxPayload:WS_LIMIT,perMessageDeflate:false});
+ const wss=new WebSocketServer({noServer:true,maxPayload:WS_LIMIT,perMessageDeflate:false,handleProtocols:(_offered,req)=>req[selectedProtocol]||false});
  function proxy(req,res,c){
   if(!validPath(req.url))throw fail(400);
   const site=req.headers['sec-fetch-site'];
@@ -80,8 +90,9 @@ export function createTransport({active,desktopOrigin,stillAuthorized=async()=>{
    if(r.headers.location){const target=new URL(r.headers.location,c.app.upstream+req.url);if(target.origin!==c.app.upstream||target.username||target.password||!validPath(target.pathname+target.search+target.hash))return badGateway();out.location=c.route.origin+target.pathname+target.search+target.hash;}
    // Additional policy intersects upstream policy; never delete/weaken upstream CSP/XFO.
    // Executable app code stays on its app+session origin, not Relay's auth origin.
-   const policy=`default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' ${c.route.origin.replace('https:','wss:')}; frame-src 'self'; frame-ancestors ${desktopOrigin}; form-action 'self'; base-uri 'self'; object-src 'none'; worker-src 'none'`;
+   const policy=`default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' ${c.route.origin.replace('https:','wss:')}; frame-src 'self'; frame-ancestors ${c.app.presentation==='tab'?"'self'":desktopOrigin}; form-action 'self'; base-uri 'self'; object-src 'none'; worker-src 'none'`;
    out['content-security-policy']=[...(out['content-security-policy']?[out['content-security-policy']]:[]),policy];
+   if(c.app.presentation==='tab')out['content-security-policy'].push('sandbox allow-scripts allow-same-origin allow-forms'+(c.app.allowDownloads?' allow-downloads':'')+(c.app.allowPopups?' allow-popups':''));
    if(capture&&r.statusCode===p.login.status){
     const data=await captureCredential(r,c,generation,async cap=>{await stillAuthorized(cap);if(finished)throw Error('Cancelled login');});
     res.writeHead(r.statusCode,out);res.end(data);finished=true;clearTimeout(loginDeadline);active.delete(op);up.destroy();return;
@@ -102,12 +113,28 @@ export function createTransport({active,desktopOrigin,stillAuthorized=async()=>{
   let bytes=0;const bound=new Transform({transform(chunk,encoding,cb){bytes+=chunk.length;cb(bytes>REQUEST_LIMIT?Error('Request bound'):null,chunk);}});pipeline(req,bound,up,e=>{if(e)op.cancel();});
  }
  function upgrade(req,socket,head,c){
-  if(!validPath(req.url)||!c.app.webSocketPaths.includes(new URL(req.url,c.app.upstream).pathname)||req.headers['sec-websocket-protocol'])throw fail(403);
+  if(!validPath(req.url)||!c.app.webSocketPaths.includes(new URL(req.url,c.app.upstream).pathname))throw fail(403);
+  // Require every offered token to be declared; never filter an unsafe offer into
+  // a different negotiation. An explicit nonempty policy also forbids downgrade.
+  const raw=req.headers['sec-websocket-protocol'],allowed=c.app.webSocketProtocols??[];
+  if(raw!==undefined&&(typeof raw!=='string'||raw.length>8*66))throw fail(403);
+  const offered=raw===undefined?[]:raw.split(',').map(p=>p.trim());
+  if(offered.length>8||offered.some(p=>!protocolToken(p)||!allowed.includes(p))||new Set(offered).size!==offered.length||(!offered.length&&allowed.length))throw fail(403);
   if(active.size>=32)throw fail(429);
-  const remote=new WebSocket(c.app.upstream.replace(/^http/,'ws')+req.url,{headers:headers(req,c),ca:c.app.tls?.ca,servername:c.app.tls?.serverName,rejectUnauthorized:true,followRedirects:false,handshakeTimeout:2000,maxPayload:WS_LIMIT,perMessageDeflate:false});let peer,stopped=false;
+  const remote=new WebSocket(c.app.upstream.replace(/^http/,'ws')+req.url,offered,{headers:headers(req,c),origin:c.app.webSocketOrigin==='upstream'?new URL(c.app.upstream).origin:undefined,ca:c.app.tls?.ca,servername:c.app.tls?.serverName,rejectUnauthorized:true,followRedirects:false,handshakeTimeout:2000,maxPayload:WS_LIMIT,perMessageDeflate:false});let peer,stopped=false;
   const op={cap:c,cancel:()=>{if(stopped)return;stopped=true;stats.cancelled++;active.delete(op);remote.terminate();peer?.terminate();socket.destroy();}};
   active.add(op);socket.on('close',op.cancel);remote.on('error',op.cancel);remote.on('close',op.cancel);
-  remote.on('open',()=>{if(stopped)return;stats.websockets++;wss.handleUpgrade(req,socket,head,client=>{peer=client;client.on('error',op.cancel);client.on('close',op.cancel);client.on('message',(data,binary)=>{if(remote.readyState!==1||remote.bufferedAmount>WS_LIMIT)return op.cancel();remote.send(data,{binary});});remote.on('message',(data,binary)=>{if(client.readyState!==1||client.bufferedAmount>WS_LIMIT)return op.cancel();client.send(data,{binary});});});});
+  remote.on('open',async()=>{
+   try{
+    if(stopped)return;
+    if(offered.length?!offered.includes(remote.protocol):remote.protocol!=='')return op.cancel();
+    await stillAuthorized(c);
+    if(stopped||c.expires<=Date.now())return op.cancel();
+    req[selectedProtocol]=remote.protocol;
+    stats.websockets++;
+    wss.handleUpgrade(req,socket,head,client=>{peer=client;client.on('error',op.cancel);client.on('close',op.cancel);client.on('message',(data,binary)=>{if(remote.readyState!==1||remote.bufferedAmount>WS_LIMIT)return op.cancel();remote.send(data,{binary});});remote.on('message',(data,binary)=>{if(client.readyState!==1||client.bufferedAmount>WS_LIMIT)return op.cancel();client.send(data,{binary});});});
+   }catch{op.cancel();}
+  });
  }
  return {proxy,upgrade,stats,close(){wss.close();}};
 }

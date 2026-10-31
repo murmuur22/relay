@@ -2,7 +2,8 @@ import {webConfig} from './webapps.mjs';
 import {SYSTEM_APPS} from './system-apps.mjs';
 import {randomBytes,randomUUID,scrypt,timingSafeEqual} from 'node:crypto';
 import {promisify} from 'node:util';
-import {readFile,writeFile,rename,chmod} from 'node:fs/promises';
+import {readFile,writeFile,chmod} from 'node:fs/promises';
+import {renameSync} from 'node:fs';
 const derive=promisify(scrypt);
 export const token=()=>randomBytes(32).toString('hex');
 export const fail=(status,message)=>Object.assign(new Error(message),{status});
@@ -24,7 +25,7 @@ export class Accounts{
   }catch(e){if(e.code!=='ENOENT')throw Error('Account state unreadable; refusing enrollment');this.state={version:1,users:[],services:structuredClone(this.templates).map(a=>({...a,template:a.id,enabled:true}))};}
   this.dummy=await hash(token());
  }
- mutate(fn){const job=this.queue.catch(()=>{}).then(async()=>{const next=structuredClone(this.state);const result=await fn(next);await writeFile(this.runtime+'/accounts.tmp',JSON.stringify(next),{mode:0o600});await chmod(this.runtime+'/accounts.tmp',0o600);await rename(this.runtime+'/accounts.tmp',this.runtime+'/accounts.json');this.state=next;return result;});this.queue=job;return job;}
+ mutate(fn,authorize=()=>{}){const job=this.queue.catch(()=>{}).then(async()=>{authorize();const next=structuredClone(this.state);const result=await fn(next);await writeFile(this.runtime+'/accounts.tmp',JSON.stringify(next),{mode:0o600});await chmod(this.runtime+'/accounts.tmp',0o600);authorize();renameSync(this.runtime+'/accounts.tmp',this.runtime+'/accounts.json');this.state=next;return result;});this.queue=job;return job;}
  validateUser(user,state){
   if(typeof user.username!=='string'||!/^[a-z][a-z0-9_-]{2,31}$/.test(user.username)||typeof user.displayName!=='string'||!user.displayName.trim()||user.displayName.length>64||!['admin','user'].includes(user.role)||typeof user.disabled!=='boolean'||!Array.isArray(user.grants)||user.grants.length>64||user.grants.some(id=>!state.services.some(s=>s.id===id)))throw fail(400,'Invalid user fields');
  }
@@ -40,7 +41,7 @@ export class Accounts{
   const saved=state.services.find(s=>s.id===user.onboardingAppId);if(saved)return saved;
   const service=this.mutateService(state,null,body);user.onboardingAppId=service.id;return service;
  });}
- async service(id,body,remove=false){return this.mutate(state=>this.mutateService(state,id,body,remove));}
+ async service(id,body,remove=false,authorize){return this.mutate(state=>this.mutateService(state,id,body,remove),authorize);}
  mutateService(state,id,body,remove=false){
   let service=state.services.find(s=>s.id===id);
   if(!remove&&(body.kind==='web'||service?.kind==='web')){

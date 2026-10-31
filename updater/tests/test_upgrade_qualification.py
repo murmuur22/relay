@@ -35,6 +35,31 @@ class UpgradeQualificationTests(unittest.TestCase):
                                   capture_output=True, text=True, timeout=5).returncode == 0
                    for predicate in guard.splitlines() if predicate.strip())
 
+    def test_v0611_stock_runtime_upgrade_admission(self):
+        q = qualifier()
+        q.validate_versions('v0.6.11', 'v0.7.0')
+        self.assertTrue(self.workflow_admits('v0.6.11', 'v0.7.0'))
+        self.assertEqual(q.baseline_gateway_mode('v0.6.11'), 'remote')
+        self.assertFalse(q.delivery_release('v0.6.11', 'v0.7.0'))
+        for old in ('v0.6.10', 'v0.6.12', 'v0.06.11', 'v0.6.11\n',
+                    '0.6.11', 'refs/tags/v0.6.11', 'v0.6.11-rc1', 'v0.6.11-manual'):
+            with self.subTest(old=old):
+                self.assertFalse(self.workflow_admits(old, 'v0.7.0'))
+                with self.assertRaises(q.install.InstallError):
+                    q.validate_versions(old, 'v0.7.0')
+        for target in ('v0.6.11', 'v0.6.10', 'v0.7.0-rc1', 'refs/tags/v0.7.0'):
+            with self.subTest(target=target), self.assertRaises(q.install.InstallError):
+                q.validate_versions('v0.6.11', target)
+        for address in (None, '10.20.30.40'):
+            command = q.worker_command('v0.6.11', 'v0.7.0', address)
+            self.assertEqual(command[command.index('--upgrade-from') + 1], 'v0.6.11')
+            self.assertNotIn('--delivery-worker', command)
+            self.assertIn('--property=ProtectSystem=strict', command)
+        with patch.dict(q.os.environ, {}, clear=True), patch.object(q, 'load_installed') as load:
+            with self.assertRaises(q.install.InstallError):
+                q.installed_worker(True, 'v0.6.11', 'v0.7.0', None)
+            load.assert_not_called()
+
     def test_v068_immediate_predecessor_harness_admission(self):
         q = qualifier()
         q.validate_versions('v0.6.8', 'v0.6.9')
@@ -55,13 +80,13 @@ class UpgradeQualificationTests(unittest.TestCase):
     def test_predecessor_exact_allowlist_and_version_refusals(self):
         q = qualifier()
         expected = {'v0.4.2': None, 'v0.6.1': 'direct', 'v0.6.2': 'reverse',
-                    'v0.6.3': 'remote', 'v0.6.4': 'remote', 'v0.6.8': 'remote'}
+                    'v0.6.3': 'remote', 'v0.6.4': 'remote', 'v0.6.8': 'remote', 'v0.6.11': 'remote'}
         self.assertEqual(set(q.BASELINES), set(expected))
         for old, mode in expected.items():
             with self.subTest(old=old):
-                q.validate_versions(old, 'v0.6.9')
+                q.validate_versions(old, 'v0.7.0')
                 self.assertEqual(q.baseline_gateway_mode(old), mode)
-                self.assertTrue(self.workflow_admits(old, 'v0.6.9'))
+                self.assertTrue(self.workflow_admits(old, 'v0.7.0'))
         for old in ('v0.6.5', 'v0.6.6', 'v0.6.7', 'v0.6.9', 'v0.06.8', 'v0.6.8\n',
                     '0.6.8', 'refs/tags/v0.6.8', 'v0.6.8-rc1', ''):
             with self.subTest(old=old):

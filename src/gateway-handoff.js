@@ -8,5 +8,6 @@ export function validateGatewayHandoff(result,config,desktopOrigin,launchId){
  const suffix='.'+config.appBaseDomain;
  if(!origin.hostname.endsWith(suffix)||! /^[a-f0-9]{32}$/.test(origin.hostname.slice(0,-suffix.length)))invalid();
  if(result.launchId!==launchId||typeof result.ticket!=='string'||! /^[a-f0-9]{64}$/.test(result.ticket))invalid();
- return {origin:result.origin,ticket:result.ticket,allowDownloads:result.allowDownloads===true,allowPopups:result.allowPopups===true};
+ const presentation=result.presentation??'frame';if(!['frame','tab'].includes(presentation))invalid();
+ return {origin:result.origin,ticket:result.ticket,allowDownloads:result.allowDownloads===true,allowPopups:result.allowPopups===true,presentation};
 }
