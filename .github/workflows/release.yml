@@ -9,7 +9,7 @@ on:
         required: true
         type: string
       upgrade-from:
-        description: 'OPTIONAL signed runtime upgrade/matching-state rollback: v0.4.2 (off), v0.6.1 (Direct to v2), v0.6.2 (v2 to v3), v0.6.3/v0.6.4/v0.6.8/v0.6.11 (stock v3 mTLS); web-only delivery bootstrap only for v0.6.3/v0.6.4 to v0.6.5'
+        description: 'OPTIONAL signed runtime upgrade/matching-state rollback: v0.4.2 (off), v0.6.1 (Direct to v2), v0.6.2 (v2 to v3), v0.6.3/v0.6.4/v0.6.8/v0.6.11/v0.7.1 (stock v3 mTLS); web-only delivery bootstrap only for v0.6.3/v0.6.4 to v0.6.5'
         required: false
         default: ''
         type: string
@@ -221,7 +221,7 @@ jobs:
       - name: Require explicit old baseline and stable-form published target
         shell: bash
         run: |
-          [[ "$UPGRADE_FROM" = v0.4.2 || "$UPGRADE_FROM" = v0.6.1 || "$UPGRADE_FROM" = v0.6.2 || "$UPGRADE_FROM" = v0.6.3 || "$UPGRADE_FROM" = v0.6.4 || "$UPGRADE_FROM" = v0.6.8 || "$UPGRADE_FROM" = v0.6.11 ]]
+          [[ "$UPGRADE_FROM" = v0.4.2 || "$UPGRADE_FROM" = v0.6.1 || "$UPGRADE_FROM" = v0.6.2 || "$UPGRADE_FROM" = v0.6.3 || "$UPGRADE_FROM" = v0.6.4 || "$UPGRADE_FROM" = v0.6.8 || "$UPGRADE_FROM" = v0.6.11 || "$UPGRADE_FROM" = v0.7.1 ]]
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

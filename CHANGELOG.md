@@ -5,6 +5,8 @@ Versions describe the source/application, not a production deployment or a GitHu
 
 ## [0.7.2] — release candidate (unpublished)
 
+- Admit exact signed-stock v0.7.1 as an additional existing v3 mTLS upgrade/matching-state rollback qualification baseline. Keep unknown, malformed and manually suffixed baselines refused, require a newer stable-form target, retain disposable-host/unchanged-control-plane guards, and leave the v0.6.5-only web bootstrap unchanged. Local harness/workflow admission tests are not execution of a signed v0.7.1 upgrade or rollback.
+
 - Add optional `maxRequestBytes` per Gateway target: safe integers from 1 MiB through 64 MiB, retaining the 1 MiB default for existing targets. Enforce declared and streamed bytes with backpressure rather than buffering whole uploads. Managed configuration, advanced target JSON and bounded Agent plans/readback preserve the field.
 - Return useful bounded HTTP 413 HTML/JSON recovery responses for local request overflow and upstream size rejection, preserving upstream framing protections. Close oversized streams without draining unbounded bodies; hold early upstream responses until the request passes its byte bound. Chunked uploads may reach an upstream partially before overflow is observed and cannot be transactionally undone by Relay.
 - Add configuration, boundary/stream cleanup, genuine multipart browser and CLI ↔ compiled-panel roundtrip regressions. Source changes do not update an installed release or alter live target limits; service/browser, signed release and production qualification remain separate gates.

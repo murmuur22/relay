@@ -35,6 +35,46 @@ class UpgradeQualificationTests(unittest.TestCase):
                                   capture_output=True, text=True, timeout=5).returncode == 0
                    for predicate in guard.splitlines() if predicate.strip())
 
+    def test_v071_stock_runtime_upgrade_admission(self):
+        q = qualifier()
+        q.validate_versions('v0.7.1', 'v0.7.2')
+        self.assertEqual(q.baseline_gateway_mode('v0.7.1'), 'remote')
+        config = q.gateway_reference(Path('/synthetic/backend'), remote=True)
+        self.assertEqual(config['version'], 3)
+        self.assertEqual(config['backendTLS']['clientName'], 'caddy.example.test')
+        self.assertFalse(q.delivery_release('v0.7.1', 'v0.7.2'))
+        for old in ('v0.7.0', 'v0.7.2', 'v0.07.1', 'v0.7.1\n',
+                    '0.7.1', 'refs/tags/v0.7.1', 'v0.7.1-rc1', 'v0.7.1-manual'):
+            with self.subTest(old=old):
+                with self.assertRaises(q.install.InstallError):
+                    q.validate_versions(old, 'v0.7.2')
+                with self.assertRaises(q.install.InstallError):
+                    q.baseline_gateway_mode(old)
+        for target in ('v0.7.1', 'v0.7.0', 'v0.7.2-rc1', 'refs/tags/v0.7.2', 'v0.7.2\n'):
+            with self.subTest(target=target), self.assertRaises(q.install.InstallError):
+                q.validate_versions('v0.7.1', target)
+        for address in (None, '10.20.30.40'):
+            command = q.worker_command('v0.7.1', 'v0.7.2', address)
+            self.assertEqual(command[command.index('--upgrade-from') + 1], 'v0.7.1')
+            self.assertEqual(command[command.index('--version') + 1], 'v0.7.2')
+            self.assertEqual('--private-lan' in command, address is not None)
+            self.assertNotIn('--delivery-worker', command)
+            self.assertIn('--property=ProtectSystem=strict', command)
+        with patch.dict(q.os.environ, {}, clear=True), patch.object(q, 'load_installed') as load:
+            with self.assertRaises(q.install.InstallError):
+                q.installed_worker(True, 'v0.7.1', 'v0.7.2', None)
+            load.assert_not_called()
+
+    def test_v071_workflow_upgrade_admission(self):
+        self.assertTrue(self.workflow_admits('v0.7.1', 'v0.7.2'))
+        for old in ('v0.7.0', 'v0.7.2', 'v0.07.1', 'v0.7.1\n',
+                    '0.7.1', 'refs/tags/v0.7.1', 'v0.7.1-rc1', 'v0.7.1-manual'):
+            with self.subTest(old=old):
+                self.assertFalse(self.workflow_admits(old, 'v0.7.2'))
+        for target in ('v0.7.2-rc1', 'v0.07.2', 'v0.7.2\n', 'refs/tags/v0.7.2'):
+            with self.subTest(target=target):
+                self.assertFalse(self.workflow_admits('v0.7.1', target))
+
     def test_v0611_stock_runtime_upgrade_admission(self):
         q = qualifier()
         q.validate_versions('v0.6.11', 'v0.7.0')
@@ -80,13 +120,14 @@ class UpgradeQualificationTests(unittest.TestCase):
     def test_predecessor_exact_allowlist_and_version_refusals(self):
         q = qualifier()
         expected = {'v0.4.2': None, 'v0.6.1': 'direct', 'v0.6.2': 'reverse',
-                    'v0.6.3': 'remote', 'v0.6.4': 'remote', 'v0.6.8': 'remote', 'v0.6.11': 'remote'}
+                    'v0.6.3': 'remote', 'v0.6.4': 'remote', 'v0.6.8': 'remote', 'v0.6.11': 'remote',
+                    'v0.7.1': 'remote'}
         self.assertEqual(set(q.BASELINES), set(expected))
         for old, mode in expected.items():
             with self.subTest(old=old):
-                q.validate_versions(old, 'v0.7.0')
+                q.validate_versions(old, 'v0.7.2')
                 self.assertEqual(q.baseline_gateway_mode(old), mode)
-                self.assertTrue(self.workflow_admits(old, 'v0.7.0'))
+                self.assertTrue(self.workflow_admits(old, 'v0.7.2'))
         for old in ('v0.6.5', 'v0.6.6', 'v0.6.7', 'v0.6.9', 'v0.06.8', 'v0.6.8\n',
                     '0.6.8', 'refs/tags/v0.6.8', 'v0.6.8-rc1', ''):
             with self.subTest(old=old):
@@ -112,7 +153,10 @@ class UpgradeQualificationTests(unittest.TestCase):
         condition = job.splitlines()[0].strip().removeprefix('if: ')
         condition = condition.replace('github.repository', '"$REPO"').replace('github.event_name', '"$EVENT"')
         condition = condition.replace("inputs['upgrade-from']", '"$UPGRADE_FROM"')
-        for repo, event, old, expected in [('murmuur22/relay', 'workflow_dispatch', 'v0.6.8', True),
+        for repo, event, old, expected in [('murmuur22/relay', 'workflow_dispatch', 'v0.7.1', True),
+                                          ('other/relay', 'workflow_dispatch', 'v0.7.1', False),
+                                          ('murmuur22/relay', 'push', 'v0.7.1', False),
+                                          ('murmuur22/relay', 'workflow_dispatch', 'v0.6.8', True),
                                           ('murmuur22/relay', 'workflow_dispatch', 'v0.6.4', True),
                                           ('other/relay', 'workflow_dispatch', 'v0.6.8', False),
                                           ('murmuur22/relay', 'push', 'v0.6.8', False),
