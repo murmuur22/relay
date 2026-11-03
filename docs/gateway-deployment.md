@@ -109,6 +109,20 @@ HTTPS uses normal CA and hostname verification. Without an override, the literal
 
 The existing 1 MiB request bound remains. Responses default to 64 MiB; an operator may set a target's `maxResponseBytes` to an integer from 1 MiB through 1 GiB (for example 134217728 for 128 MiB). Both declared Content-Length and streamed bytes enforce the selected cap without whole-response buffering. Login-profile capture retains its independent maximum of 8192 bytes. Connection/route/ticket, WebSocket payload and generation-cleanup bounds remain. End does not revoke an upstream token at its issuer, erase downloaded data, or guarantee immediate cleanup after abrupt client disappearance. Apps can retain their own client-side data. Universal upstream compatibility, very large files, long-running media, retained-storage adversarial browser isolation and public exposure remain separate qualification gates.
 
+## Target-scoped HTTP Origin compatibility (Unreleased)
+
+Targets accept `httpOrigin: "omit"` (the default) or `httpOrigin: "upstream"`. Opt in only for a fixed upstream that needs canonical same-origin assertions on mutations, for example a secure form application with CSRF-token validation:
+
+```json
+{"httpOrigin":"upstream"}
+```
+
+Add this field to the target in operator JSON (versions 1/2/3), or merge it into Control Panel → Gateway → Edit target → Advanced target options → Target options JSON, preserving existing cookie/header/TLS options. Check, explicitly confirm and save; read back the saved configuration and reopen the app because configuration changes retire Gateway sessions. Managed references persist the field across restart. Agent CLI target `set` accepts the same field in revision-bound plans; `state`/`list` reads it back. `"omit"` explicitly turns it off without deleting other target settings. Unknown fields and all other policy values are refused.
+
+With `"upstream"`, only admitted POST, PUT, PATCH and DELETE requests receive an Origin derived from the already validated fixed upstream URL. It keeps the upstream HTTP/HTTPS scheme, literal host and nondefault port; the TLS certificate/SNI identity does not replace that origin. GET/HEAD never receive an injected Origin, even when a browser sent one. Referer is never forwarded or synthesized. WebSockets retain their independent `webSocketOrigin` policy. Neither Origin nor Referer can be supplied through `requestHeaders`, and client forwarding headers cannot choose the asserted origin.
+
+This is an operator-authorized translation, not a claim that the external browser's origin was the private upstream. Exact external Host/Origin (including denial of null/missing mutation Origin), fetch-metadata, genuine Relay account/session/grant and route capability checks run first. Upstream CSRF cookie/token and endpoint authorization remain necessary; this option does not disable CSRF or modify standalone upstream protections. Private cookie/response isolation, TLS verification and the total 1 MiB request limit remain unchanged. No DNS/trust/network provisioning, Safari/normal-PKI or universal app compatibility is implied.
+
 ## Programmatic compatibility and verification
 
 Legacy `createGateway({experimentalGateway:{key,cert,port,targets}})` remains loopback-only with desktop.relay.test and per-launch *.relay.test. Its ephemeral port remains allowed. Loaded JSON produces the same object with an additional `deployment:{bind,desktopHostname,appBaseDomain}` field and server-private normalized upstream TLS bytes. Programmatic tests can supply this field; installed operators should use the validated JSON/PEM path interface so certificate/time/file checks run before startup.

@@ -3,6 +3,13 @@
 Meaningful user-facing changes, security fixes and migration notes for **WE relay**.
 Versions describe the source/application, not a production deployment or a GitHub Release. Earlier unversioned development commits are grouped into the first version containing them; no retrospective releases are invented.
 
+## [0.7.1] — release candidate (unpublished)
+
+- Add target-scoped `httpOrigin: "upstream"` for secure upstream form compatibility. Only admitted POST/PUT/PATCH/DELETE requests receive the validated fixed upstream Origin; the default remains `"omit"`, GET/HEAD remain unchanged, and Referer is never synthesized.
+- Retain existing incoming Origin/fetch-metadata, session/grant/capability, CSRF-token, TLS and private-cookie boundaries. Operator/managed settings, advanced target JSON and bounded Agent plans/readback support the option.
+- Profile password changes already exist in 0.7.0; this candidate does not add or replace that feature. WE Speak still needs its own separately configured deployment and accounts. Local Chromium evidence is not Safari/trusted-PKI or production qualification; the total Gateway request bound remains 1 MiB.
+- Candidate preparation only. No publication or deployment is implied; release and signed installation qualification remain separate gates.
+
 ## [0.7.0] — release candidate (unpublished)
 
 - Prepare the inherited management/guided/Agent access source as 0.7.0, synchronizing only root package/lock versions. Shared `version.js` remains the single runtime/UI version source; independent updater UI tooling retains its own version. No dependency upgrade or release date is asserted.
@@ -15,6 +22,8 @@ Versions describe the source/application, not a production deployment or a GitHu
 - Full integrated local/source/export/package review, official Linux, signing/provenance, fresh install, stable-predecessor upgrade/matching-state rollback and stable discovery/promotion remain separate gates. No publication, installation or deployment performed.
 
 ## [Unreleased] — retained development history (not a release inclusion list)
+
+- Add target-scoped `httpOrigin: "upstream"` for HTTP POST/PUT/PATCH/DELETE compatibility with secure upstream Origin/CSRF validation. Default/explicit `"omit"` preserves existing omission; GET/HEAD still omit Origin and Referer. Derive the assertion only from the validated fixed upstream after existing incoming Origin, fetch-metadata and account/session/app/capability checks. Preserve upstream token validation, TLS, private cookie jars and independent WebSocket policy. Operator/managed configuration, advanced panel JSON and bounded Agent CLI target plans/readback retain the option and stale-write guards. This isolated source change is not a release, Safari/trusted-PKI qualification or deployment.
 
 - Keep once-only Agent access disclosure until its issuance-response expiry even while credential inventory refresh is delayed. Hide, page leave, blur and actual expiry still clear disclosure; completing a delayed refresh cannot redisclose it. Server access lifetime and revocation are unchanged.
 

@@ -21,6 +21,8 @@ export function validateApp(app){
  if(!['granted','admin-only'].includes(app.accessPolicy))throw Error('Unsafe gateway access policy');
  if(app.presentation===undefined)app.presentation='frame';
  if(!['frame','tab'].includes(app.presentation))throw Error('Unsafe gateway presentation');
+ if(app.httpOrigin===undefined)app.httpOrigin='omit';
+ if(!['omit','upstream'].includes(app.httpOrigin))throw Error('Unsafe HTTP Origin policy');
  if(app.webSocketOrigin===undefined)app.webSocketOrigin='omit';
  if(!['omit','upstream'].includes(app.webSocketOrigin))throw Error('Unsafe WebSocket Origin policy');
  if(app.webSocketProtocols===undefined)app.webSocketProtocols=[];
@@ -68,7 +70,12 @@ export function createTransport({active,desktopOrigin,stillAuthorized=async()=>{
   if(capture)forgetCredential(c.route);
   const generation=c.route.authGeneration;
   if(active.size>=32)throw fail(429);
-  const h=headers(req,c);if(Number(h['content-length']||0)>REQUEST_LIMIT)throw fail(413);
+  const h=headers(req,c);
+  // Assert only the validated fixed upstream origin, after external Origin,
+  // fetch-metadata and live route/capability authority checks. Never a Referer.
+  // GET/HEAD keep legacy omission; WebSockets have their independent policy.
+  if(c.app.httpOrigin==='upstream'&&!['GET','HEAD'].includes(req.method))h.origin=new URL(c.app.upstream).origin;
+  if(Number(h['content-length']||0)>REQUEST_LIMIT)throw fail(413);
   if(p?.logout&&req.method===p.logout.method&&req.url===p.logout.path)forgetCredential(c.route);
   if(h.range&&!/^bytes=(?:\d+-\d*|-\d+)$/.test(h.range))throw fail(416);
   stats.http++;if(h.range)stats.ranges++;

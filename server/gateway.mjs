@@ -159,7 +159,7 @@ export async function createGateway({port=4180,runtime=ROOT+'.runtime',native=fa
  const agentHistory=[];let managementRevision=0;
  const changed=record=>{managementRevision++;agentHistory.push({at:Date.now(),...record});if(agentHistory.length>128)agentHistory.shift();};
  const agents=agentManagement({app,wrap,getSession,sessions,accounts,admit,
-  getState:()=>({source:management.status().source,targets:(management.status().config?.targets??[]).map(({id,label,upstream,entryPath,presentation,accessPolicy})=>({id,label,upstream,entryPath,presentation,accessPolicy})),apps:accounts.state.services.map(({id,label,kind,mode,enabled,icon,gateway})=>({id,label,kind,mode,enabled,icon,gateway})),history:agentHistory}),
+  getState:()=>({source:management.status().source,targets:(management.status().config?.targets??[]).map(({id,label,upstream,entryPath,presentation,accessPolicy,httpOrigin})=>({id,label,upstream,entryPath,presentation,accessPolicy,httpOrigin})),apps:accounts.state.services.map(({id,label,kind,mode,enabled,icon,gateway})=>({id,label,kind,mode,enabled,icon,gateway})),history:agentHistory}),
   revisionSeed:()=>JSON.stringify([managementRevision,management.status().config,accounts.state.services,accounts.state.users.map(publicUser)]),
   previewTarget:(c,a)=>management.previewTarget(c,a),changeTarget:(c,a,actor)=>management.changeTarget(c,a,actor),
   previewApp:async(c,a)=>{const old=accounts.state.services.find(s=>s.id===c.id);if(c.id&&(!old||old.kind!=='web'||old.mode!=='gateway'))throw fail(400,'Only Gateway web apps can be changed');const body=c.id?c.set:{kind:'web',mode:'gateway',...c.set};await validateDraft({...old,...body});accounts.mutateService(structuredClone(accounts.state),c.id,body);a();},

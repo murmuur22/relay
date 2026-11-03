@@ -13,7 +13,7 @@ export function agentManagement({app,wrap,getSession,sessions,accounts,admit,get
  const snapshot=()=>({version:1,revision:revision(),...getState()});
  const validateChange=c=>{
   if(!fields(c,['type','id','set'])||!['target','app'].includes(c.type))throw fail(400,'Expected a bounded target or app change');
-  const target=c.type==='target',keys=target?['label','upstream','entryPath','presentation','accessPolicy']:['label','icon','enabled','gateway','userIds'];
+  const target=c.type==='target',keys=target?['label','upstream','entryPath','presentation','accessPolicy','httpOrigin']:['label','icon','enabled','gateway','userIds'];
   const idOK=target?typeof c.id==='string'&&/^[a-z][a-z0-9-]{0,31}$/.test(c.id):c.id===null||typeof c.id==='string'&&/^service-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(c.id);
   if(!idOK||!fields(c.set,keys)||!Object.keys(c.set).length)throw fail(400,'Expected a bounded target or app change');
  };
