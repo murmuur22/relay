@@ -10,6 +10,8 @@ const REQUEST_LIMIT=1024*1024,RESPONSE_LIMIT=64*1024*1024,WS_LIMIT=65536;
 const protocolToken=value=>typeof value==='string'&&value.length>=1&&value.length<=64&&/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(value);
 const selectedProtocol=Symbol('verified upstream protocol');
 export function validateApp(app){
+ if(app.maxRequestBytes===undefined)app.maxRequestBytes=REQUEST_LIMIT;
+ if(!Number.isSafeInteger(app.maxRequestBytes)||app.maxRequestBytes<REQUEST_LIMIT||app.maxRequestBytes>64*1024*1024)throw Error('Invalid request bound');
  if(app.maxResponseBytes===undefined)app.maxResponseBytes=RESPONSE_LIMIT;
  if(!Number.isSafeInteger(app.maxResponseBytes)||app.maxResponseBytes<1024*1024||app.maxResponseBytes>1024*1024*1024)throw Error('Invalid response bound');
  app.authProfile=validateProfile(app.authProfile);
@@ -48,6 +50,20 @@ function storeCookies(c,lines=[]){
   const jar=c.route.jar??=new Map();if(expires<=Date.now())jar.delete(name);else jar.set(name,{value,expires});
  }
 }
+function uploadTooLarge(req,res,c,desktopOrigin,fromUpstream=false,upstreamHeaders={}){
+ // Never interpolate request paths, headers, upstream bodies or route credentials.
+ const limit=c.app.maxRequestBytes??REQUEST_LIMIT;
+ const message=fromUpstream?'The upstream application rejected this upload. Its limit may be lower than Relay’s.':`The complete request exceeds this target’s ${limit} byte limit (${limit/(1024*1024)} MiB), including form overhead.`;
+ const recovery='Use Back to return to the form, choose a smaller attachment, and submit again. Do not reload this response or automatically resend the upload. Unsaved text may need to be re-entered. If Back cannot restore the form, reopen the app from Relay.';
+ const html=req.headers['sec-fetch-mode']==='navigate'||/\btext\/html\b/i.test(req.headers.accept??'');
+ const headers={};
+ for(const name of ['content-security-policy','content-security-policy-report-only','x-frame-options','permissions-policy','cross-origin-opener-policy','cross-origin-embedder-policy','cross-origin-resource-policy','strict-transport-security'])if(upstreamHeaders[name])headers[name]=upstreamHeaders[name];
+ const policy=`default-src 'none'; frame-ancestors ${c.app.presentation==='tab'?"'self'":desktopOrigin}; base-uri 'none'; form-action 'none'`;
+ headers['content-security-policy']=[...(headers['content-security-policy']?[headers['content-security-policy']]:[]),policy];
+ req.pause();res.shouldKeepAlive=false;
+ res.writeHead(413,{...headers,'Connection':'close','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Type':html?'text/html; charset=utf-8':'application/json; charset=utf-8'});
+ res.end(html?`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Upload too large</title><h1>Upload too large</h1><p>${message}</p><p>${recovery}</p></html>`:JSON.stringify({error:'Upload too large',code:fromUpstream?'upstream_request_too_large':'request_too_large',...(!fromUpstream?{maxRequestBytes:limit}:{}),message,recovery}));
+}
 export function createTransport({active,desktopOrigin,stillAuthorized=async()=>{throw Error('No live authority check');}}){
  const stats={http:0,ranges:0,websockets:0,cancelled:0};
  const wss=new WebSocketServer({noServer:true,maxPayload:WS_LIMIT,perMessageDeflate:false,handleProtocols:(_offered,req)=>req[selectedProtocol]||false});
@@ -75,13 +91,32 @@ export function createTransport({active,desktopOrigin,stillAuthorized=async()=>{
   // fetch-metadata and live route/capability authority checks. Never a Referer.
   // GET/HEAD keep legacy omission; WebSockets have their independent policy.
   if(c.app.httpOrigin==='upstream'&&!['GET','HEAD'].includes(req.method))h.origin=new URL(c.app.upstream).origin;
-  if(Number(h['content-length']||0)>REQUEST_LIMIT)throw fail(413);
+  const requestLimit=c.app.maxRequestBytes??REQUEST_LIMIT;
+  if(Number(h['content-length']||0)>requestLimit)return uploadTooLarge(req,res,c,desktopOrigin);
   if(p?.logout&&req.method===p.logout.method&&req.url===p.logout.path)forgetCredential(c.route);
   if(h.range&&!/^bytes=(?:\d+-\d*|-\d+)$/.test(h.range))throw fail(416);
   stats.http++;if(h.range)stats.ranges++;
-  let remote,finished=false,loginDeadline;
+  let remote,finished=false,loginDeadline,requestDeadline,bound,requestDone;
+  const requestComplete=new Promise(resolve=>requestDone=resolve);
+  function stopRequest(){clearTimeout(requestDeadline);req.unpipe(bound);req.pause();bound?.unpipe();bound?.destroy();requestDone(false);}
+  function upstreamClosed(){
+   if(finished)return;
+   if(!remote||(remote.destroyed&&!remote.complete))return badGateway();
+   if(req.readableEnded)return; // Normal completed responses also close up.
+   // A final response can close the outgoing request before client EOF. Keep
+   // counting through the SAME limiter, but discard its bounded output locally:
+   // no blocked destination, whole-body buffer, or unlimited request drain.
+   // Overflow still stops the source immediately; requestDeadline bounds a
+   // client that never ends, even after the upstream socket timer disappears.
+   bound.unpipe(up);bound.resume();
+  }
+  function tooLarge(fromUpstream=false,out){
+   if(finished)return;finished=true;clearTimeout(loginDeadline);active.delete(op);stopRequest();up.destroy();remote?.destroy();
+   if(res.headersSent){res.destroy();return;}
+   uploadTooLarge(req,res,c,desktopOrigin,fromUpstream,out);
+  }
   function badGateway(){
-   if(finished)return;finished=true;clearTimeout(loginDeadline);active.delete(op);up.destroy();remote?.destroy();
+   if(finished)return;finished=true;clearTimeout(loginDeadline);active.delete(op);stopRequest();up.destroy();remote?.destroy();
    if(res.headersSent){res.destroy();return;}
    res.shouldKeepAlive=false;res.writeHead(502,{'Connection':'close','Content-Type':'text/plain'});res.end('Bad gateway');
   }
@@ -93,6 +128,12 @@ export function createTransport({active,desktopOrigin,stillAuthorized=async()=>{
    // A received response is reachability, never proof of login or app readiness.
    c.route.observation={state:r.statusCode>=200&&r.statusCode<400?'Online':'Reached',source:'relay',checkedAt:Date.now(),httpStatus:r.statusCode,detail:`Gateway upstream received HTTP ${r.statusCode}; not a readiness or authenticated-health check.`};
    for(const name of ['content-type','content-length','content-range','accept-ranges','content-encoding','etag','last-modified','content-security-policy','content-security-policy-report-only','x-frame-options','x-content-type-options','referrer-policy','permissions-policy','cross-origin-opener-policy','cross-origin-embedder-policy','cross-origin-resource-policy','strict-transport-security','content-disposition',...c.app.responseHeaders])if(r.headers[name])out[name]=r.headers[name];
+   if(r.statusCode===413)return tooLarge(true,out);
+   // Hold (do not buffer) an early response until the whole request has passed
+   // the streaming bound, so an early upstream 200 cannot mask upload overflow.
+   r.on('error',badGateway);
+   if(!req.readableEnded)requestDeadline=setTimeout(badGateway,30000).unref();
+   if(!await requestComplete||finished)return;
    if(Number(out['content-length']||0)>(c.app.maxResponseBytes??RESPONSE_LIMIT))return badGateway();
    if(r.headers.location){const target=new URL(r.headers.location,c.app.upstream+req.url);if(target.origin!==c.app.upstream||target.username||target.password||!validPath(target.pathname+target.search+target.hash))return badGateway();out.location=c.route.origin+target.pathname+target.search+target.hash;}
    // Additional policy intersects upstream policy; never delete/weaken upstream CSP/XFO.
@@ -114,10 +155,20 @@ export function createTransport({active,desktopOrigin,stillAuthorized=async()=>{
    pipeline(r,bound,res,()=>{finished=true;clearTimeout(loginDeadline);active.delete(op);up.destroy();});
    }catch{badGateway();}
   });
-  const op={cap:c,cancel:()=>{if(finished)return;stats.cancelled++;finished=true;clearTimeout(loginDeadline);active.delete(op);up.destroy();remote?.destroy();res.destroy();}};
+  const op={cap:c,cancel:()=>{if(finished)return;stats.cancelled++;finished=true;clearTimeout(loginDeadline);active.delete(op);stopRequest();up.destroy();remote?.destroy();res.destroy();}};
   if(capture)loginDeadline=setTimeout(badGateway,5000).unref();
-  active.add(op);up.on('error',badGateway);up.setTimeout(30000,badGateway);res.on('close',op.cancel);
-  let bytes=0;const bound=new Transform({transform(chunk,encoding,cb){bytes+=chunk.length;cb(bytes>REQUEST_LIMIT?Error('Request bound'):null,chunk);}});pipeline(req,bound,up,e=>{if(e)op.cancel();});
+  active.add(op);up.on('error',e=>{
+   // Only a write-side closure after a final response can switch to discard;
+   // response read errors and all other upstream failures still fail closed.
+   if(remote&&['EPIPE','ECONNRESET','ERR_STREAM_DESTROYED'].includes(e.code))upstreamClosed();else badGateway();
+  });up.on('close',upstreamClosed);up.setTimeout(30000,badGateway);res.on('close',op.cancel);
+  // Do not pipeline the client IncomingMessage: pipeline destroys its socket on
+  // overflow before a useful 413 can be flushed. Retain bounded backpressure,
+  // pause/unpipe on failure and close the connection instead of draining a body.
+  let bytes=0;bound=new Transform({transform(chunk,encoding,cb){bytes+=chunk.length;cb(bytes>requestLimit?fail(413):null,chunk);}});
+  bound.on('error',e=>e.status===413?tooLarge():op.cancel());
+  req.on('error',op.cancel);req.once('aborted',op.cancel);req.once('end',()=>{clearTimeout(requestDeadline);requestDone(true);});
+  req.pipe(bound).pipe(up);
  }
  function upgrade(req,socket,head,c){
   if(!validPath(req.url)||!c.app.webSocketPaths.includes(new URL(req.url,c.app.upstream).pathname))throw fail(403);
